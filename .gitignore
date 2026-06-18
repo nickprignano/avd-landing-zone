@@ -1,0 +1,17 @@
+# Local parameter files (may contain tenant-specific values)
+parameters/*.bicepparam
+!parameters/*.example.bicepparam
+
+# Secrets — never commit
+*.pw
+*.secret
+.env
+
+# Bicep build output
+*.json
+!.github/**/*.json
+
+# OS / editor
+.DS_Store
+.vscode/
+*.swp

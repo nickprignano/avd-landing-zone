@@ -1,0 +1,51 @@
+name: validate
+
+# Lint the Bicep and run a what-if on PRs. Does not deploy.
+on:
+  pull_request:
+    paths:
+      - 'bicep/**'
+      - 'parameters/**'
+      - '.github/workflows/validate.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # for OIDC login to Azure
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bicep lint + build
+        run: |
+          az bicep install
+          az bicep build --file bicep/main.bicep --stdout > /dev/null
+          echo "Bicep built clean."
+
+  what-if:
+    runs-on: ubuntu-latest
+    needs: lint
+    # Requires repo secrets: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+    # and a federated credential on the app registration. SH_ADMIN_PW for the param.
+    # Repo vars: AZURE_WHATIF_ENABLED=true and AZURE_WHATIF_RG.
+    if: ${{ vars.AZURE_WHATIF_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-if
+        run: |
+          az deployment group what-if \
+            -g ${{ vars.AZURE_WHATIF_RG }} \
+            -f bicep/main.bicep \
+            -p parameters/dev.example.bicepparam \
+            -p adminPassword='${{ secrets.SH_ADMIN_PW }}'
