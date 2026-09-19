@@ -12,10 +12,11 @@ This repo stands up the non-negotiable 80% of an AVD deployment that's the same 
 |-------|--------------|------------|
 | **Networking** | Spoke VNet, session-host + private-endpoint subnets, NSGs, route table forcing egress through a hub | `avm/res/network/virtual-network` |
 | **Private endpoints + DNS** | Private endpoints for storage; private DNS zone linked to the VNet | `avm/res/network/private-endpoint`, `avm/res/network/private-dns-zone` |
-| **Storage** | Azure Files share behind a private endpoint, for FSLogix profiles | `avm/res/storage/storage-account` |
+| **Storage** | Premium Azure Files share behind a private endpoint, with Entra Kerberos for SMB auth, for FSLogix profiles | `avm/res/storage/storage-account` |
 | **Host pool** | AVD host pool, application group, workspace | `avm/res/desktop-virtualization/host-pool` (+ app group, workspace) |
 | **Session hosts** | VMs joined to Entra ID, AVD agents registered | `avm/res/compute/virtual-machine` |
 | **Scaling** | A scaling plan attached to the host pool | `avm/res/desktop-virtualization/scaling-plan` |
+| **Access** | The role assignments that make the above usable: desktop access, VM sign-in, SMB share access, and power on/off for the scaling plan | native `Microsoft.Authorization/roleAssignments` |
 
 The Bicep is a thin orchestration layer (`bicep/main.bicep`) that composes [Azure Verified Modules](https://aka.ms/avm) — you're not maintaining the network or storage modules, you're wiring Microsoft-maintained ones together.
 
@@ -28,7 +29,8 @@ The Bicep is a thin orchestration layer (`bicep/main.bicep`) that composes [Azur
 - Private endpoints + DNS so traffic stays off the public internet
 - FSLogix-ready storage
 - A non-persistent host pool with a scaling plan
-- **Entra ID join** for session hosts
+- **Entra ID join** for session hosts, with **Entra Kerberos** so profiles can mount without domain services
+- The **RBAC** that an Entra-only deployment actually needs — desktop access, VM sign-in, SMB share access, and the scaling plan's power on/off rights
 - **Standalone by default** — runs on a fresh personal subscription with no hub; optionally peers to an existing hub
 
 **Out of scope — the real engagement** (see [`docs/out-of-scope.md`](docs/out-of-scope.md)):
@@ -71,7 +73,11 @@ cp parameters/dev.example.bicepparam parameters/dev.bicepparam
 pwsh ./scripts/config/Configure-FSLogix.ps1 -ResourceGroup rg-avd-lz-dev
 pwsh ./scripts/config/Register-SessionHosts.ps1 -ResourceGroup rg-avd-lz-dev
 
-# 5. Connect: open the AVD client, sign in with the same account, open the desktop.
+# 5. ONE manual step: grant admin consent for Entra Kerberos on the storage
+#    account, as a Global Administrator. Profiles will not mount without it.
+#    See docs/gotchas.md#4 for the exact commands.
+
+# 6. Connect: open the AVD client, sign in with the same account, open the desktop.
 ```
 
 That's it — cloning and following these steps produces a working AVD desktop. Full walkthrough and verification in [`docs/deploy.md`](docs/deploy.md).

@@ -44,7 +44,10 @@ Review the what-if output. Nothing is created.
 ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -g rg-avd-lz-dev -l eastus2
 ```
 
-This creates: spoke VNet + subnets + NSG + route table + hub peering → storage account + file share → private endpoint + DNS zone → host pool + app group + workspace + session host VMs → scaling plan.
+This creates: spoke VNet + subnets + NSG (plus route table + hub peering only in
+hub-peered mode) → storage account + file share → private endpoint + DNS zone →
+host pool + app group + workspace + session host VMs → scaling plan → role
+assignments.
 
 ## 4. Post-deploy config
 
@@ -56,11 +59,36 @@ pwsh ./scripts/config/Configure-FSLogix.ps1 -ResourceGroup rg-avd-lz-dev
 pwsh ./scripts/config/Register-SessionHosts.ps1 -ResourceGroup rg-avd-lz-dev
 ```
 
-## 5. Verify
+## 5. Grant admin consent for Entra Kerberos (manual, once)
+
+Session hosts are Entra-ID joined, so the profile share authenticates with Entra
+Kerberos. Enabling it creates an app registration for the storage account, and
+that registration needs admin consent from a **Global Administrator** before any
+host can get a ticket. Neither Bicep nor the config scripts can do this for you.
+
+```bash
+STG=$(az storage account list -g rg-avd-lz-dev --query "[0].name" -o tsv)
+APP_ID=$(az ad app list --display-name "[Storage Account] $STG" --query "[0].appId" -o tsv)
+az ad app permission admin-consent --id "$APP_ID"
+```
+
+Session hosts also need a reboot after `Configure-FSLogix.ps1`, because
+`CloudKerberosTicketRetrievalEnabled` only takes effect on restart.
+
+```bash
+az vm restart -g rg-avd-lz-dev --ids $(az vm list -g rg-avd-lz-dev --query "[].id" -o tsv)
+```
+
+## 6. Verify
 
 - Host pool blade → session hosts show **Available** within a few minutes.
 - Assign yourself to the desktop application group (or be in `desktopUserObjectIds`).
 - Connect via the AVD client. Profile should load from FSLogix.
+
+If the desktop appears but sign-in fails, that's RBAC, not credentials — see
+[gotchas.md](gotchas.md). If sign-in works but the profile doesn't roam, the
+admin consent in step 5 or the NTFS permissions on the share are the usual
+cause.
 
 If a host doesn't register or a profile doesn't load, start with [gotchas.md](gotchas.md).
 

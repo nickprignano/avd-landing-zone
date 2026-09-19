@@ -23,10 +23,21 @@ param privateEndpointSubnetPrefix = '10.20.0.128/26'
 param sessionHostCount = 2
 param sessionHostVmSize = 'Standard_D4as_v5'   // CHECK vCPU QUOTA in your region first
 
-// Entra ID object IDs (users or groups) to grant desktop access.
+// Entra ID object IDs (users or groups) to grant desktop access. These get
+// Desktop Virtualization User on the app group, Virtual Machine User Login on
+// the session hosts, and SMB access to the FSLogix profile share.
 param desktopUserObjectIds = [
   // '00000000-0000-0000-0000-000000000000'
 ]
+
+// Must match what's in desktopUserObjectIds above. If you leave that list empty
+// the deploy script grants the desktop to you and overrides this to 'User'.
+param desktopUserPrincipalType = 'Group'
+
+// Object ID of the "Azure Virtual Desktop" service principal in your tenant.
+// Needed for the scaling plan to actually start/stop hosts. Leave empty --
+// the deploy script resolves it for you.
+param avdServicePrincipalObjectId = ''
 
 // ---- Session host local admin ----
 param adminUsername = 'avdadmin'

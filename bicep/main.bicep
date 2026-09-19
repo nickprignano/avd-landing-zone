@@ -40,8 +40,15 @@ param sessionHostCount int = 2
 @description('VM size for session hosts. Check vCPU quota in your region first.')
 param sessionHostVmSize string = 'Standard_D4as_v5'
 
-@description('Object IDs (Entra ID) of users/groups to grant Desktop Virtualization User on the app group.')
+@description('Object IDs (Entra ID) of users/groups to grant desktop access. They get Desktop Virtualization User on the app group, Virtual Machine User Login on the session hosts, and SMB access to the profile share.')
 param desktopUserObjectIds array = []
+
+@description('Principal type for desktopUserObjectIds. The standalone path grants to the signed-in USER; a real deployment normally uses a Group.')
+@allowed(['User', 'Group', 'ServicePrincipal'])
+param desktopUserPrincipalType string = 'Group'
+
+@description('Object ID of the "Azure Virtual Desktop" service principal in YOUR tenant. Required for the scaling plan to actually start/stop hosts. The deploy script resolves this automatically; leave empty to skip.')
+param avdServicePrincipalObjectId string = ''
 
 @description('Admin username for session host VMs.')
 param adminUsername string
@@ -85,6 +92,8 @@ module storage 'modules/storage.bicep' = {
     name: storageName
     location: location
     tags: tags
+    smbShareContributorObjectIds: desktopUserObjectIds
+    smbSharePrincipalType: desktopUserPrincipalType
   }
 }
 
@@ -115,6 +124,7 @@ module hostPool 'modules/hostPool.bicep' = {
     sessionHostVmSize: sessionHostVmSize
     sessionHostSubnetResourceId: network.outputs.sessionHostSubnetResourceId
     desktopUserObjectIds: desktopUserObjectIds
+    desktopUserPrincipalType: desktopUserPrincipalType
     adminUsername: adminUsername
     adminPassword: adminPassword
   }
@@ -131,6 +141,20 @@ module scalingPlan 'modules/scalingPlan.bicep' = {
     tags: tags
     hostPoolResourceId: hostPool.outputs.resourceId
   }
+}
+
+// =====================================================================
+// 6. RBAC  — the cross-cutting assignments no single module owns
+// =====================================================================
+module rbac 'modules/rbac.bicep' = {
+  name: 'deploy-rbac'
+  params: {
+    desktopUserObjectIds: desktopUserObjectIds
+    desktopUserPrincipalType: desktopUserPrincipalType
+    avdServicePrincipalObjectId: avdServicePrincipalObjectId
+  }
+  // The session hosts must exist before we grant sign-in rights over them.
+  dependsOn: [hostPool]
 }
 
 // ---------- Outputs ----------

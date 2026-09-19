@@ -14,8 +14,17 @@
 
 .NOTES
   Permissions on the share (share-level RBAC + NTFS) are the thing that bites
-  people. See docs/gotchas.md. This script sets the FSLogix *client* config;
-  it assumes the share permissions are correct.
+  people. See docs/gotchas.md. The Bicep now grants the share-level RBAC
+  (Storage File Data SMB Share Contributor); NTFS is still manual.
+
+  Entra Kerberos also needs ONE step that cannot be done from here or from
+  Bicep: admin consent for the storage account's Entra app registration.
+  Run it once per storage account, as a Global Administrator:
+
+    az ad app permission admin-consent --id <app-id-of-[Storage Account] $Name>
+
+  Until that consent is granted, session hosts get a Kerberos failure when
+  mounting the share and profiles will not load.
 #>
 param(
   [Parameter(Mandatory)] [string] $ResourceGroup,
@@ -34,7 +43,13 @@ $uncPath = "\\$($storage.StorageAccountName).file.$((Get-AzContext).Environment.
 Write-Host "    Profile share: $uncPath"
 
 # FSLogix client registry config, applied on each session host.
+# Includes the Entra Kerberos switch: without CloudKerberosTicketRetrievalEnabled
+# the host cannot get a cloud TGT, so it cannot authenticate to the Azure Files
+# share with its Entra identity and the profile silently fails to mount.
 $fslogixScript = @"
+New-Item -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters' -Force | Out-Null
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters' -Name 'CloudKerberosTicketRetrievalEnabled' -Type DWord -Value 1
+
 New-Item -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Force | Out-Null
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'Enabled' -Type DWord -Value 1
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'VHDLocations' -Type MultiString -Value '$uncPath'
@@ -57,4 +72,7 @@ foreach ($vm in $vms) {
 Remove-Item $tmp -Force
 
 Write-Host "==> FSLogix configured on $($vms.Count) host(s)." -ForegroundColor Green
-Write-Host "    If profiles fail to load, check share + NTFS permissions first (docs/gotchas.md)." -ForegroundColor Yellow
+Write-Host "    CloudKerberosTicketRetrievalEnabled needs a REBOOT to take effect." -ForegroundColor Yellow
+Write-Host "    Entra Kerberos also needs admin consent on the storage account's app" -ForegroundColor Yellow
+Write-Host "    registration - see the .NOTES in this script and docs/gotchas.md." -ForegroundColor Yellow
+Write-Host "    If profiles still fail to load, check NTFS permissions on the share." -ForegroundColor Yellow

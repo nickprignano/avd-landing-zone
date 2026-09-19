@@ -9,6 +9,10 @@ param sessionHostCount int
 param sessionHostVmSize string
 param sessionHostSubnetResourceId string
 param desktopUserObjectIds array
+
+@description('Principal type for desktopUserObjectIds. The standalone path grants the desktop to the signed-in USER; a real deployment normally uses a Group.')
+@allowed(['User', 'Group', 'ServicePrincipal'])
+param desktopUserPrincipalType string = 'Group'
 param adminUsername string
 @secure()
 param adminPassword string
@@ -50,7 +54,7 @@ module appGroup 'br/public:avm/res/desktop-virtualization/application-group:0.4.
     roleAssignments: [for id in desktopUserObjectIds: {
       principalId: id
       roleDefinitionIdOrName: 'Desktop Virtualization User'
-      principalType: 'Group'
+      principalType: desktopUserPrincipalType
     }]
   }
 }

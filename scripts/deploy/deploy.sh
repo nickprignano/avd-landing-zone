@@ -58,7 +58,25 @@ if grep -qE "param desktopUserObjectIds = \[\s*\]" "$PARAM_FILE" || grep -qzE "d
   if [[ -n "$MY_OID" ]]; then
     echo "==> No desktop users set; granting the desktop to you ($MY_OID)"
     EXTRA_PARAMS+=(--parameters "desktopUserObjectIds=[\"$MY_OID\"]")
+    # That OID is a User, not a Group. Role assignments are validated against
+    # the principal type, so it has to be declared correctly.
+    EXTRA_PARAMS+=(--parameters "desktopUserPrincipalType=User")
   fi
+fi
+
+# The scaling plan runs as the "Azure Virtual Desktop" service principal, which
+# needs Power On Off Contributor over the session hosts. The app ID is the same
+# in every tenant; the OBJECT id is not, so resolve it here. Without this the
+# scaling plan deploys and reports healthy but never starts or stops a host.
+AVD_SP_APP_ID="9cdead84-a844-4324-93f2-b2e6bb768d07"
+AVD_SP_OID=$(az ad sp show --id "$AVD_SP_APP_ID" --query id -o tsv 2>/dev/null || true)
+if [[ -n "$AVD_SP_OID" ]]; then
+  echo "==> Azure Virtual Desktop service principal: $AVD_SP_OID"
+  EXTRA_PARAMS+=(--parameters "avdServicePrincipalObjectId=$AVD_SP_OID")
+else
+  echo "WARNING: could not resolve the Azure Virtual Desktop service principal."
+  echo "         The scaling plan will deploy but will not start/stop hosts."
+  echo "         Fix: az ad sp create --id $AVD_SP_APP_ID   (then re-run)"
 fi
 
 # Prompt for admin password if the param file left it empty (never commit secrets).

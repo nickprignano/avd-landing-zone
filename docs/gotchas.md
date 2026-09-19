@@ -34,15 +34,64 @@ nslookup <storageaccount>.file.core.windows.net
 # If it returns a public IP, the DNS zone link hasn't taken effect yet.
 ```
 
-## 4. FSLogix share permissions
+## 4. FSLogix share permissions and Entra Kerberos
 
-The single most common reason profiles silently fail to load. Two layers, both required:
+The single most common reason profiles silently fail to load. With Entra-ID-only
+session hosts (this template's default) there are **three** layers, not two, and
+only some of them are automated:
 
-- **Share-level (RBAC):** session host users need *Storage File Data SMB Share Contributor* on the storage account.
-- **NTFS:** set on the share itself — users need Modify on their own profile path.
+- **Identity source — Entra Kerberos.** An Entra-joined host has no AD DS to
+  authenticate against, so the storage account is configured with
+  `directoryServiceOptions: AADKERB` and the hosts get
+  `CloudKerberosTicketRetrievalEnabled`. Both are handled for you (Bicep and
+  `Configure-FSLogix.ps1` respectively). **The registry change needs a reboot.**
+- **Admin consent — manual, once per storage account.** Enabling Entra Kerberos
+  creates an app registration for the storage account, and it needs admin
+  consent from a Global Administrator before any host can get a ticket:
 
-Get either wrong and logins succeed but profiles don't roam, with no obvious error. The `Configure-FSLogix.ps1` script sets the *client* config; it assumes these permissions are already correct.
+  ```bash
+  # Find the app registration created for the storage account, then consent
+  az ad app list --display-name "[Storage Account] <your-storage-account-name>" --query "[].appId" -o tsv
+  az ad app permission admin-consent --id <that-app-id>
+  ```
 
-## 5. Region capacity for your VM size
+  Skip this and mounting the share fails with a Kerberos error. This is the step
+  people miss.
+- **Share-level (RBAC):** session host users need *Storage File Data SMB Share
+  Contributor*. The Bicep grants this to everything in `desktopUserObjectIds`.
+- **NTFS:** set on the share itself — users need Modify on their own profile
+  path. **Still manual.**
+
+Get any of these wrong and logins succeed but profiles don't roam, with no
+obvious error.
+
+## 5. The scaling plan that never scales
+
+A scaling plan runs as the **Azure Virtual Desktop service principal**, not as
+you. If that principal has no power on/off rights over the session hosts, the
+plan deploys clean, shows healthy in the portal, and never starts or stops
+anything — the most expensive kind of silent failure in this template.
+
+The deploy script resolves the service principal and the Bicep assigns
+*Desktop Virtualization Power On Off Contributor* at the resource group scope.
+If the lookup fails, the script warns and tells you to run:
+
+```bash
+az ad sp create --id 9cdead84-a844-4324-93f2-b2e6bb768d07
+```
+
+Note the assignment is at **resource group** scope here because the template is
+resource-group scoped. Microsoft documents subscription scope; if you run
+several host pools across a subscription, hoist it up yourself.
+
+## 6. Sign-in fails on an Entra-joined session host
+
+*Desktop Virtualization User* on the app group only makes the desktop **appear**
+in the client. Actually signing in to the VM behind it needs **Virtual Machine
+User Login**. Miss it and the connection is accepted and then the sign-in
+fails — which looks like a credential problem and isn't. The Bicep assigns it at
+resource group scope to everything in `desktopUserObjectIds`.
+
+## 7. Region capacity for your VM size
 
 Quota and *capacity* are different things. You can have quota and still get an allocation failure because the specific VM size isn't available in that region/zone right now. Have a fallback size (e.g. `Standard_D4as_v5` → `Standard_D4s_v5`) and don't hard-code one size everywhere.
