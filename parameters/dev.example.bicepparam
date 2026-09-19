@@ -39,6 +39,27 @@ param desktopUserPrincipalType = 'Group'
 // the deploy script resolves it for you.
 param avdServicePrincipalObjectId = ''
 
+// ---- Cost control (read docs/cost-controls.md before you deploy) ----
+// Azure has NO hard spending cap on pay-as-you-go. These bound the damage.
+
+// Daily hard stop for the session hosts. The only control here with no data
+// lag, and the one that will actually save you money. Leave it on.
+param enableAutoShutdown = true
+param autoShutdownTime = '1900'                  // HHmm, 24-hour
+param autoShutdownTimeZone = 'Eastern Standard Time'
+
+// Budget + alerts + automated stop. A BACKSTOP: budget data lags real usage by
+// 8-24 hours, so this fires late. It is not a cap.
+param enableCostGuard = true
+param monthlyBudgetAmount = 50                   // in your subscription's billing currency
+
+// Where budget alerts go. Leave empty and the deploy script uses your signed-in
+// address -- but on a personal subscription that address is often not
+// deliverable, so setting a real inbox here is safer.
+param costAlertEmails = [
+  // 'you@example.com'
+]
+
 // ---- Session host local admin ----
 param adminUsername = 'avdadmin'
 // Do NOT commit a real password. Pass it at deploy time or use Key Vault.

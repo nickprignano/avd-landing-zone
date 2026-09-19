@@ -79,6 +79,32 @@ else
   echo "         Fix: az ad sp create --id $AVD_SP_APP_ID   (then re-run)"
 fi
 
+# Budget alerts need somewhere to land. If the param file leaves costAlertEmails
+# empty, fall back to the signed-in user's address.
+if grep -qzE "costAlertEmails = \[\s*(//[^]]*)?\]" "$PARAM_FILE"; then
+  MY_MAIL=$(az ad signed-in-user show --query mail -o tsv 2>/dev/null || true)
+  if [[ -z "$MY_MAIL" || "$MY_MAIL" == "null" ]]; then
+    # No mail attribute. The UPN is the fallback, but on a personal subscription
+    # backed by a Microsoft account the UPN is often something like
+    # you_gmail.com#EXT#@yourtenant.onmicrosoft.com, which DOES NOT receive mail.
+    MY_MAIL=$(az ad signed-in-user show --query userPrincipalName -o tsv 2>/dev/null || true)
+    if [[ "$MY_MAIL" == *"#EXT#"* ]]; then
+      echo "WARNING: your account has no mail attribute and its UPN ($MY_MAIL)"
+      echo "         is not a deliverable address. Budget alerts would go nowhere."
+      echo "         Set costAlertEmails in $PARAM_FILE to a real inbox."
+      MY_MAIL=""
+    fi
+  fi
+  if [[ -n "$MY_MAIL" ]]; then
+    echo "==> Budget alerts will go to $MY_MAIL"
+    EXTRA_PARAMS+=(--parameters "costAlertEmails=[\"$MY_MAIL\"]")
+  else
+    echo "WARNING: no cost alert address, so the budget and kill switch are SKIPPED."
+    echo "         Auto-shutdown on the session hosts still applies."
+    echo "         Set costAlertEmails in $PARAM_FILE and re-run to enable them."
+  fi
+fi
+
 # Prompt for admin password if the param file left it empty (never commit secrets).
 if grep -qE "param adminPassword = ''" "$PARAM_FILE"; then
   read -r -s -p "Session host admin password: " ADMIN_PW; echo
@@ -106,3 +132,8 @@ echo "==> Infrastructure deployed."
 echo "    Next: post-deploy config"
 echo "      pwsh ./scripts/config/Configure-FSLogix.ps1 -ResourceGroup $RESOURCE_GROUP"
 echo "      pwsh ./scripts/config/Register-SessionHosts.ps1 -ResourceGroup $RESOURCE_GROUP"
+echo ""
+echo "    THIS IS NOW COSTING YOU MONEY. To stop it:"
+echo "      ./scripts/ops/stop-lab.sh -g $RESOURCE_GROUP            # stop, reversible"
+echo "      ./scripts/ops/stop-lab.sh -g $RESOURCE_GROUP --delete   # remove everything"
+echo "    Azure has no hard spending cap - see docs/cost-controls.md."

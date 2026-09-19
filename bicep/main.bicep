@@ -50,6 +50,32 @@ param desktopUserPrincipalType string = 'Group'
 @description('Object ID of the "Azure Virtual Desktop" service principal in YOUR tenant. Required for the scaling plan to actually start/stop hosts. The deploy script resolves this automatically; leave empty to skip.')
 param avdServicePrincipalObjectId string = ''
 
+// ---------- Cost control ----------
+// Azure has no hard spending cap on pay-as-you-go. These bound the damage; they
+// do not prevent it. See docs/cost-controls.md.
+
+@description('Daily auto-shutdown for session hosts. The only cost control here with no data lag. Leave on unless you have a reason.')
+param enableAutoShutdown bool = true
+
+@description('Auto-shutdown time, HHmm 24-hour, in autoShutdownTimeZone.')
+param autoShutdownTime string = '1900'
+
+@description('Time zone for autoShutdownTime and the scaling plan.')
+param autoShutdownTimeZone string = 'Eastern Standard Time'
+
+@description('Deploy the budget, alerts and automated kill switch. Needs at least one address in costAlertEmails.')
+param enableCostGuard bool = true
+
+@description('Monthly budget for this resource group, in the subscription billing currency.')
+@minValue(1)
+param monthlyBudgetAmount int = 50
+
+@description('Where budget alerts go. Leave empty and the deploy script uses the signed-in user. If it stays empty the cost guard is SKIPPED.')
+param costAlertEmails array = []
+
+@description('First day of the month the budget starts tracking. Azure requires the 1st.')
+param budgetStartDate string = utcNow('yyyy-MM-01')
+
 @description('Admin username for session host VMs.')
 param adminUsername string
 
@@ -125,6 +151,9 @@ module hostPool 'modules/hostPool.bicep' = {
     sessionHostSubnetResourceId: network.outputs.sessionHostSubnetResourceId
     desktopUserObjectIds: desktopUserObjectIds
     desktopUserPrincipalType: desktopUserPrincipalType
+    enableAutoShutdown: enableAutoShutdown
+    autoShutdownTime: autoShutdownTime
+    autoShutdownTimeZone: autoShutdownTimeZone
     adminUsername: adminUsername
     adminPassword: adminPassword
   }
@@ -155,6 +184,24 @@ module rbac 'modules/rbac.bicep' = {
   }
   // The session hosts must exist before we grant sign-in rights over them.
   dependsOn: [hostPool]
+}
+
+// =====================================================================
+// 7. COST GUARD  — budget, alerts, and the automated stop
+// A BACKSTOP, not a cap: budget data lags real usage by 8-24 hours.
+// =====================================================================
+module costGuard 'modules/costGuard.bicep' = if (enableCostGuard && !empty(costAlertEmails)) {
+  name: 'deploy-cost-guard'
+  params: {
+    location: location
+    tags: tags
+    namePrefix: namePrefix
+    budgetAmount: monthlyBudgetAmount
+    alertEmails: costAlertEmails
+    budgetStartDate: budgetStartDate
+    scalingPlanResourceId: scalingPlan.outputs.resourceId
+    hostPoolResourceId: hostPool.outputs.resourceId
+  }
 }
 
 // ---------- Outputs ----------

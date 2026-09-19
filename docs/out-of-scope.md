@@ -30,7 +30,7 @@ If you fork this for a real deployment, this is your backlog.
 
 ## Operations
 
-- **Cost optimization.** The scaling plan schedule is a reasonable default. Tuning it to real usage — time zones, shift patterns, how aggressively you can scale down — is where the savings actually are.
+- **Cost optimization.** The scaling plan schedule is a reasonable default. Tuning it to real usage — time zones, shift patterns, how aggressively you can scale down — is where the savings actually are. Basic *cost safety* (auto-shutdown, a budget, a kill switch) is in scope and documented in [cost-controls.md](cost-controls.md); cost *optimization* is not.
 - **Monitoring / Log Analytics / alerts.** Not wired up.
 - **Policy / compliance overlays.** Azure Policy, regulatory baselines, tagging enforcement — org-specific.
 

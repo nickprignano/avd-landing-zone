@@ -17,6 +17,15 @@ param adminUsername string
 @secure()
 param adminPassword string
 
+@description('Daily auto-shutdown for session hosts. The most effective cost control here: unlike a budget alert it is deterministic and has no data lag. Leave on for a personal subscription.')
+param enableAutoShutdown bool = true
+
+@description('Auto-shutdown time, HHmm 24-hour, in autoShutdownTimeZone.')
+param autoShutdownTime string = '1900'
+
+@description('Time zone for autoShutdownTime.')
+param autoShutdownTimeZone string = 'Eastern Standard Time'
+
 @description('Marketplace image for session hosts. Replace with your golden image in a real build.')
 param imageReference object = {
   publisher: 'MicrosoftWindowsDesktop'
@@ -97,6 +106,15 @@ module sessionHosts 'br/public:avm/res/compute/virtual-machine:0.12.0' = [for i 
     extensionAadJoinConfig: {
       enabled: true
     }
+    // Hard daily stop. The scaling plan may start hosts again the next morning;
+    // this guarantees they are not left running overnight if it does not.
+    // An empty object disables the schedule entirely.
+    autoShutdownConfig: enableAutoShutdown ? {
+      status: 'Enabled'
+      dailyRecurrenceTime: autoShutdownTime
+      timeZone: autoShutdownTimeZone
+      notificationStatus: 'Disabled'
+    } : {}
   }
 }]
 
