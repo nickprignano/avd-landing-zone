@@ -45,7 +45,7 @@ module appGroup 'br/public:avm/res/desktop-virtualization/application-group:0.4.
     location: location
     tags: tags
     applicationGroupType: 'Desktop'
-    hostpoolResourceId: hostPool.outputs.resourceId
+    hostpoolName: hostPool.outputs.name
     // Grant Desktop Virtualization User to the supplied object IDs.
     roleAssignments: [for id in desktopUserObjectIds: {
       principalId: id
@@ -56,13 +56,13 @@ module appGroup 'br/public:avm/res/desktop-virtualization/application-group:0.4.
 }
 
 // --- Workspace ---
-module workspace 'br/public:avm/res/desktop-virtualization/workspace:0.10.0' = {
+module workspace 'br/public:avm/res/desktop-virtualization/workspace:0.9.2' = {
   name: 'deploy-workspace'
   params: {
     name: '${name}-ws'
     location: location
     tags: tags
-    applicationGroupResourceIds: [appGroup.outputs.resourceId]
+    applicationGroupReferences: [appGroup.outputs.resourceId]
   }
 }
 
@@ -74,6 +74,7 @@ module sessionHosts 'br/public:avm/res/compute/virtual-machine:0.12.0' = [for i 
     location: location
     tags: tags
     vmSize: sessionHostVmSize
+    zone: 0   // 0 = no availability zone; zonal placement is a sizing decision (out of scope)
     osType: 'Windows'
     adminUsername: adminUsername
     adminPassword: adminPassword
