@@ -1,8 +1,17 @@
 name: validate
 
-# Lint the Bicep and run a what-if on PRs. Does not deploy.
+# Lint the Bicep and run a what-if on PRs and on master. Does not deploy.
 on:
   pull_request:
+    paths:
+      - 'bicep/**'
+      - 'parameters/**'
+      - '.github/workflows/validate.yml'
+  # Also run on master. Without this the workflow only fires on PRs, so a repo
+  # whose history is pushed straight to master never runs it at all.
+  push:
+    branches:
+      - master
     paths:
       - 'bicep/**'
       - 'parameters/**'

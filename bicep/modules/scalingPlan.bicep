@@ -45,7 +45,7 @@ module scalingPlan 'br/public:avm/res/desktop-virtualization/scaling-plan:0.4.0'
     ]
     hostPoolReferences: [
       {
-        hostPoolArmPath: hostPoolResourceId
+        hostPoolResourceId: hostPoolResourceId
         scalingPlanEnabled: true
       }
     ]
