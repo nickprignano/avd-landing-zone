@@ -69,6 +69,13 @@ The one to actually reach for.
 ./scripts/ops/stop-lab.sh -g rg-avd-lz-dev --delete  # remove everything
 ```
 
+Add `-s <subscription-id>` to target a specific subscription instead of
+whatever your `az` context happens to be set to. It does not change your global
+az context — the flag is passed per-command. Either way the script prints the
+subscription name and ID before it touches anything, and `--delete` names them
+in the confirmation prompt. Acting on the wrong subscription is the mistake that
+actually happens, and with `--delete` there is no undo.
+
 `stop` disables the scaling plan **before** deallocating the hosts. That order
 matters: deallocate without disabling the plan and it ramps everything back up
 at the next ramp-up window, which on a weekday is 07:00.
@@ -146,3 +153,7 @@ real inbox.
 - Deallocated VMs still incur disk charges. Only `--delete` reaches zero.
 - None of this has been exercised against a live subscription. See the caveat in
   the repo history.
+- No subscription or tenant ID is committed anywhere. Bicep resolves the
+  subscription with `subscription().subscriptionId`; the scripts use your `az`
+  context or `-s`. A CI job (`no-hardcoded-ids` in `validate.yml`) fails the
+  build if either regresses, or if a real `.bicepparam` is force-added.

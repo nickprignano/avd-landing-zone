@@ -16,6 +16,10 @@ az login
 az account set --subscription "<your-subscription-id>"
 ```
 
+Or skip `az account set` and pass `-s <subscription-id>` to the deploy and
+stop-lab scripts instead — they print the target subscription before doing
+anything, which is worth having if you have more than one.
+
 ## 1. Parameters
 
 ```bash

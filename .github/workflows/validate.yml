@@ -6,6 +6,8 @@ on:
     paths:
       - 'bicep/**'
       - 'parameters/**'
+      - 'scripts/**'
+      - 'docs/**'
       - '.github/workflows/validate.yml'
   # Also run on master. Without this the workflow only fires on PRs, so a repo
   # whose history is pushed straight to master never runs it at all.
@@ -15,6 +17,8 @@ on:
     paths:
       - 'bicep/**'
       - 'parameters/**'
+      - 'scripts/**'
+      - 'docs/**'
       - '.github/workflows/validate.yml'
   workflow_dispatch:
 
@@ -23,6 +27,38 @@ permissions:
   contents: read
 
 jobs:
+  # Nothing tenant-specific belongs in this repo. Subscription and tenant IDs
+  # are resolved at deploy time - subscription().subscriptionId in Bicep, the
+  # az context in the scripts - and a real .bicepparam is gitignored. This job
+  # is what stops either of those quietly regressing.
+  no-hardcoded-ids:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No hardcoded subscription IDs or real parameter files
+        run: |
+          fail=0
+
+          # A leaked subscription ID almost always arrives inside a resource ID.
+          # Built-in role definition GUIDs and the AVD first-party app ID are
+          # the same in every tenant, so they are fine and this does not match
+          # them.
+          if grep -rInE '/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}' \
+               --exclude-dir=.git --exclude=validate.yml .; then
+            echo "::error::Hardcoded subscription ID. Use subscription().subscriptionId in Bicep, or the az context in scripts."
+            fail=1
+          fi
+
+          # Real parameter files are gitignored; catch a git add -f.
+          if git ls-files 'parameters/*.bicepparam' | grep -v '\.example\.bicepparam$'; then
+            echo "::error::A non-example .bicepparam is committed. Those hold tenant-specific values."
+            fail=1
+          fi
+
+          [[ $fail -eq 0 ]] && echo "No tenant-specific values committed."
+          exit $fail
+
   lint:
     runs-on: ubuntu-latest
     steps:
