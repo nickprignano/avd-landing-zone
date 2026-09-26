@@ -1,77 +1,73 @@
-# CI / validation
+# CI / CD
 
-The repo ships a GitHub Actions workflow at [`.github/workflows/validate.yml`](../.github/workflows/validate.yml) with two jobs: **lint** (always runs) and **what-if** (opt-in).
+Two workflows:
 
-## Lint — runs automatically, no setup
+| Workflow | Trigger | Jobs |
+|---|---|---|
+| [`validate.yml`](../.github/workflows/validate.yml) | PRs and pushes to `master` touching Bicep, parameters, scripts or config | **bicep** (lint + build template and param files) · **scripts** (PSScriptAnalyzer, shellcheck) · **psrule** (Well-Architected rules, advisory) · **what-if** (opt-in) |
+| [`deploy.yml`](../.github/workflows/deploy.yml) | Manual (`workflow_dispatch`) | Deploys `parameters/<env>.bicepparam` to the matching GitHub Environment, with optional what-if only |
 
-On every PR that touches `bicep/`, `parameters/`, or the workflow itself, the lint job installs Bicep and runs:
+The **bicep** and **scripts** jobs need no setup: the parameter files compile with placeholder identity values set in the workflow. `bicepconfig.json` makes security-relevant linter findings errors.
 
-```bash
-az bicep build --file bicep/main.bicep --stdout > /dev/null
-```
+**PSRule** runs with `continue-on-error: true` so you can review its findings and baseline them (`ps-rule.yaml`) before making it a gate.
 
-If the template doesn't transpile — including failures resolving the pinned AVM modules — the PR fails. This is your first gate and it needs nothing configured. It also runs on `workflow_dispatch` if you want to trigger it manually.
+## Azure access (OIDC, no stored secrets)
 
-## What-if — opt-in, needs Azure access
-
-The what-if job runs a `az deployment group what-if` against a test resource group so you can see what a PR *would* change before merging. It stays dormant until you set the repo variable `AZURE_WHATIF_ENABLED` to `true`, so a fresh fork won't fail on it.
-
-It authenticates to Azure with **OIDC** (federated credentials) — no client secret is stored in the repo.
-
-### 1. Create an app registration + service principal
+### 1. App registration and permissions
 
 ```bash
-az ad app create --display-name avd-lz-ci
-# note the appId (this is AZURE_CLIENT_ID)
+az ad app create --display-name avd-lz-cicd            # note appId
 az ad sp create --id <appId>
+az role assignment create --assignee <appId> --role Owner \
+  --scope /subscriptions/<landing-zone-subscription-id>
 ```
 
-Grant it Contributor on the subscription (or, better, just the test resource group):
+**Owner** is needed because the deployment creates role assignments and policy assignments. If you prefer, use Contributor + Role Based Access Control Administrator + Resource Policy Contributor.
+The pipeline makes no Microsoft Graph calls when `AVD_SERVICE_PRINCIPAL_ID` and the group IDs are provided as variables, so no Graph permission is needed.
+
+### 2. Federated credentials
+
+OIDC subjects are exact-match. Create one per context:
+
+| Used by | Subject |
+|---|---|
+| what-if on PRs | `repo:<owner>/<repo>:pull_request` |
+| deploy to dev | `repo:<owner>/<repo>:environment:dev` |
+| deploy to prod | `repo:<owner>/<repo>:environment:prod` |
 
 ```bash
-az role assignment create \
-  --assignee <appId> \
-  --role Contributor \
-  --scope /subscriptions/<sub-id>/resourceGroups/<test-rg>
+az ad app federated-credential create --id <appId> --parameters '{
+  "name": "avd-lz-prod",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:<owner>/<repo>:environment:prod",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
 ```
 
-### 2. Add a federated credential (this is what makes OIDC work)
+### 3. Secrets and variables
 
-Point the credential at your repo. The `subject` must match where the workflow runs — for PRs from branches in the same repo, use the `pull_request` subject:
+Create GitHub Environments `dev` and `prod`, and add **required reviewers** to `prod`. Set these on each environment. For the PR what-if, which runs outside an environment, set them at repository level too.
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `AZURE_CLIENT_ID` | app registration appId |
+| Secret | `AZURE_TENANT_ID` | tenant ID |
+| Secret | `AZURE_SUBSCRIPTION_ID` | landing zone subscription |
+| Secret | `AVD_LOCAL_ADMIN_PASSWORD` | break-glass password (stable) |
+| Variable | `AZURE_LOCATION` | e.g. `eastus2` |
+| Variable | `AVD_USERS_GROUP_ID` | group object ID |
+| Variable | `AVD_ADMINS_GROUP_ID` | group object ID |
+| Variable | `AVD_SERVICE_PRINCIPAL_ID` | `az ad sp show --id 9cdead84-a844-4324-93f2-b2e6bb768d07 --query id -o tsv` |
+| Variable | `AVD_ALERT_EMAIL` | optional |
+| Variable | `AVD_MONTHLY_BUDGET` | optional |
+| Variable (repo) | `AZURE_WHATIF_ENABLED` | `true` to enable the PR what-if |
+
+## Running the checks locally
 
 ```bash
-az ad app federated-credential create \
-  --id <appId> \
-  --parameters '{
-    "name": "avd-lz-ci-pr",
-    "issuer": "https://token.actions.githubusercontent.com",
-    "subject": "repo:nickprignano/avd-landing-zone:pull_request",
-    "audiences": ["api://AzureADTokenExchange"]
-  }'
+az bicep lint --file bicep/main.bicep
+AVD_USERS_GROUP_ID=x AVD_ADMINS_GROUP_ID=x AVD_SERVICE_PRINCIPAL_ID=x AVD_LOCAL_ADMIN_PASSWORD=Placeholder-1234 \
+  az bicep build-params --file parameters/prod.bicepparam --stdout > /dev/null
+pwsh -c "Invoke-ScriptAnalyzer -Path scripts/sessionhost -Recurse -Severity Warning,Error"
+shellcheck scripts/deploy/deploy.sh
 ```
-
-> If you also want it to run on pushes to `main` (e.g. via `workflow_dispatch` on a branch), add a second credential with subject `repo:nickprignano/avd-landing-zone:ref:refs/heads/main`. OIDC subjects are exact-match — one per context.
-
-### 3. Set the repo secrets and variables
-
-**Secrets** (Settings → Secrets and variables → Actions → Secrets):
-
-| Secret | Value |
-|--------|-------|
-| `AZURE_CLIENT_ID` | the app registration's `appId` |
-| `AZURE_TENANT_ID` | your Entra tenant ID |
-| `AZURE_SUBSCRIPTION_ID` | the target subscription ID |
-| `SH_ADMIN_PW` | a throwaway password for the session-host admin param (what-if doesn't deploy, but the template requires the param) |
-
-**Variables** (same screen → Variables):
-
-| Variable | Value |
-|----------|-------|
-| `AZURE_WHATIF_ENABLED` | `true` |
-| `AZURE_WHATIF_RG` | the test resource group name |
-
-Once those are in place, open a PR touching `bicep/` and the what-if job will post the projected changes.
-
-## Why OIDC and not a stored secret
-
-OIDC uses a short-lived federated token minted per run — there's no client secret living in your repo secrets to leak or rotate. A service-principal JSON (`--sdk-auth`) is faster to stand up but stores a secret that expires (~1 year) and has to be rotated. For anything people might actually deploy from, OIDC is the better posture; that's why it's the default here.

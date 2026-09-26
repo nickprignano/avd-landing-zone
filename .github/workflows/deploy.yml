@@ -1,0 +1,53 @@
+name: deploy
+
+# Manual, environment-gated deployment. Configure required reviewers on the
+# "prod" GitHub Environment so production changes need an approval.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment (selects parameters/<env>.bicepparam and the GitHub Environment)
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+      whatIfOnly:
+        description: Run what-if only
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      AVD_USERS_GROUP_ID: ${{ vars.AVD_USERS_GROUP_ID }}
+      AVD_ADMINS_GROUP_ID: ${{ vars.AVD_ADMINS_GROUP_ID }}
+      AVD_SERVICE_PRINCIPAL_ID: ${{ vars.AVD_SERVICE_PRINCIPAL_ID }}
+      AVD_ALERT_EMAIL: ${{ vars.AVD_ALERT_EMAIL }}
+      AVD_MONTHLY_BUDGET: ${{ vars.AVD_MONTHLY_BUDGET }}
+      AVD_LOCAL_ADMIN_PASSWORD: ${{ secrets.AVD_LOCAL_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy
+        run: |
+          args=(-p "parameters/${{ inputs.environment }}.bicepparam" -l "${{ vars.AZURE_LOCATION }}")
+          if [[ "${{ inputs.whatIfOnly }}" == "true" ]]; then args+=(--what-if); fi
+          ./scripts/deploy/deploy.sh "${args[@]}"

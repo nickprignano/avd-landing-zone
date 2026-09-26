@@ -1,44 +1,121 @@
-// Storage — Azure Files share for FSLogix profiles.
-// Public network access disabled; reached only via the private endpoint
-// created in privateEndpoints.bicep. Wraps the AVM storage-account module.
+// Profile storage — Premium Azure Files for FSLogix, Entra Kerberos auth.
+//
+//   - kind FileStorage: Premium file shares only exist on FileStorage accounts.
+//   - Entra Kerberos (AADKERB): Entra-joined session hosts get Kerberos tickets
+//     for the share from Entra ID. No domain controllers, no storage keys.
+//   - Shared key access disabled, SMB hardened to 3.1.1 + Kerberos + AES-256.
+//   - Share-level access via RBAC on the account; reachable only over its
+//     private endpoint.
+//
+// One-time tenant step Bicep cannot do: grant admin consent to the storage
+// account's Entra app registration. See docs/deploy.md.
 
-@description('Storage account name (3-24 lowercase alphanumeric).')
-param name string
 param location string
 param tags object
+param name string
 
-@description('Name of the file share for FSLogix profiles.')
-param profileShareName string = 'profiles'
+@allowed([
+  'Premium_LRS'
+  'Premium_ZRS'
+])
+param skuName string
+param shareName string
+param shareQuotaGiB int
+param privateEndpointSubnetResourceId string
+param privateDnsZoneResourceId string
+param logAnalyticsWorkspaceResourceId string
+param usersGroupObjectId string
+param adminsGroupObjectId string
 
-@description('Quota for the profile share, in GB.')
-param shareQuotaGb int = 100
+var roles = {
+  smbShareContributor: '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb'
+  smbShareElevatedContributor: 'a7264617-510b-434b-a828-9731dc254ea7'
+}
 
-module storageAccount 'br/public:avm/res/storage/storage-account:0.14.3' = {
-  name: 'deploy-storage-account'
+module account 'br/public:avm/res/storage/storage-account:0.33.1' = {
+  name: 'storage-account'
   params: {
     name: name
     location: location
     tags: tags
-    kind: 'StorageV2'
-    skuName: 'Premium_LRS'      // Premium FileStorage for FSLogix IOPS; sizing is YOUR call (see docs)
-    largeFileSharesState: 'Enabled'
-    // Lock the front door: no public network access. PE only.
+    kind: 'FileStorage'
+    skuName: skuName
+    allowSharedKeyAccess: false
     publicNetworkAccess: 'Disabled'
     networkAcls: {
-      defaultAction: 'Deny'
       bypass: 'AzureServices'
+      defaultAction: 'Deny'
+    }
+    azureFilesIdentityBasedAuthentication: {
+      directoryServiceOptions: 'AADKERB'
     }
     fileServices: {
+      protocolSettings: {
+        smb: {
+          versions: 'SMB3.1.1;'
+          authenticationMethods: 'Kerberos;'
+          kerberosTicketEncryption: 'AES-256;'
+          channelEncryption: 'AES-256-GCM;'
+          multichannel: {
+            enabled: true
+          }
+        }
+      }
+      shareDeleteRetentionPolicy: {
+        enabled: true
+        days: 14
+      }
       shares: [
         {
-          name: profileShareName
-          shareQuota: shareQuotaGb
+          name: shareName
+          shareQuota: shareQuotaGiB
           enabledProtocols: 'SMB'
         }
       ]
+      diagnosticSettings: [
+        {
+          workspaceResourceId: logAnalyticsWorkspaceResourceId
+        }
+      ]
     }
+    privateEndpoints: [
+      {
+        service: 'file'
+        subnetResourceId: privateEndpointSubnetResourceId
+        privateDnsZoneGroup: {
+          privateDnsZoneGroupConfigs: [
+            {
+              privateDnsZoneResourceId: privateDnsZoneResourceId
+            }
+          ]
+        }
+      }
+    ]
+    roleAssignments: [
+      {
+        principalId: usersGroupObjectId
+        principalType: 'Group'
+        roleDefinitionIdOrName: roles.smbShareContributor
+      }
+      {
+        principalId: adminsGroupObjectId
+        principalType: 'Group'
+        roleDefinitionIdOrName: roles.smbShareElevatedContributor
+      }
+    ]
+    diagnosticSettings: [
+      {
+        workspaceResourceId: logAnalyticsWorkspaceResourceId
+        metricCategories: [
+          {
+            category: 'Transaction'
+          }
+        ]
+      }
+    ]
   }
 }
 
-output resourceId string = storageAccount.outputs.resourceId
-output name string = storageAccount.outputs.name
+output name string = account.outputs.name
+output resourceId string = account.outputs.resourceId
+output profileShareUncPath string = '\\\\${account.outputs.name}.file.${environment().suffixes.storage}\\${shareName}'

@@ -1,36 +1,66 @@
 # Architecture
 
-The shape of what this deploys.
+## Layout
 
 ```
-            HUB VNet (you provide)              SPOKE VNet (this template)
-        ┌───────────────────────────┐      ┌────────────────────────────────────┐
-        │  Azure Firewall / NVA      │◄─────┤  NETWORKING (#1)                    │
-        │  Private DNS Zones         │ peer │   snet-session-hosts (no public IP) │
-        │  VPN / ExpressRoute GW     │      │   snet-private-endpoints            │
-        │                            │      │   NSG + route table → egress to hub │
-        │  IDENTITY (#2)             │      │                                     │
-        │   Entra ID (tenant, CA)    │◄─────┤  HOST POOL                          │
-        │   [Domain services = OUT   │ join │   session hosts (Entra ID joined)   │
-        │    OF SCOPE — Entra only]  │      │   app group + workspace             │
-        └───────────────────────────┘      │   Scaling Plan                      │
-                                           │                                     │
-                                           │  STORAGE (#3)                       │
-                                           │   Azure Files (private endpoint)    │
-                                           │   FSLogix profile containers        │
-                                           └────────────────────────────────────┘
+Subscription (dedicated AVD landing zone)
+│  Policy: allowed locations, tag inheritance · Defender for Cloud · Budget · Activity log → LAW
+│
+├── rg-<prefix>-<env>-network
+│     vnet-<prefix>-<env>            10.100.0.0/22
+│       snet-session-hosts           10.100.0.0/23   NSG · NAT GW (standalone) or UDR→hub FW · no default outbound
+│       snet-private-endpoints       10.100.2.0/27   NSG enforced on PEs (445 from hosts, 443 from VNet)
+│     private endpoints: file, vault, host pool (connection)
+│     privatelink zones: file, vaultcore, wvd       (standalone; hub mode can use central zones)
+│
+├── rg-<prefix>-<env>-management
+│     Log Analytics · AVD Insights DCR (microsoft-avdi-*) · action group · alerts
+│     Key Vault (private, RBAC): break-glass local admin
+│
+├── rg-<prefix>-<env>-storage
+│     Premium FileStorage (ZRS): share "profiles" · Entra Kerberos · shared key off
+│     Recovery Services vault: daily share backup
+│
+├── rg-<prefix>-<env>-avd
+│     Host pool (pooled, Private Link) · Desktop app group · Workspace · Scaling plan
+│
+└── rg-<prefix>-<env>-hosts
+      Session hosts ×N (zones 1/2/3, Trusted Launch, encryption at host)
+        extensions: AADLoginForWindows (+Intune), AzureMonitorWindowsAgent, GuestConfiguration
+        run commands: Configure-FSLogix → Register-AvdAgent
 ```
 
-## The three non-negotiables, in order
+## Traffic flows
 
-1. **Networking** — the boundary everything else sits inside. Spoke VNet, isolated subnets, NSGs, forced egress through the hub. Built first because nothing can be deployed correctly until it exists.
-2. **Identity** — Entra ID join. Who can sign in and what they can reach. Built before the host pool because hosts need somewhere to join. **Entra-only by default**; domain services are out of scope.
-3. **Storage** — FSLogix profile storage behind a private endpoint. Where the user's desktop persists. Without it, a non-persistent pool is useless.
+| Flow | Path |
+|---|---|
+| User → desktop | Windows App → AVD gateway (public, reverse connect; RDP Shortpath where available). Session hosts accept no inbound connections |
+| Session host → AVD service (host pool) | Private endpoint `connection` sub-resource via `privatelink.wvd.microsoft.com` |
+| Session host → FSLogix share | SMB 445 → storage private endpoint; Kerberos ticket from Entra ID |
+| Session host → Entra ID, Intune, Windows Update, M365, AVD agent downloads | Egress through the NAT Gateway (standalone) or the hub firewall (hub-peered) |
+| Session host → Log Analytics | Azure Monitor Agent over egress |
+| Operator → Key Vault | Private endpoint, reachable from the VNet or peered networks only |
+
+In **hub-peered** mode your firewall must allow the [AVD required FQDNs](https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint) plus Entra ID, Intune and Windows Update endpoints.
+
+## Identity and access (RBAC)
+
+| Principal | Role | Scope |
+|---|---|---|
+| AVD Users group | Desktop Virtualization User | Desktop application group |
+| AVD Users group | Virtual Machine User Login | `hosts` RG |
+| AVD Users group | Storage File Data SMB Share Contributor | Storage account |
+| AVD Admins group | Virtual Machine Administrator Login | `hosts` RG |
+| AVD Admins group | Storage File Data SMB Share Elevated Contributor | Storage account |
+| AVD Admins group | Key Vault Secrets User | Key Vault |
+| Azure Virtual Desktop SP | Desktop Virtualization Power On Off Contributor | `avd` and `hosts` RGs |
+| Tag-inheritance policy identities | Tag Contributor | Subscription |
+
+## Deployment order
+
+`monitoring` → `network` → `privateDns` → `keyVault`, `storage` (→ `backup`), `controlPlane` → `sessionHosts` (VMs → FSLogix run command → agent run command). `governance` runs as soon as the workspace exists.
+Dependencies come from outputs, so ARM parallelises everything else.
 
 ## Why AVM
 
-`main.bicep` is a thin orchestration layer. The actual resources come from [Azure Verified Modules](https://aka.ms/avm) — Microsoft-maintained, tested module wrappers. You compose them; you don't maintain them. That's the whole "don't rebuild the boring 80%" idea expressed in the code.
-
-## What's deliberately missing
-
-See [out-of-scope.md](out-of-scope.md). The short version: the hub, golden imaging, domain services, sizing, cost tuning, monitoring, and compliance are all yours. This is the floor.
+Resources come from pinned [Azure Verified Modules](https://aka.ms/avm). Native resources are used only where no module exists or the module adds nothing: Run Commands, backup protection, role assignments at resource group scope, policy, Defender pricings, budget and alerts.

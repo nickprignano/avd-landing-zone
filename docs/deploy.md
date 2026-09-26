@@ -1,71 +1,92 @@
-# Deploy walkthrough
+# Deploy
 
-End-to-end, cold start to a working desktop. The infra is `az` + Bicep; the post-deploy config is PowerShell.
+## 1. Prerequisites
 
-## 0. Prereqs
+**Azure**
+- A dedicated subscription for the landing zone. The deploying identity needs **Owner** (it creates role and policy assignments).
+- Azure CLI ≥ 2.65 (`az upgrade`), with Bicep (`az bicep install`).
+- vCPU quota for `sessionHostCount × sessionHostVmSize` in the region, and a region that supports Premium ZRS file shares if you keep `profileStorageSku = 'Premium_ZRS'`.
 
-- Azure subscription you can deploy to (a personal pay-as-you-go sub is fine)
-- Azure CLI ≥ 2.60 with bicep (`az bicep upgrade`)
-- PowerShell 7+ with `Az` modules (`Install-Module Az`)
-- vCPU quota in your target region — [check first](gotchas.md#2-vcpu-quota-in-your-target-region)
+**Entra ID / Microsoft 365**
+- Two security groups: **AVD Users** (people who get the desktop) and **AVD Admins** (operators).
+- Users licensed for AVD, e.g. Microsoft 365 E3/E5/Business Premium or Windows Enterprise E3/E5.
+- Intune licensing, if `enrollInIntune = true` (the default). Without it, set `enrollInIntune = false`.
+- Someone with **Cloud Application Administrator** or **Application Administrator** for the post-deployment admin consent.
+- Profiles on Azure Files through Entra Kerberos: hybrid (synced) identities are fully supported. Check [Microsoft's current guidance](https://learn.microsoft.com/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable) on cloud-only identity support before relying on it.
 
-No hub and no domain are required for the standalone path.
+## 2. Parameters
+
+`parameters/dev.bicepparam` and `parameters/prod.bicepparam` are committed. They hold no tenant data: identity values and secrets come from environment variables.
+
+| Variable | Required | Set by |
+|---|---|---|
+| `AVD_USERS_GROUP_ID` | yes | `deploy.sh --users-group <name>` or you |
+| `AVD_ADMINS_GROUP_ID` | yes | `deploy.sh --admins-group <name>` or you |
+| `AVD_SERVICE_PRINCIPAL_ID` | yes | `deploy.sh` (looks up app `9cdead84-a844-4324-93f2-b2e6bb768d07`) |
+| `AVD_LOCAL_ADMIN_PASSWORD` | yes | you, or `deploy.sh` prompts. **Use the same value every time** |
+| `AVD_ALERT_EMAIL` | no | you |
+| `AVD_MONTHLY_BUDGET` | no (prod) | you |
+
+Things you'll most likely change in the file: `namePrefix`, `location`, address ranges, `sessionHostCount`/`sessionHostVmSize`, `scalingTimeZone`, and for hub-peered mode the hub settings (examples are in `prod.bicepparam`).
+
+## 3. Deploy
 
 ```bash
 az login
-az account set --subscription "<your-subscription-id>"
+az account set --subscription "<subscription-id>"
+
+./scripts/deploy/deploy.sh -p parameters/prod.bicepparam -l eastus2 \
+  --users-group "AVD Users" --admins-group "AVD Admins" --what-if
+
+./scripts/deploy/deploy.sh -p parameters/prod.bicepparam -l eastus2 \
+  --users-group "AVD Users" --admins-group "AVD Admins"
 ```
 
-## 1. Parameters
+`deploy.sh` registers the resource providers and the `EncryptionAtHost` feature, resolves the group and service principal IDs, and runs `az deployment sub create`. A first deployment takes roughly 30–45 minutes. Session hosts are registered to the pool and FSLogix-configured as part of it. There are no post-deployment scripts.
 
-```bash
-cp parameters/dev.example.bicepparam parameters/dev.bicepparam
+## 4. Post-deployment
+
+These are tenant-level steps that ARM can't perform. Each is done once per storage account.
+
+### Grant admin consent for Entra Kerberos
+Entra ID → **App registrations** → **All applications** → `[Storage Account] <storage>.file.core.windows.net` → **API permissions** → **Grant admin consent**.
+([Microsoft docs](https://learn.microsoft.com/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable#grant-admin-consent-to-the-new-service-principal))
+
+### Exclude the storage app from MFA Conditional Access
+Kerberos ticket requests for the share can't satisfy MFA. Exclude the `[Storage Account] …` app from Conditional Access policies that require MFA for all resources.
+
+### NTFS permissions
+The share's default root ACL lets every authenticated user modify every folder. Harden it before production use. Mount the share from a session host while signed in as a member of **AVD Admins** (Elevated Contributor) and apply the FSLogix-recommended ACL:
+
+```powershell
+net use P: \\<storage>.file.core.windows.net\profiles
+icacls P: /inheritance:r
+icacls P: /grant "CREATOR OWNER:(OI)(CI)(IO)(M)"
+icacls P: /grant "<AVD Users group>:(M)"            # this folder only
+icacls P: /grant "<AVD Admins group>:(OI)(CI)(F)"
+icacls P: /remove "Authenticated Users" "Users"
 ```
 
-The example defaults already run **standalone** (no hub). You only need to touch:
-- `namePrefix` — short prefix; everything derives from it
-- `location`
-- `sessionHostVmSize` — confirm quota for this size
-- leave `adminPassword = ''` — you'll be prompted at deploy time
-- leave `desktopUserObjectIds = []` — the deploy script grants the desktop to you
-- leave `hubVnetResourceId = ''` — empty = standalone. Set it only to peer to a real hub.
-
-## 2. Dry run (recommended)
-
-```bash
-./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -g rg-avd-lz-dev -l eastus2 --what-if
-```
-
-Review the what-if output. Nothing is created.
-
-## 3. Deploy the infrastructure
-
-```bash
-./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -g rg-avd-lz-dev -l eastus2
-```
-
-This creates: spoke VNet + subnets + NSG + route table + hub peering → storage account + file share → private endpoint + DNS zone → host pool + app group + workspace + session host VMs → scaling plan.
-
-## 4. Post-deploy config
-
-```bash
-# Point FSLogix at the profile share
-pwsh ./scripts/config/Configure-FSLogix.ps1 -ResourceGroup rg-avd-lz-dev
-
-# Install the AVD agent and register hosts to the pool
-pwsh ./scripts/config/Register-SessionHosts.ps1 -ResourceGroup rg-avd-lz-dev
-```
+Configuring ACLs for Entra identities depends on your identity type (hybrid vs cloud-only). Follow [Configure directory and file-level permissions](https://learn.microsoft.com/azure/storage/files/storage-files-identity-configure-file-level-permissions).
 
 ## 5. Verify
 
-- Host pool blade → session hosts show **Available** within a few minutes.
-- Assign yourself to the desktop application group (or be in `desktopUserObjectIds`).
-- Connect via the AVD client. Profile should load from FSLogix.
+- **Host pool** → Session hosts: every host **Available**.
+- A member of AVD Users signs in to the [Windows App](https://windows.cloud.microsoft) and opens the desktop.
+- On the host, `frx list-redirects` or the `Microsoft-FSLogix-Apps/Operational` log shows the profile attached from `\\<storage>.file.core.windows.net\profiles`.
+- **AVD Insights** (host pool → Insights) shows data within about 15 minutes.
 
-If a host doesn't register or a profile doesn't load, start with [gotchas.md](gotchas.md).
+## 6. Day-2 operations
 
-## Teardown
+- **Scale out:** raise `sessionHostCount` and redeploy. Existing hosts are untouched (their run commands see `IsRegistered = 1` and exit).
+- **New image:** change `sessionHostImage` or move to an Azure Compute Gallery image. Replace hosts by deploying a new `sessionHostNamePrefix`, drain the old hosts, then delete them.
+- **Exclude a host from autoscale:** tag the VM `avd-scaling-exclude`.
+- **Break-glass sign-in:** read `sessionhost-localadmin-password` from Key Vault (AVD Admins have Secrets User) from inside the VNet.
 
-```bash
-az group delete -n rg-avd-lz-dev --yes --no-wait
-```
+## 7. Teardown
+
+1. Recovery Services vault → Backup items → Azure Storage (Azure Files) → **Stop backup** and delete the data. Registration puts a delete lock on the storage account.
+2. `az group delete` the five `rg-<prefix>-<env>-*` groups (hosts first).
+3. Remove the `avdlz-*` policy assignments and their role assignments, the budget, and set Defender plans back to Free if you want.
+4. Delete the session hosts' device objects from Entra ID and Intune.
+5. Key Vault is soft-deleted with purge protection: the same name can't be reused for 90 days. See [gotchas](gotchas.md#key-vault-name-after-teardown).
