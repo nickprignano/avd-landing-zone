@@ -1,48 +1,55 @@
-# Gotchas — a taste of why it gets complicated
+# Gotchas
 
-The baseline deploys cleanly. These are the things that bite once you point it at a real environment.
+## Before you deploy
 
-## 1. Resource providers not registered (fresh subscriptions)
+### vCPU quota and zonal capacity
+New subscriptions often have low quota. Check it with `az vm list-usage -l <region> -o table`. Quota is not capacity either: a size can be unavailable in a given zone. If allocation fails, try a sibling size (for example `Standard_D4s_v5`) or narrow `availabilityZones`.
 
-On a brand-new subscription — exactly what you get swiping a personal card — the resource providers an AVD landing zone needs aren't registered yet, and the deployment fails with an opaque error. The deploy script registers them for you, but if you deploy by hand:
+### Premium ZRS file shares aren't in every region
+If the storage deployment fails on SKU, set `profileStorageSku = 'Premium_LRS'`.
 
-```bash
-for ns in Microsoft.DesktopVirtualization Microsoft.Compute Microsoft.Storage Microsoft.Network Microsoft.Insights; do
-  az provider register -n "$ns"
-done
-# Registration is async; the first run can take a few minutes.
-az provider show -n Microsoft.DesktopVirtualization --query registrationState -o tsv
-```
+### Encryption at host is a subscription feature
+`deploy.sh` registers `Microsoft.Compute/EncryptionAtHost` and waits for it. If you deploy another way, register it first or set `encryptionAtHost = false`.
 
-## 2. vCPU quota in your target region
+### Intune enrollment needs Intune
+With `enrollInIntune = true` and no Intune licence in the tenant, the Entra join extension fails. Set it to `false` for lab tenants.
 
-The deployment fails fast if you don't have vCPU quota for your session-host VM size. **Brand-new subscriptions often start with very low quota** — this is the most likely thing to stop a personal-sub demo.
+## During and after deployment
 
-```bash
-az vm list-usage --location eastus2 -o table | grep -i "standard d"
-```
+### FSLogix profiles don't attach
+Check these in order:
+1. **Admin consent** hasn't been granted to the storage account's Entra app ([deploy.md](deploy.md#grant-admin-consent-for-entra-kerberos)).
+2. **Conditional Access** requires MFA for the storage app. Exclude it.
+3. The user isn't in AVD Users, so has no **SMB Share Contributor** role.
+4. **DNS**: on a host, `Resolve-DnsName <storage>.file.core.windows.net` must return a `10.x` address. In hub mode with custom DNS, the hub must resolve `privatelink.file.core.windows.net` (pass central zones with `centralPrivateDnsZoneResourceIds`).
+5. **Kerberos**: `klist get cifs/<storage>.file.core.windows.net` on the host should return a ticket.
 
-Request an increase early (portal → Subscriptions → Usage + quotas), or drop `sessionHostCount` to 1 and use a smaller size.
+The `Microsoft-FSLogix-Apps/Operational` log is shipped to Log Analytics, and the *FSLogix profile errors* alert fires on errors.
 
-## 3. DNS propagation for private endpoints
+### A session host shows "Unavailable" or never registers
+- The `Register-AvdAgent` run command's output is on the VM → **Run command** blade.
+- The hosts must reach the agent download links and the AVD service. In hub mode, allow the [required FQDNs](https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint) on the firewall.
+- With AVD Private Link on, `privatelink.wvd.microsoft.com` must resolve from the hosts.
 
-A private endpoint gives storage a private IP. **Nothing resolves to it** until the private DNS zone is linked to the VNet *and* the link has propagated. The failure mode is cruel: the endpoint exists, but session hosts get **"access denied"** rather than a DNS error, so you go looking in the wrong place.
+### Budget start date
+A budget's start date must be the first of a month and can't be changed once the budget is active. Set `budgetStartDate` to the first day of the month of your first deployment and leave it there.
 
-```bash
-# From a session host, confirm the storage account resolves to a private (10.x) IP
-nslookup <storageaccount>.file.core.windows.net
-# If it returns a public IP, the DNS zone link hasn't taken effect yet.
-```
+### Hub-peered mode needs an egress path
+Subnets have no default outbound access. In `HubPeered` mode, set `hubFirewallPrivateIp` (or make sure hub routing, e.g. Virtual WAN routing intent, supplies 0.0.0.0/0). Otherwise hosts can't reach Entra ID, Intune or the agent downloads, and registration fails.
 
-## 4. FSLogix share permissions
+### Keep the break-glass password stable
+It is set on the VMs at creation and stored in Key Vault. Supply the same `AVD_LOCAL_ADMIN_PASSWORD` on every deployment. To rotate it, use VM → Reset password, then update the Key Vault secret.
 
-The single most common reason profiles silently fail to load. Two layers, both required:
+### Default outbound access can't be changed later
+`defaultOutboundAccess: false` is set at subnet creation. It's immutable, so if you import an existing subnet, it keeps whatever it had.
 
-- **Share-level (RBAC):** session host users need *Storage File Data SMB Share Contributor* on the storage account.
-- **NTFS:** set on the share itself — users need Modify on their own profile path.
+## Teardown
 
-Get either wrong and logins succeed but profiles don't roam, with no obvious error. The `Configure-FSLogix.ps1` script sets the *client* config; it assumes these permissions are already correct.
+### The storage account won't delete
+Azure Backup puts a delete lock on protected storage accounts. Stop protection and delete the backup data first.
 
-## 5. Region capacity for your VM size
+### Key Vault name after teardown
+The vault name is deterministic (prefix + environment + subscription + region hash) and purge protection keeps a deleted vault for 90 days. Redeploying the same name in that window fails. Either recover the vault (`az keyvault recover`) or change `namePrefix`.
 
-Quota and *capacity* are different things. You can have quota and still get an allocation failure because the specific VM size isn't available in that region/zone right now. Have a fallback size (e.g. `Standard_D4as_v5` → `Standard_D4s_v5`) and don't hard-code one size everywhere.
+### Orphaned devices
+Deleting VMs doesn't remove their Entra ID and Intune device objects. Clean them up, or rebuilt hosts with the same names will be confusing to manage.

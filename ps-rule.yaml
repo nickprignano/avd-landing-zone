@@ -1,0 +1,17 @@
+# PSRule for Azure — analyses the .bicepparam files (and the Bicep they use)
+# against the Azure Well-Architected Framework rules.
+# https://azure.github.io/PSRule.Rules.Azure/
+
+configuration:
+  AZURE_BICEP_FILE_EXPANSION: true
+  AZURE_BICEP_PARAMS_FILE_EXPANSION: true
+  AZURE_BICEP_FILE_EXPANSION_TIMEOUT: 120
+
+input:
+  pathIgnore:
+    - '**'
+    - '!parameters/*.bicepparam'
+
+include:
+  module:
+    - PSRule.Rules.Azure

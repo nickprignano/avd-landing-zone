@@ -1,0 +1,205 @@
+// AVD control plane — pooled host pool, desktop application group, workspace
+// and an autoscale plan. Diagnostics from every object go to Log Analytics
+// (that's what AVD Insights and the alerts read).
+
+param location string
+param tags object
+param hostPoolName string
+param appGroupName string
+param workspaceName string
+param scalingPlanName string
+param maxSessionLimit int
+param rdpProperties string
+param validationEnvironment bool
+param enableAvdPrivateLink bool
+param privateEndpointSubnetResourceId string
+param avdPrivateDnsZoneResourceId string
+param scalingTimeZone string
+param logAnalyticsWorkspaceResourceId string
+param usersGroupObjectId string
+param avdServicePrincipalObjectId string
+
+var roles = {
+  desktopVirtualizationUser: '1d18fff3-a72a-46b5-b4a9-0b38a3cd7e63'
+  powerOnOffContributor: '40c5ff49-9181-41f8-ae61-143b0e78555e'
+}
+var diagnostics = [
+  {
+    workspaceResourceId: logAnalyticsWorkspaceResourceId
+  }
+]
+
+// ---------- Host pool ----------
+module hostPool 'br/public:avm/res/desktop-virtualization/host-pool:0.8.1' = {
+  name: 'host-pool'
+  params: {
+    name: hostPoolName
+    location: location
+    tags: tags
+    hostPoolType: 'Pooled'
+    loadBalancerType: 'BreadthFirst'
+    preferredAppGroupType: 'Desktop'
+    maxSessionLimit: maxSessionLimit
+    customRdpProperty: rdpProperties
+    validationEnvironment: validationEnvironment
+    startVMOnConnect: true
+    // Registration token for this deployment's session hosts; short-lived on purpose.
+    tokenValidityLength: 'PT4H'
+    // Private Link: session hosts reach the service privately, users still
+    // connect from anywhere over the public AVD gateway.
+    publicNetworkAccess: enableAvdPrivateLink ? 'EnabledForClientsOnly' : 'Enabled'
+    privateEndpoints: enableAvdPrivateLink
+      ? [
+          {
+            subnetResourceId: privateEndpointSubnetResourceId
+            privateDnsZoneGroup: {
+              privateDnsZoneGroupConfigs: [
+                {
+                  privateDnsZoneResourceId: avdPrivateDnsZoneResourceId
+                }
+              ]
+            }
+          }
+        ]
+      : []
+    agentUpdate: {
+      type: 'Scheduled'
+      useSessionHostLocalTime: true
+      maintenanceWindows: [
+        {
+          dayOfWeek: 'Saturday'
+          hour: 2
+        }
+      ]
+    }
+    diagnosticSettings: diagnostics
+  }
+}
+
+// ---------- Desktop application group ----------
+module appGroup 'br/public:avm/res/desktop-virtualization/application-group:0.4.2' = {
+  name: 'app-group'
+  params: {
+    name: appGroupName
+    location: location
+    tags: tags
+    applicationGroupType: 'Desktop'
+    hostpoolName: hostPool.outputs.name
+    friendlyName: 'Desktop'
+    roleAssignments: [
+      {
+        principalId: usersGroupObjectId
+        principalType: 'Group'
+        roleDefinitionIdOrName: roles.desktopVirtualizationUser
+      }
+    ]
+    diagnosticSettings: diagnostics
+  }
+}
+
+// ---------- Workspace ----------
+module workspace 'br/public:avm/res/desktop-virtualization/workspace:0.9.2' = {
+  name: 'workspace'
+  params: {
+    name: workspaceName
+    location: location
+    tags: tags
+    applicationGroupReferences: [
+      appGroup.outputs.resourceId
+    ]
+    // The feed stays public so users can subscribe from any network.
+    publicNetworkAccess: 'Enabled'
+    diagnosticSettings: diagnostics
+  }
+}
+
+// ---------- Autoscale ----------
+// Weekdays: ramp up 07:00, peak 09:00, ramp down 18:00, off-peak 20:00.
+// Weekends: off-peak all day; Start VM on Connect brings a host up on demand.
+module scalingPlan 'br/public:avm/res/desktop-virtualization/scaling-plan:0.5.0' = {
+  name: 'scaling-plan'
+  params: {
+    name: scalingPlanName
+    location: location
+    tags: tags
+    hostPoolType: 'Pooled'
+    timeZone: scalingTimeZone
+    exclusionTag: 'avd-scaling-exclude'
+    schedules: [
+      {
+        name: 'weekdays'
+        daysOfWeek: [
+          'Monday'
+          'Tuesday'
+          'Wednesday'
+          'Thursday'
+          'Friday'
+        ]
+        rampUpStartTime: { hour: 7, minute: 0 }
+        rampUpLoadBalancingAlgorithm: 'BreadthFirst'
+        rampUpMinimumHostsPct: 20
+        rampUpCapacityThresholdPct: 60
+        peakStartTime: { hour: 9, minute: 0 }
+        peakLoadBalancingAlgorithm: 'BreadthFirst'
+        rampDownStartTime: { hour: 18, minute: 0 }
+        rampDownLoadBalancingAlgorithm: 'DepthFirst'
+        rampDownMinimumHostsPct: 10
+        rampDownCapacityThresholdPct: 90
+        rampDownForceLogoffUsers: false
+        rampDownWaitTimeMinutes: 30
+        rampDownNotificationMessage: 'This session host is being shut down to save cost. Please save your work and sign out.'
+        rampDownStopHostsWhen: 'ZeroSessions'
+        offPeakStartTime: { hour: 20, minute: 0 }
+        offPeakLoadBalancingAlgorithm: 'DepthFirst'
+      }
+      {
+        name: 'weekends'
+        daysOfWeek: [
+          'Saturday'
+          'Sunday'
+        ]
+        rampUpStartTime: { hour: 9, minute: 0 }
+        rampUpLoadBalancingAlgorithm: 'DepthFirst'
+        rampUpMinimumHostsPct: 0
+        rampUpCapacityThresholdPct: 90
+        peakStartTime: { hour: 10, minute: 0 }
+        peakLoadBalancingAlgorithm: 'DepthFirst'
+        rampDownStartTime: { hour: 16, minute: 0 }
+        rampDownLoadBalancingAlgorithm: 'DepthFirst'
+        rampDownMinimumHostsPct: 0
+        rampDownCapacityThresholdPct: 90
+        rampDownForceLogoffUsers: false
+        rampDownWaitTimeMinutes: 30
+        rampDownNotificationMessage: 'This session host is being shut down to save cost. Please save your work and sign out.'
+        rampDownStopHostsWhen: 'ZeroSessions'
+        offPeakStartTime: { hour: 18, minute: 0 }
+        offPeakLoadBalancingAlgorithm: 'DepthFirst'
+      }
+    ]
+    hostPoolReferences: [
+      {
+        hostPoolResourceId: hostPool.outputs.resourceId
+        scalingPlanEnabled: true
+      }
+    ]
+    diagnosticSettings: diagnostics
+  }
+}
+
+// The AVD service principal also needs Power On Off Contributor where the
+// host pool lives (the session-host resource group is covered in sessionHosts.bicep).
+resource powerOnOffOnControlPlane 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, avdServicePrincipalObjectId, roles.powerOnOffContributor)
+  properties: {
+    principalId: avdServicePrincipalObjectId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.powerOnOffContributor)
+  }
+}
+
+output hostPoolResourceId string = hostPool.outputs.resourceId
+output hostPoolName string = hostPool.outputs.name
+output workspaceResourceId string = workspace.outputs.resourceId
+
+@secure()
+output registrationToken string = hostPool.outputs.registrationToken!

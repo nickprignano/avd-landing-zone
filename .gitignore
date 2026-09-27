@@ -1,6 +1,6 @@
-# Local parameter files (may contain tenant-specific values)
-parameters/*.bicepparam
-!parameters/*.example.bicepparam
+# Local parameter overrides (the committed .bicepparam files read tenant values
+# from environment variables and hold none themselves)
+parameters/*.local.bicepparam
 
 # Secrets — never commit
 *.pw
@@ -10,6 +10,10 @@ parameters/*.bicepparam
 # Bicep build output
 *.json
 !.github/**/*.json
+!bicepconfig.json
+
+# PSRule reports
+reports/
 
 # OS / editor
 .DS_Store
