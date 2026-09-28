@@ -73,10 +73,13 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   if ($Path -match 'Microsoft.Compute/virtualMachines\?api-version') {
     $n = if ($g) { 2 } else { 1 }
     return & $ok @{ value=@(1..$n | ForEach-Object {
-          $vm = @{ name="avdlzdsh-00$_"; properties=@{ securityProfile=@{ securityType='TrustedLaunch'; encryptionAtHost=$true } } }
+          $vm = @{ name="avdlzdsh-00$_"; id="$S/resourceGroups/rg-avdlz-dev-hosts/providers/Microsoft.Compute/virtualMachines/avdlzdsh-00$_"; properties=@{ securityProfile=@{ securityType='TrustedLaunch'; encryptionAtHost=$true } } }
           if ($g) { $vm.zones = @("$_") }
           $vm }) }
   }
+  if ($Path -match 'virtualMachines/[^/]+/extensions\?') { return & $ok @{ value=@(
+        @{ name='AADLogin'; properties=@{ publisher='Microsoft.Azure.ActiveDirectory'; type='AADLoginForWindows'; provisioningState='Succeeded' } },
+        @{ name='AzureMonitorAgent'; properties=@{ publisher='Microsoft.Azure.Monitor'; type='AzureMonitorWindowsAgent'; provisioningState=$(if ($global:St.waf.amaFailed) { 'Failed' } else { 'Succeeded' }) } }) } }
   if ($Path -match 'Microsoft.Network/networkInterfaces\?') { return & $ok @{ value=@(@{ name='avdlzdsh-001-nic'; properties=@{ enableAcceleratedNetworking=$true } }) } }
   if ($Path -match "storageAccounts/$saName/fileServices/default\?") { return & $ok @{ properties=@{ shareDeleteRetentionPolicy=@{ enabled=$true; days=14 } } } }
   if ($Path -match "storageAccounts/$saName\?api-version") { return & $ok @{ sku=@{ name=$(if ($g) { 'Premium_ZRS' } else { 'Premium_LRS' }) }; properties=@{ minimumTlsVersion='TLS1_2'; supportsHttpsTrafficOnly=$true; allowSharedKeyAccess=$false } } }
@@ -186,6 +189,8 @@ function Invoke-PSRule { param($InputPath,$Module,$Outcome,$Path,$WarningAction,
   if ($global:St.waf.good) { return }
   [pscustomobject]@{ RuleName='Azure.VM.UseHybridUseBenefit'; TargetName='avdlzdsh-001'; Tag=@{ 'Azure.WAF/pillar'='Cost Optimization' }; Reason=@('The field ''properties.licenseType'' does not exist.') }
   [pscustomobject]@{ RuleName='Azure.Storage.ContainerSoftDelete'; TargetName=$saName; Tag=@{ 'Azure.WAF/pillar'='Reliability' }; Reason=$null }
+  # Live run: PSRule's export doesn't attach VM extensions, so this fails although the agent is installed.
+  [pscustomobject]@{ RuleName='Azure.VM.AMA'; TargetName='avdlzdsh-001'; Tag=@{ 'Azure.WAF/pillar'='Operational Excellence' }; Reason=@('The virtual machine does not have Azure Monitor Agent installed.') }
 }
 
 # ---- Graph ----

@@ -1233,6 +1233,21 @@ function Test-AvdWellArchitected {
     }
   }
 
+  # Azure Monitor Agent, read from the VM's extensions. PSRule's export doesn't attach them to
+  # the VM, so its Azure.VM.AMA rule can't see the agent (live run: installed and Succeeded).
+  $script:AvdAmaHosts = @()
+  if ($vms.Count) {
+    & $read 'Operational Excellence' 'VM extensions' {
+      $missing = @()
+      foreach ($vm in $vms) {
+        $ext = @(Get-AvdArmList -Path "$($vm.id)/extensions?api-version=2024-07-01")
+        $ama = $ext | Where-Object { $_.properties.publisher -eq 'Microsoft.Azure.Monitor' -and $_.properties.type -eq 'AzureMonitorWindowsAgent' -and $_.properties.provisioningState -eq 'Succeeded' }
+        if ($ama) { $script:AvdAmaHosts += $vm.name } else { $missing += $vm.name }
+      }
+      & $waf 'Operational Excellence' 'monitor-agent' 'Azure Monitor Agent on session hosts' (-not $missing.Count) $(if ($missing.Count) { "Missing or not Succeeded: $($missing -join ', ')" } else { "$($vms.Count) host(s)" }) 'Redeploy the session hosts (bicep/modules/sessionHosts.bicep installs the agent and links the AVD Insights data collection rule).'
+    }
+  }
+
   # ---------------------------------------------------------------- Defender for Cloud and Advisor
   & $read 'Security' 'Defender for Cloud recommendations' {
     Write-Host '          Reading Defender for Cloud recommendations ...' -ForegroundColor DarkGray
@@ -1260,7 +1275,8 @@ function Test-AvdWellArchitected {
   else {
     Write-Host '          Running PSRule for Azure on the deployed resources (a minute or two) ...' -ForegroundColor DarkGray
     try {
-      $failed = @(Get-AvdPSRuleFinding -ResourceGroupName @($rgKeys | ForEach-Object { $Lz.ResourceGroups[$_] }))
+      $failed = @(Get-AvdPSRuleFinding -ResourceGroupName @($rgKeys | ForEach-Object { $Lz.ResourceGroups[$_] }) |
+          Where-Object { -not ($_.RuleName -eq 'Azure.VM.AMA' -and $script:AvdAmaHosts -contains $_.TargetName) })
       foreach ($pillar in $script:WafPillars) {
         $mine = @($failed | Where-Object { (Get-AvdPSRulePillar $_) -eq $pillar })
         $slug = ($pillar -replace ' ', '-').ToLower()

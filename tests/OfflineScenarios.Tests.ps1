@@ -111,7 +111,7 @@ Describe 'Well-Architected review of the deployed landing zone' {
   BeforeAll { $script:out = Invoke-OfflineScenario 'WellArchitected' }
 
   It 'reports findings as warnings, so a dev landing zone is still ready' {
-    foreach ($step in 'dev', 'skip-psrule', 'production-grade', 'without-switch') { Get-StepExit $out $step | Should -Be 0 }
+    foreach ($step in 'dev', 'skip-psrule', 'production-grade', 'ama-failed', 'without-switch') { Get-StepExit $out $step | Should -Be 0 }
   }
   It 'marks the dev parameter file''s trade-offs as expected' {
     $s = (Get-PortalState $out)[0]
@@ -146,9 +146,15 @@ Describe 'Well-Architected review of the deployed landing zone' {
     @($s[2].warnings).Count | Should -Be 0
     $out | Should -Match 'Reliability\s+7 of 7 pass'
   }
+  It 'checks the Azure Monitor Agent directly, and drops PSRule''s AMA finding only where the agent is confirmed' {
+    $s = Get-PortalState $out
+    ($s[0].warnings | Where-Object { $_.detail -match 'Azure.VM.AMA' }) | Should -BeNullOrEmpty
+    ($s[3].warnings | Where-Object id -eq 'waf-monitor-agent').detail | Should -Match 'avdlzdsh-001'
+    ($s[3].warnings | Where-Object id -eq 'waf-psrule-operational-excellence').detail | Should -Match 'Azure.VM.AMA on avdlzdsh-001'
+  }
   It 'adds nothing without -WellArchitected' {
     $s = Get-PortalState $out
-    $s[3].context.wellArchitected | Should -BeFalse
+    $s[4].context.wellArchitected | Should -BeFalse
     $out.Substring($out.IndexOf('######## without-switch')) | Should -Not -Match 'Well-Architected'
   }
 }
