@@ -9,6 +9,7 @@ on:
       - 'parameters/**'
       - 'scripts/**'
       - 'tests/**'
+      - '.claude/hooks/**'
       - 'PSScriptAnalyzerSettings.psd1'
       - 'bicepconfig.json'
       - 'ps-rule.yaml'
@@ -22,6 +23,7 @@ on:
       - 'parameters/**'
       - 'scripts/**'
       - 'tests/**'
+      - '.claude/hooks/**'
       - 'PSScriptAnalyzerSettings.psd1'
       - 'bicepconfig.json'
       - 'ps-rule.yaml'
@@ -77,14 +79,25 @@ jobs:
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
           Invoke-ScriptAnalyzer -Path scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit
 
-      - name: Pester (ops module unit tests)
+      # The offline scenarios and template guards compile the parameter files.
+      - name: Install Bicep
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/bicep" https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x "$RUNNER_TEMP/bin/bicep"
+          "$RUNNER_TEMP/bin/bicep" --version
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Unit tests, offline end-to-end scenarios (tests/offline) and template guards.
+      # Each one encodes a lesson from a real run: see docs/lessons.
+      - name: Pester
         shell: pwsh
         run: |
           Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
           Invoke-Pester -Path ./tests -CI -Output Detailed
 
-      - name: shellcheck (deploy script)
-        run: shellcheck scripts/deploy/deploy.sh
+      - name: shellcheck (deploy script, session hook)
+        run: shellcheck scripts/deploy/deploy.sh .claude/hooks/session-start.sh
 
   psrule:
     name: PSRule for Azure (Well-Architected)

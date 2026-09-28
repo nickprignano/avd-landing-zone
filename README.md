@@ -83,7 +83,7 @@ avd-landing-zone/
 │   └── sessionhost/               # embedded into Run Commands at compile time
 │       ├── Set-FSLogixConfiguration.ps1
 │       └── Register-AvdAgent.ps1
-├── tests/                         # Pester unit tests for scripts/ops
+├── tests/                         # Pester: unit tests, offline scenarios (tests/offline), template guards
 ├── ps-rule.yaml                   # PSRule for Azure configuration
 ├── docs/
 └── .github/workflows/
@@ -100,6 +100,8 @@ avd-landing-zone/
 - [Region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/) ([source](docs/region-latency/index.html)): pick the closest region and get the commands
 - [`docs/ci.md`](docs/ci.md): validation and deployment pipelines, OIDC setup
 - [`docs/gotchas.md`](docs/gotchas.md): the things that bite
+- [`docs/lessons`](docs/lessons/README.md): what real deployments taught, each with the guard that now catches it
+- [`docs/decisions`](docs/decisions/README.md): the choices that shape the repo, and why
 - [`docs/out-of-scope.md`](docs/out-of-scope.md): what this repo does not do
 - [`docs/setup-azure-account.md`](docs/setup-azure-account.md): starting from zero on a personal card (lab use)
 

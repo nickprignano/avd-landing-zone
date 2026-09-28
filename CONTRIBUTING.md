@@ -15,7 +15,18 @@ pwsh -c "Invoke-Pester ./tests"
 shellcheck scripts/deploy/deploy.sh
 ```
 
+`./tests` holds three kinds of test: unit tests for the ops module, **offline end-to-end scenarios** (`tests/offline`: the real scripts against a mock of Azure and Graph), and **template guards** (compile the Bicep and assert on it). The last two need the Bicep CLI on `PATH`.
+
 If your change touches resources, include `deploy.sh --what-if` output from a test subscription in the PR.
+
+## When a real run surprises you
+
+Real deployments and Cloud Shell runs are the source of truth. When one fails for a reason the tests didn't catch:
+1. **Fix it.**
+2. **Add a guard** (a test, an offline scenario or a preflight check) that fails if it comes back.
+3. **Record a lesson** in [`docs/lessons`](docs/lessons/README.md).
+
+The routine is written up in [`.claude/skills/retro/SKILL.md`](.claude/skills/retro/SKILL.md), and the PR template asks for it. Choices that shape the repo are recorded in [`docs/decisions`](docs/decisions/README.md). [`CLAUDE.md`](CLAUDE.md) collects the standing rules.
 
 ## Conventions
 

@@ -1,0 +1,170 @@
+# Offline stand-in for the Az, ARM (Invoke-AzRestMethod) and Microsoft Graph calls the
+# ops scripts make. State lives in $global:St; every state-changing call is logged in
+# $global:Calls. Used by tests/offline/*.Scenario.ps1 (run by tests/OfflineScenarios.Tests.ps1).
+# When a real run exposes a behaviour this mock gets wrong, fix the mock AND add the case.
+
+# ---- State ----
+$global:Calls = [System.Collections.Generic.List[string]]::new()
+function Log($s){ $global:Calls.Add($s) }
+$sub='00000000-aaaa-bbbb-cccc-000000000001'; $S="/subscriptions/$sub"
+$base='avdlz-dev'
+$global:St = @{
+  grants = @(); tags=@(); caExclude=@(); aclApplied=$false; forbiddenOnce=$true; roleAssignments=@()
+  rgs = @('rg-avdlz-dev-network','rg-avdlz-dev-management','rg-avdlz-dev-storage','rg-avdlz-dev-avd','rg-avdlz-dev-hosts')
+}
+$users='11111111-1111-1111-1111-111111111111'; $admins='22222222-2222-2222-2222-222222222222'; $avdsp='33333333-3333-3333-3333-333333333333'
+$saName='stavdlzdevabc123'; $saId="$S/resourceGroups/rg-avdlz-dev-storage/providers/Microsoft.Storage/storageAccounts/$saName"
+$hpId="$S/resourceGroups/rg-avdlz-dev-avd/providers/Microsoft.DesktopVirtualization/hostPools/vdpool-avdlz-dev"
+$agId="$S/resourceGroups/rg-avdlz-dev-avd/providers/Microsoft.DesktopVirtualization/applicationGroups/vdag-avdlz-dev-desktop"
+$vnetId="$S/resourceGroups/rg-avdlz-dev-network/providers/Microsoft.Network/virtualNetworks/vnet-avdlz-dev"
+
+function Get-AzContext { [pscustomobject]@{ Subscription=[pscustomobject]@{Id=$sub;Name='AVD LZ Dev'}; Tenant=[pscustomobject]@{Id='tenant-1'}; Environment=[pscustomobject]@{StorageEndpointSuffix='core.windows.net'} } }
+function Set-AzContext { param($SubscriptionId,$ErrorAction) Get-AzContext }
+function Get-AzResourceGroup { param($Name,$ErrorAction) $list = $global:St.rgs | % { [pscustomobject]@{ResourceGroupName=$_;Location='eastus2'} }; if ($Name) { $list | ? ResourceGroupName -eq $Name } else { $list } }
+function Get-AzResource {
+  param($ResourceGroupName,$ResourceType,$Name,$ResourceId,[switch]$ExpandProperties,$ErrorAction)
+  if ($ResourceId) { return [pscustomobject]@{ Properties=[pscustomobject]@{publicNetworkAccess='EnabledForClientsOnly'} } }
+  $r = switch ($ResourceType) {
+    'Microsoft.Network/virtualNetworks' { [pscustomobject]@{Name='vnet-avdlz-dev';ResourceId=$vnetId;Location='eastus2'} }
+    'Microsoft.KeyVault/vaults' { [pscustomobject]@{Name='kvavdlzdevabc';ResourceId="$S/rg/kv";ResourceGroupName=$ResourceGroupName} }
+    'Microsoft.OperationalInsights/workspaces' { [pscustomobject]@{Name='log-avdlz-dev';ResourceId="$S/rg/law"} }
+    'Microsoft.Insights/dataCollectionRules' { [pscustomobject]@{Name='microsoft-avdi-avdlz-dev';ResourceId="$S/rg/dcr"} }
+    'Microsoft.DesktopVirtualization/hostPools' { [pscustomobject]@{Name='vdpool-avdlz-dev';ResourceId=$hpId} }
+    'Microsoft.DesktopVirtualization/applicationGroups' { [pscustomobject]@{Name='vdag';ResourceId=$agId} }
+    'Microsoft.RecoveryServices/vaults' { [pscustomobject]@{Name='rsv-avdlz-dev';ResourceGroupName='rg-avdlz-dev-storage'} }
+  }
+  if ($global:St.rgs -contains $ResourceGroupName) { $r }
+}
+function Get-AzStorageAccount { param($ResourceGroupName,$ErrorAction)
+  [pscustomobject]@{StorageAccountName=$saName;Id=$saId;Kind='FileStorage';PublicNetworkAccess='Disabled';AzureFilesIdentityBasedAuth=[pscustomobject]@{DirectoryServiceOptions='AADKERB'}} }
+function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
+  Log "ARM $Method $Path"
+  $ok = { param($o) [pscustomobject]@{StatusCode=200;Content=($o|ConvertTo-Json -Depth 20)} }
+  if ($Method -eq 'POST' -and $Path -match '/providers/([^/?]+)/register') { $global:St.registered += $Matches[1]; return & $ok @{} }
+  # Resource provider list (Get-AvdProviderState) and the AVD provider's regions (Test-AvdHostPoolRegion).
+  if ($Path -match '/providers\?api-version') {
+    $ns = 'Microsoft.DesktopVirtualization','Microsoft.Compute','Microsoft.Storage','Microsoft.Network','Microsoft.Insights','Microsoft.OperationalInsights','Microsoft.KeyVault','Microsoft.RecoveryServices','Microsoft.Security','Microsoft.PolicyInsights','Microsoft.GuestConfiguration','Microsoft.Consumption'
+    return & $ok @{ value = @($ns | ForEach-Object { @{ namespace = $_; registrationState = $(if ($global:St.unregistered -contains $_ -and $global:St.registered -notcontains $_) { 'NotRegistered' } else { 'Registered' }) } }) }
+  }
+  if ($Path -match '/providers/Microsoft.DesktopVirtualization\?api-version') {
+    return & $ok @{ resourceTypes = @(@{ resourceType = 'workspaces'; locations = @('North Central US') }, @{ resourceType = 'hostpools'; locations = @('North Central US', 'East US 2', 'West US 2') }) }
+  }
+  if ($Path -match 'Microsoft.Storage/skus') { return & $ok @{ value=@(@{name='Premium_ZRS';kind='FileStorage';locations=@('eastus2');restrictions=@()},@{name='Premium_LRS';kind='FileStorage';locations=@('eastus2','northcentralus');restrictions=@()}) } }
+  if ($Path -match 'privateEndpoints\?') { return & $ok @{ value=@(
+      @{ id="$S/pe-st"; properties=@{ privateLinkServiceConnections=@(@{properties=@{privateLinkServiceId=$saId}}); manualPrivateLinkServiceConnections=@() } },
+      @{ id="$S/pe-hp"; properties=@{ privateLinkServiceConnections=@(@{properties=@{privateLinkServiceId=$hpId}}); manualPrivateLinkServiceConnections=@() } }) } }
+  if ($Path -match 'pe-st/privateDnsZoneGroups') { return & $ok @{ value=@(@{properties=@{privateDnsZoneConfigs=@(@{properties=@{privateDnsZoneId="$S/zones/privatelink.file.core.windows.net"}})}}) } }
+  if ($Path -match 'pe-hp/privateDnsZoneGroups') { return & $ok @{ value=@(@{properties=@{privateDnsZoneConfigs=@(@{properties=@{privateDnsZoneId="$S/zones/privatelink.wvd.microsoft.com"}})}}) } }
+  if ($Path -match '/sessionHosts\?') { return & $ok @{ value=@(@{ name='vdpool-avdlz-dev-demo/avdlzddemo-001'; properties=@{status='Available';allowNewSession=$true;agentVersion='1.0.9999';sessionHostHealthCheckResults=@(@{healthCheckName='DomainJoinedCheck';healthCheckResult='HealthCheckSucceeded'})} }) } }
+  if ($Path -match '/runCommands/') { return & $ok @{ properties=@{ instanceView=@{executionState='Succeeded';exitCode=0} } } }
+  if ($Path -match 'policyAssignments\?') { return & $ok @{ value=@(@{name='avdlz-allowed-locations';id="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-allowed-locations"},@{name='avdlz-inherit-rg-tag-workload';id="$S/pa2";identity=@{principalId='44444444-0000-0000-0000-000000000000'}},@{name='someone-else';id='x'}) } }
+  if ($Path -match 'budgets/' -and $Method -eq 'GET') { return [pscustomobject]@{StatusCode=404;Content=''} }
+  if ($Path -match 'diagnosticSettings/' -and $Method -eq 'GET') { return & $ok @{ name='avdlz-activity-log' } }
+  return & $ok @{}
+}
+function Get-AzRoleAssignment { param($Scope,$RoleDefinitionName,$ObjectId,$ObjectType,[switch]$ExpandPrincipalGroups,$ErrorAction)
+  if ($Scope -and $ExpandPrincipalGroups) { throw 'Parameter set cannot be resolved using the specified named parameters. One or more parameters issued cannot be used together or an insufficient number of parameters were provided.' }
+  $all = @(
+    [pscustomobject]@{Scope=$agId;RoleDefinitionName='Desktop Virtualization User';ObjectId=$users;ObjectType='Group'}
+    [pscustomobject]@{Scope="$S/resourceGroups/rg-avdlz-dev-avd";RoleDefinitionName='Desktop Virtualization Power On Off Contributor';ObjectId=$avdsp;ObjectType='ServicePrincipal'}
+    [pscustomobject]@{Scope="$S/resourceGroups/rg-avdlz-dev-hosts";RoleDefinitionName='Virtual Machine Administrator Login';ObjectId=$admins;ObjectType='Group'}
+    [pscustomobject]@{Scope=$saId;RoleDefinitionName='Storage File Data SMB Share Contributor';ObjectId=$users;ObjectType='Group'}
+    [pscustomobject]@{Scope=$S;RoleDefinitionName='Owner';ObjectId='me';ObjectType='User'}
+    [pscustomobject]@{Scope="$S/resourceGroups/rg-avdlz-dev-demo/providers/Microsoft.DesktopVirtualization/applicationGroups/vdag-avdlz-dev-demo-desktop";RoleDefinitionName='Desktop Virtualization User';ObjectId=$users;ObjectType='Group'}
+    [pscustomobject]@{Scope="$S/resourceGroups/rg-avdlz-dev-demo";RoleDefinitionName='Virtual Machine User Login';ObjectId=$users;ObjectType='Group'}
+  ) + $global:St.roleAssignments
+  $all | ? { (-not $RoleDefinitionName -or $_.RoleDefinitionName -eq $RoleDefinitionName) -and (-not $ObjectId -or $_.ObjectId -eq $ObjectId) -and (-not $Scope -or $Scope.StartsWith($_.Scope) -or $_.Scope -eq $Scope) }
+}
+function New-AzRoleAssignment { param($ObjectId,$ObjectType,$RoleDefinitionName,$Scope,$ErrorAction) Log "RBAC + $RoleDefinitionName $ObjectId"; $global:St.roleAssignments += [pscustomobject]@{Scope=$Scope;RoleDefinitionName=$RoleDefinitionName;ObjectId=$ObjectId;ObjectType=$ObjectType} }
+function Remove-AzRoleAssignment { param($ObjectId,$RoleDefinitionName,$Scope,$InputObject,$ErrorAction) Log "RBAC - $RoleDefinitionName $ObjectId $($InputObject.ObjectId)"; $global:St.roleAssignments = @($global:St.roleAssignments | ? { $_.ObjectId -ne $ObjectId }) }
+function Get-AzADUser { param([switch]$SignedIn,$ErrorAction) [pscustomobject]@{Id='me';UserPrincipalName='admin@contoso.com'} }
+$global:St.registered = @()
+$global:St.unregistered = @('Microsoft.GuestConfiguration')
+$global:St.skuZones = @('1','2','3')
+$global:St.deletedVaults = @()
+$global:St.groups = @(@{id='11111111-1111-1111-1111-111111111111';displayName='AVD Users';securityEnabled=$true},@{id='22222222-2222-2222-2222-222222222222';displayName='AVD Admins';securityEnabled=$true})
+$global:St.avdSp = $true
+function Get-AzResourceProvider { param($ProviderNamespace,$ErrorAction) [pscustomobject]@{RegistrationState=$(if ($global:St.unregistered -contains $ProviderNamespace -and $global:St.registered -notcontains $ProviderNamespace) {'NotRegistered'} else {'Registered'})} }
+function Register-AzResourceProvider { param($ProviderNamespace) Log "register $ProviderNamespace"; $global:St.registered += $ProviderNamespace }
+function Get-AzProviderFeature { param($ProviderNamespace,$FeatureName,$ErrorAction) [pscustomobject]@{RegistrationState='Registered'} }
+function Register-AzProviderFeature { param($ProviderNamespace,$FeatureName) }
+function Get-AzComputeResourceSku { param($Location,$ErrorAction) [pscustomobject]@{ResourceType='virtualMachines';Name='Standard_D4as_v5';Family='standardDASv5Family';Restrictions=@();LocationInfo=@([pscustomobject]@{Location=$Location;Zones=$global:St.skuZones});Capabilities=@([pscustomobject]@{Name='vCPUs';Value='4'})} }
+function Get-AzKeyVault { param([switch]$InRemovedState,$ErrorAction) $global:St.deletedVaults }
+function Get-AzVMUsage { param($Location) @([pscustomobject]@{Name=[pscustomobject]@{Value='standardDASv5Family'};Limit=10;CurrentValue=4},[pscustomobject]@{Name=[pscustomobject]@{Value='cores'};Limit=20;CurrentValue=4}) }
+function Get-AzVM { param($ResourceGroupName,$Name,[switch]$Status,$ErrorAction)
+  $n = if ($ResourceGroupName -like '*demo') {'avdlzddemo-001'} else {'avdlzdsh-001'}
+  $vm=[pscustomobject]@{Name=$n;Id="$S/resourceGroups/$ResourceGroupName/providers/Microsoft.Compute/virtualMachines/$n";Identity=[pscustomobject]@{PrincipalId="mi-$n"};PowerState='VM running';OSProfile=[pscustomobject]@{ComputerName=$n}}
+  if ($global:St.rgs -contains $ResourceGroupName) { if (-not $Name -or $Name -eq $n) { $vm } }
+}
+function Start-AzVM { param($ResourceGroupName,$Name) Log "start $Name" }
+function Stop-AzVM { param($ResourceGroupName,$Name,[switch]$Force) Log "stop $Name" }
+function Invoke-AzVMRunCommand { param($ResourceGroupName,$VMName,$CommandId,$ScriptString,$Parameter,$ErrorAction)
+  Log "runcmd $VMName $(if ($ScriptString -match 'filepermission') {'acl'} else {'diag'}) apply=$($Parameter.Apply)"
+  if ($ScriptString -match 'filepermission') {
+    if ($global:St.forbiddenOnce) { $global:St.forbiddenOnce=$false; $o=@{status='Forbidden';httpStatus=403} }
+    elseif ($Parameter.Apply -eq 'true') { $global:St.aclApplied=$true; $sddl=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Parameter.DesiredSddlBase64)); $o=@{status='ok';before='x';after=$sddl} }
+    elseif ($global:St.aclApplied) { $o=@{status='ok';before=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Parameter.DesiredSddlBase64))} }
+    elseif ($global:St.defaultRoot) { $o=@{status='ok';before=$null;defaultAcl=$true} }
+    else { $o=@{status='ok';before='O:SYG:SYD:(A;OICIIO;GA;;;CO)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1301bf;;;AU)(A;OICI;0x1200a9;;;BU)'} }
+  } else { $o=@{entraJoined=$true;intuneEnrolled=$true;agentRegistered=$true;bootLoaderRunning=$true;fslogixServiceRunning=$true;fslogixEnabled=$true;fslogixPointsAtShare=$true;cloudKerberosEnabled=$true;loadCredKeyFromProfile=$true;storageIp='10.100.2.4';storageIpPrivate=$true;smbReachable=$true} }
+  [pscustomobject]@{ Value=@([pscustomobject]@{Code='ComponentStatus/StdOut/succeeded';Message=('<<<AVDJSON'+($o|ConvertTo-Json -Compress)+'AVDJSON>>>')},[pscustomobject]@{Code='ComponentStatus/StdErr/succeeded';Message=''}) }
+}
+function New-AzSubscriptionDeployment { param($Name,$Location,$TemplateFile,$TemplateParameterObject,$ErrorAction)
+  Log "deploy $Name pwType=$($TemplateParameterObject.localAdminPassword.GetType().Name) dns=$($TemplateParameterObject.avdPrivateDnsZoneResourceId -split '/' | select -last 1)"
+  foreach ($k in 'sessionHostSubnetResourceId','usersGroupObjectId','avdServicePrincipalObjectId','profileShareUncPath') { if (-not $TemplateParameterObject[$k]) { throw "missing $k" } }
+  $global:St.rgs += 'rg-avdlz-dev-demo'
+  $v = { param($x) [pscustomobject]@{Value=$x} }
+  [pscustomobject]@{ProvisioningState='Succeeded';Outputs=@{resourceGroupName=(& $v 'rg-avdlz-dev-demo');hostPoolResourceId=(& $v "$S/resourceGroups/rg-avdlz-dev-demo/providers/Microsoft.DesktopVirtualization/hostPools/vdpool-avdlz-dev-demo");hostPoolName=(& $v 'vdpool-avdlz-dev-demo');appGroupResourceId=(& $v "$S/resourceGroups/rg-avdlz-dev-demo/providers/Microsoft.DesktopVirtualization/applicationGroups/vdag-avdlz-dev-demo-desktop");workspaceResourceId=(& $v 'ws');sessionHostNames=(& $v @('avdlzddemo-001'))}}
+}
+function Get-AzDeployment { param($Name,$ErrorAction) if ($Name) { [pscustomobject]@{DeploymentName=$Name} } else { @([pscustomobject]@{DeploymentName='avdlz-governance-x'}) } }
+function Remove-AzDeployment { param($Name) Log "del deployment $Name" }
+function Remove-AzResourceGroup { param($Name,[switch]$Force) Log "del rg $Name"; $global:St.rgs = @($global:St.rgs | ? { $_ -ne $Name }) }
+function Get-AzRecoveryServicesVault { param($ResourceGroupName,$Name) [pscustomobject]@{Name=$Name;ResourceGroupName=$ResourceGroupName;ID="$S/rsv"} }
+function Update-AzRecoveryServicesVault { param($ResourceGroupName,$Name,$ImmutabilityState) Log "rsv immutability $ImmutabilityState" }
+function Set-AzRecoveryServicesVaultProperty { param($VaultId,$SoftDeleteFeatureState) Log "rsv softdelete $SoftDeleteFeatureState" }
+function Get-AzRecoveryServicesBackupItem { param($BackupManagementType,$WorkloadType,$VaultId) @([pscustomobject]@{Name='AzureFileShare;profiles'}) }
+function Disable-AzRecoveryServicesBackupProtection { param($Item,[switch]$RemoveRecoveryPoints,$VaultId,[switch]$Force) Log "backup disable $($Item.Name) remove=$RemoveRecoveryPoints" }
+function Get-AzRecoveryServicesBackupContainer { param($ContainerType,$VaultId) @([pscustomobject]@{Name='storagecontainer'}) }
+function Unregister-AzRecoveryServicesBackupContainer { param($Container,$VaultId,[switch]$Force) Log 'backup unregister' }
+function Get-AzResourceLock { param($Scope,$ErrorAction) @([pscustomobject]@{Name='AzureBackupProtectionLock';LockId='lock1'}) }
+function Remove-AzResourceLock { param($LockId,[switch]$Force) Log "unlock $LockId" }
+function Start-Sleep { param($Seconds) }
+
+# ---- Graph ----
+function Get-MgContext { $global:MgCtx }
+function Connect-MgGraph { param($Scopes,$TenantId,[switch]$NoWelcome,[switch]$UseDeviceCode,$ErrorAction) $global:MgCtx=[pscustomobject]@{TenantId=$TenantId;Scopes=$Scopes}; Log "graph connect $($Scopes -join ' ')"; if ($UseDeviceCode) { Write-Output 'To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code ABCD-1234 to authenticate.' } }
+function Invoke-MgGraphRequest { param($Method,$Uri,$Body,$ContentType,$OutputType,$ErrorAction)
+  $u=[uri]::UnescapeDataString($Uri); Log "GRAPH $Method $u"
+  $b = if ($Body) { $Body | ConvertFrom-Json } else { $null }
+  $appId='55555555-5555-5555-5555-555555555555'
+  if ($Method -eq 'POST' -and $u -match 'oauth2PermissionGrants$') { $global:St.grants += $b; return $b }
+  if ($Method -eq 'PATCH' -and $u -match 'applications/') { $global:St.tags=$b.tags; return $null }
+  if ($Method -eq 'PATCH' -and $u -match 'conditionalAccess/policies/') { $global:St.caExclude=$b.conditions.applications.excludeApplications; return $null }
+  if ($Method -eq 'POST' -and $u -match 'v1.0/groups$') { $g=@{id=[guid]::NewGuid().ToString();displayName=$b.displayName;securityEnabled=$true}; $global:St.groups += $g; return [pscustomobject]$g }
+  if ($Method -eq 'POST' -and $u -match 'v1.0/servicePrincipals$') { $global:St.avdSp=$true; return [pscustomobject]@{id='33333333-3333-3333-3333-333333333333';appId=$b.appId} }
+  if ($Method -eq 'POST' -and $u -match 'checkMemberGroups') { return [pscustomobject]@{value=@($users)} }
+  if ($Method -eq 'DELETE') { return $null }
+  $r = switch -Regex ($u) {
+    'groups/[0-9a-f-]+/members' { @{value=@(@{id='u1'})} }
+    "groups\?.*displayName eq '([^']+)'" { $n=$Matches[1]; @{value=@($global:St.groups | ? { $_.displayName -eq $n })} }
+    "servicePrincipals\?.*appId eq '9cdead84" { @{value=@(if ($global:St.avdSp) { @{id='33333333-3333-3333-3333-333333333333';appId='9cdead84-a844-4324-93f2-b2e6bb768d07'} })} }
+    'me/memberOf' { @{value=@(@{displayName='Global Administrator'})} }
+    'groups/(\w{8}-[\w-]+)\?' { @{id=$Matches[1];displayName="grp-$($Matches[1].Substring(0,4))";onPremisesSecurityIdentifier=$null} }
+    'subscribedSkus' { @{value=@(@{servicePlans=@(@{servicePlanName='INTUNE_A';provisioningStatus='Success'})})} }
+    '^v1.0/applications\?' { @{value=@(@{id='app-obj';appId=$appId;displayName='[Storage Account] x';tags=$global:St.tags;requiredResourceAccess=@(@{resourceAppId='00000003-0000-0000-c000-000000000000';resourceAccess=@(@{id='s1';type='Scope'},@{id='s2';type='Scope'},@{id='s3';type='Scope'})})})} }
+    "servicePrincipals\?.*appId eq '00000003" { @{value=@(@{id='graph-sp';oauth2PermissionScopes=@(@{id='s1';value='openid'},@{id='s2';value='profile'},@{id='s3';value='User.Read'})})} }
+    "servicePrincipals\?(?!.*(9cdead84|00000003))" { @{value=@(@{id='storage-sp';appId=$appId})} }
+    'oauth2PermissionGrants\?' { @{value=@($global:St.grants)} }
+    'conditionalAccess/policies' { @{value=@(
+        @{id='p1';displayName='Require MFA for all users';state='enabled';conditions=@{applications=@{includeApplications=@('All');excludeApplications=@($global:St.caExclude)};users=@{includeUsers=@('All');includeGroups=@()}};grantControls=@{builtInControls=@('mfa')}},
+        @{id='p2';displayName='Block legacy auth';state='enabled';conditions=@{applications=@{includeApplications=@('All');excludeApplications=@()};users=@{includeUsers=@('All')}};grantControls=@{builtInControls=@('block')}},
+        @{id='p3';displayName='Admins MFA';state='enabled';conditions=@{applications=@{includeApplications=@('All');excludeApplications=@()};users=@{includeUsers=@();includeRoles=@('62e90394')}};grantControls=@{builtInControls=@('mfa')}}
+      )} }
+    'users/' { @{id='u1';accountEnabled=$true;assignedLicenses=@(@{skuId='x'});userPrincipalName='alex@contoso.com'} }
+    'managedDevices\?' { @{value=@(@{id='md1';deviceName='x'})} }
+    'devices\?' { @{value=@(@{id='d1';displayName='x'})} }
+    default { throw "unmocked graph $u" }
+  }
+  return ($r | ConvertTo-Json -Depth 20 | ConvertFrom-Json)
+}
+Export-ModuleMember -Function *
