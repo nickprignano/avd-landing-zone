@@ -125,7 +125,10 @@
       <label class="field"><span>AVD admins group</span><input type="text" id="adminsGroup" value="AVD Admins"></label>
     </div>
     <div class="row" style="margin-top:10px">
-      <label><input type="checkbox" id="fix"> Fix mode: register providers, create missing groups and the AVD service principal</label>
+      <label><input type="checkbox" id="fix"> Fix mode: create missing groups and the AVD service principal, register providers and wait for them</label>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label><input type="checkbox" id="addMe"> Add me to both groups (the desktop, plus admin sign-in to the hosts)</label>
     </div>
 
     <div class="cmd-head"><h3>Preflight: repeat until it comes back clean</h3><button class="secondary" data-copy="preflight">Copy</button></div>
@@ -198,6 +201,7 @@
     $(id).addEventListener('input', function () { store(id, $(id).value); render(); });
   });
   $('fix').addEventListener('change', render);
+  $('addMe').addEventListener('change', render);
 
   function timeOnce(region) {
     var ctrl = new AbortController();
@@ -268,8 +272,8 @@
     var r = results.filter(function (x) { return x.name === selected; })[0];
     var file = 'parameters/' + $('paramFile').value + '.bicepparam';
     var users = $('usersGroup').value.trim() || 'AVD Users', admins = $('adminsGroup').value.trim() || 'AVD Admins';
-    var fix = $('fix').checked;
-    var scopes = (fix ? GRAPH_FIX : GRAPH_READ).map(psQuote).join(',');
+    var fix = $('fix').checked, addMe = $('addMe').checked;
+    var scopes = (fix || addMe ? GRAPH_FIX : GRAPH_READ).map(psQuote).join(',');
     var pre = [
       '# Region: ' + r.name + (r.median !== null ? ', median ' + Math.round(r.median) + ' ms from the browser that measured it' : ''),
       '# Set-AzContext -Subscription \'<landing zone subscription>\'   # if it is not your current one',
@@ -277,7 +281,7 @@
       'Set-Location ~/' + repoName + '; git pull --ff-only',
       'Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -Scopes ' + scopes,
       './scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile ' + file + ' -Location ' + r.name +
-        ' -UsersGroup ' + psQuote(users) + ' -AdminsGroup ' + psQuote(admins) + (fix ? ' -Fix' : '')
+        ' -UsersGroup ' + psQuote(users) + ' -AdminsGroup ' + psQuote(admins) + (fix ? ' -Fix' : '') + (addMe ? ' -AddMeToGroups' : '')
     ].join('\n');
     var dep = [
       'Set-Location ~/' + repoName,
