@@ -306,6 +306,7 @@ module network 'modules/network.bicep' = {
     hubFirewallPrivateIp: hubFirewallPrivateIp
     dnsServers: dnsServers
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
+    availabilityZones: availabilityZones
   }
 }
 
