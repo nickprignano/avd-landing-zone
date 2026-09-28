@@ -4,7 +4,8 @@ Three PowerShell scripts in [`scripts/ops/`](../scripts/ops) that run against a 
 
 | Script | What it does |
 |---|---|
-| `Test-AvdLandingZoneReadiness.ps1` | Preflight. Confirms the landing zone is ready for session hosts and users, **including the three post-deployment tenant steps**. Check mode by default; `-Fix` remediates. |
+| `Test-AvdLandingZoneReadiness.ps1 -PreDeployment` | Preflight **before** deploying: is this subscription and tenant ready for the landing zone your parameter file describes? Check mode by default; `-Fix` remediates. |
+| `Test-AvdLandingZoneReadiness.ps1` | Preflight **after** deploying: is the landing zone ready for session hosts and users, **including the three post-deployment tenant steps**? Check mode by default; `-Fix` remediates. |
 | `Deploy-AvdDemo.ps1` | Deploys a demo host pool and session host into the landing zone, then validates that a user can sign in. |
 | `Remove-AvdDemo.ps1` | Removes the demo. `-IncludeLandingZone` tears down the whole landing zone. |
 
@@ -18,6 +19,14 @@ git clone https://github.com/nickprignano/avd-landing-zone.git
 cd avd-landing-zone
 Set-AzContext -Subscription '<landing zone subscription>'
 
+# 1. Before deploying: repeat until it comes back clean (-Fix remediates what it can)
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Fix
+
+# 2. Deploy, as a separate run (the clean preflight prints this command)
+bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 --users-group 'AVD Users' --admins-group 'AVD Admins'
+
+# 3. After deploying
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev          # check
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix     # fix
 ./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix avdlz -Environment dev -TestUserUpn alex@contoso.com
@@ -28,12 +37,27 @@ Microsoft Graph sign-in uses a device code in Cloud Shell. Required roles:
 
 | For | Azure | Entra ID |
 |---|---|---|
+| Pre-deployment preflight | Reader (check); Owner or Contributor to register providers with `-Fix` | Directory Readers (check); Groups Administrator + Application Administrator with `-Fix` (creates groups and the AVD service principal) |
 | Preflight (check) | Reader on the subscription, plus Role Based Access Control Administrator on the storage account for the NTFS step (it grants a temporary role) | Global Reader (or Security Reader + Directory Readers) |
 | Preflight `-Fix` | Owner, or Contributor + Role Based Access Control Administrator | Cloud Application Administrator **and** Conditional Access Administrator |
 | Demo deploy | Owner, or Contributor + Role Based Access Control Administrator | Global Reader (Cloud Application Administrator with `-FixNtfs`) |
 | Cleanup | Owner | Intune Administrator + Cloud Device Administrator (to remove device objects) |
 
-## Preflight: what it checks and fixes
+## Pre-deployment preflight
+
+`-PreDeployment` works before the landing zone exists. It compiles your `.bicepparam` file with the real group and service principal IDs and checks the subscription and tenant against the **effective** values (file values, else template defaults). Once it comes back clean, it prints the `deploy.sh` command to run as a separate step.
+
+| Area | Check | `-Fix` |
+|---|---|---|
+| Tooling | PowerShell 7, Bicep CLI, `az` and `bash` (used by `deploy.sh`), Microsoft.Graph.Authentication | — |
+| Entra ID | `-UsersGroup` / `-AdminsGroup` (name or object ID) resolve to exactly one security group each, with members; the Azure Virtual Desktop service principal exists | Creates missing groups (by name) and the service principal |
+| Parameters | The file compiles; prints prefix, environment, region, host count and size, zones, connectivity mode, Intune enrollment | — |
+| Subscription | Owner, or Contributor + RBAC Administrator, plus policy rights when `enablePolicyGuardrails`; every resource provider `deploy.sh` needs; `EncryptionAtHost` (when used); VM size offered in **every requested zone**; family and regional vCPU quota for the host count; the profile storage SKU (Premium ZRS/LRS file shares) in the region; no soft-deleted, purge-protected Key Vault holding the vault name; budget parameters complete | Registers providers and the feature |
+| Network | HubPeered only: hub VNet readable; firewall IP set for egress; central DNS zone IDs present | — |
+| Landing zone | Whether `rg-<prefix>-<env>-*` already exists (deploying then updates in place) | — |
+| Tenant | Intune licensing when `enrollInIntune = true` (the join fails without it); whether you hold active roles for the post-deployment steps; which Conditional Access policies will need the storage app excluded | — |
+
+## Post-deployment preflight: what it checks and fixes
 
 | Area | Check | `-Fix` |
 |---|---|---|

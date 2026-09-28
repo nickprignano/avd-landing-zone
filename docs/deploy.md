@@ -31,6 +31,12 @@ Things you'll most likely change in the file: `namePrefix`, `location`, address 
 
 ## 3. Deploy
 
+Run the pre-deployment preflight first, and repeat it until it comes back clean. `-Fix` registers providers and creates the groups and the AVD service principal. It checks your parameter file against the subscription (zones, quota, storage SKU, Key Vault name) and the tenant (Intune, roles). See [operations.md](operations.md#pre-deployment-preflight).
+
+```powershell
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/prod.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
+```
+
 ```bash
 az login
 az account set --subscription "<subscription-id>"

@@ -88,3 +88,27 @@ Describe 'Check result reporting' {
     $summary.Results.Count | Should -Be 2
   }
 }
+
+Describe 'Invoke-AvdGraph' {
+  BeforeAll {
+    # Stand-in so Pester can mock it without the Microsoft.Graph module installed.
+    function global:Invoke-MgGraphRequest { param($Method, $Uri, $Body, $ContentType, $OutputType) }
+  }
+  AfterAll { Remove-Item function:global:Invoke-MgGraphRequest -ErrorAction SilentlyContinue }
+
+  It 'follows nextLink and returns a flat list that @() does not nest' {
+    Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest {
+      if ($Uri -eq 'v1.0/things') { [pscustomobject]@{ value = @([pscustomobject]@{ n = 1 }, [pscustomobject]@{ n = 2 }); '@odata.nextLink' = 'page2' } }
+      else { [pscustomobject]@{ value = @([pscustomobject]@{ n = 3 }) } }
+    }
+    $items = @(Invoke-AvdGraph -Uri 'v1.0/things')
+    $items.Count | Should -Be 3
+    ($items | ForEach-Object n) -join ',' | Should -Be '1,2,3'
+    @(Invoke-AvdGraph -Uri 'v1.0/things' | Where-Object n -gt 1).Count | Should -Be 2
+  }
+
+  It 'returns nothing (not a nested empty array) for an empty collection' {
+    Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest { [pscustomobject]@{ value = @() } }
+    @(Invoke-AvdGraph -Uri 'v1.0/empty').Count | Should -Be 0
+  }
+}

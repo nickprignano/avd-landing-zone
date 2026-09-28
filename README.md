@@ -30,7 +30,12 @@ Prerequisites (details in [`docs/deploy.md`](docs/deploy.md)):
 ```bash
 az login && az account set --subscription "<subscription-id>"
 
-# What-if first
+# Preflight first (Cloud Shell, PowerShell): repeat until clean; -Fix registers providers,
+# creates the groups and the AVD service principal
+pwsh ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam \
+  -UsersGroup "AVD Users" -AdminsGroup "AVD Admins"
+
+# What-if
 ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 \
   --users-group "AVD Users" --admins-group "AVD Admins" --what-if
 
