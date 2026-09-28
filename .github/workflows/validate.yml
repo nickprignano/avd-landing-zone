@@ -8,6 +8,8 @@ on:
       - 'bicep/**'
       - 'parameters/**'
       - 'scripts/**'
+      - 'tests/**'
+      - 'PSScriptAnalyzerSettings.psd1'
       - 'bicepconfig.json'
       - 'ps-rule.yaml'
       - '.ps-rule/**'
@@ -19,6 +21,8 @@ on:
       - 'bicep/**'
       - 'parameters/**'
       - 'scripts/**'
+      - 'tests/**'
+      - 'PSScriptAnalyzerSettings.psd1'
       - 'bicepconfig.json'
       - 'ps-rule.yaml'
       - '.ps-rule/**'
@@ -47,28 +51,37 @@ jobs:
 
       # bicepconfig.json promotes the security-relevant linter rules to errors.
       - name: Lint
-        run: az bicep lint --file bicep/main.bicep
+        run: |
+          az bicep lint --file bicep/main.bicep
+          az bicep lint --file bicep/demo/main.bicep
 
       - name: Build template and parameter files
         run: |
           az bicep build --file bicep/main.bicep --stdout > /dev/null
+          az bicep build --file bicep/demo/main.bicep --stdout > /dev/null
           for f in parameters/*.bicepparam; do
             echo "build-params $f"
             az bicep build-params --file "$f" --stdout > /dev/null
           done
 
   scripts:
-    name: Script analysis
+    name: Script analysis + tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: PSScriptAnalyzer (session host scripts)
+      - name: PSScriptAnalyzer
         shell: pwsh
         run: |
           Set-PSRepository PSGallery -InstallationPolicy Trusted
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
-          Invoke-ScriptAnalyzer -Path scripts/sessionhost -Recurse -Severity Warning,Error -EnableExit
+          Invoke-ScriptAnalyzer -Path scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit
+
+      - name: Pester (ops module unit tests)
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Invoke-Pester -Path ./tests -CI -Output Detailed
 
       - name: shellcheck (deploy script)
         run: shellcheck scripts/deploy/deploy.sh

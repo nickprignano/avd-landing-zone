@@ -4,7 +4,7 @@ Two workflows:
 
 | Workflow | Trigger | Jobs |
 |---|---|---|
-| [`validate.yml`](../.github/workflows/validate.yml) | PRs and pushes to `master` touching Bicep, parameters, scripts or config | **bicep** (lint + build template and param files) · **scripts** (PSScriptAnalyzer, shellcheck) · **psrule** (Well-Architected rules, a gate) · **what-if** (opt-in) |
+| [`validate.yml`](../.github/workflows/validate.yml) | PRs and pushes to `master` touching Bicep, parameters, scripts or config | **bicep** (lint + build template and param files) · **scripts** (PSScriptAnalyzer over `scripts/`, Pester unit tests in `tests/`, shellcheck) · **psrule** (Well-Architected rules, a gate) · **what-if** (opt-in) |
 | [`deploy.yml`](../.github/workflows/deploy.yml) | Manual (`workflow_dispatch`) | Deploys `parameters/<env>.bicepparam` to the matching GitHub Environment, with optional what-if only |
 
 The **bicep** and **scripts** jobs need no setup: the parameter files compile with placeholder identity values set in the workflow. `bicepconfig.json` makes security-relevant linter findings errors.
@@ -68,6 +68,7 @@ Create GitHub Environments `dev` and `prod`, and add **required reviewers** to `
 az bicep lint --file bicep/main.bicep
 AVD_USERS_GROUP_ID=x AVD_ADMINS_GROUP_ID=x AVD_SERVICE_PRINCIPAL_ID=x AVD_LOCAL_ADMIN_PASSWORD=Placeholder-1234 \
   az bicep build-params --file parameters/prod.bicepparam --stdout > /dev/null
-pwsh -c "Invoke-ScriptAnalyzer -Path scripts/sessionhost -Recurse -Severity Warning,Error"
+pwsh -c "Invoke-ScriptAnalyzer -Path scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1"
+pwsh -c "Invoke-Pester ./tests"
 shellcheck scripts/deploy/deploy.sh
 ```

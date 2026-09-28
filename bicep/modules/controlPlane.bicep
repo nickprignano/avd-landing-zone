@@ -19,6 +19,12 @@ param logAnalyticsWorkspaceResourceId string
 param usersGroupObjectId string
 param avdServicePrincipalObjectId string
 
+@description('Deploy the autoscale plan. The demo host pool turns this off so its host stays up while it is validated.')
+param deployScalingPlan bool = true
+
+@description('Resource group for the host pool private endpoint. Empty = the private endpoint subnet\'s resource group.')
+param privateEndpointResourceGroupResourceId string = ''
+
 var roles = {
   desktopVirtualizationUser: '1d18fff3-a72a-46b5-b4a9-0b38a3cd7e63'
   powerOnOffContributor: '40c5ff49-9181-41f8-ae61-143b0e78555e'
@@ -52,6 +58,7 @@ module hostPool 'br/public:avm/res/desktop-virtualization/host-pool:0.8.1' = {
       ? [
           {
             subnetResourceId: privateEndpointSubnetResourceId
+            resourceGroupResourceId: empty(privateEndpointResourceGroupResourceId) ? null : privateEndpointResourceGroupResourceId
             privateDnsZoneGroup: {
               privateDnsZoneGroupConfigs: [
                 {
@@ -116,7 +123,7 @@ module workspace 'br/public:avm/res/desktop-virtualization/workspace:0.9.2' = {
 // ---------- Autoscale ----------
 // Weekdays: ramp up 07:00, peak 09:00, ramp down 18:00, off-peak 20:00.
 // Weekends: off-peak all day; Start VM on Connect brings a host up on demand.
-module scalingPlan 'br/public:avm/res/desktop-virtualization/scaling-plan:0.5.0' = {
+module scalingPlan 'br/public:avm/res/desktop-virtualization/scaling-plan:0.5.0' = if (deployScalingPlan) {
   name: 'scaling-plan'
   params: {
     name: scalingPlanName
@@ -200,6 +207,7 @@ resource powerOnOffOnControlPlane 'Microsoft.Authorization/roleAssignments@2022-
 output hostPoolResourceId string = hostPool.outputs.resourceId
 output hostPoolName string = hostPool.outputs.name
 output workspaceResourceId string = workspace.outputs.resourceId
+output appGroupResourceId string = appGroup.outputs.resourceId
 
 @secure()
 output registrationToken string = hostPool.outputs.registrationToken!

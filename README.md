@@ -39,7 +39,14 @@ az login && az account set --subscription "<subscription-id>"
   --users-group "AVD Users" --admins-group "AVD Admins"
 ```
 
-Then complete the three one-time tenant steps the script prints (admin consent for the storage account's Entra app, a Conditional Access exclusion, and NTFS hardening). Details are in [`docs/deploy.md#4-post-deployment`](docs/deploy.md#4-post-deployment). Users in the AVD Users group can then sign in through the Windows App.
+Then finish the three one-time tenant steps (admin consent for the storage account's Entra app, a Conditional Access exclusion, and NTFS hardening) from Azure Cloud Shell. The preflight checks them and `-Fix` applies them:
+
+```powershell
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix
+./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix avdlz -Environment dev -TestUserUpn you@contoso.com   # optional demo + sign-in validation
+```
+
+See [`docs/operations.md`](docs/operations.md). Users in the AVD Users group can then sign in through the Windows App.
 
 ## Repo layout
 
@@ -47,6 +54,7 @@ Then complete the three one-time tenant steps the script prints (admin consent f
 avd-landing-zone/
 ├── bicep/
 │   ├── main.bicep                 # subscription-scope orchestration
+│   ├── demo/main.bicep            # demo host pool inside a deployed landing zone
 │   └── modules/
 │       ├── governance.bicep       # policy, Defender, budget, activity log
 │       ├── monitoring.bicep       # Log Analytics, AVD Insights DCR, alerts
@@ -63,9 +71,11 @@ avd-landing-zone/
 │   └── prod.bicepparam
 ├── scripts/
 │   ├── deploy/deploy.sh           # providers, features, lookups, deploy
+│   ├── ops/                       # Cloud Shell: preflight (-Fix), demo deploy + validation, cleanup
 │   └── sessionhost/               # embedded into Run Commands at compile time
 │       ├── Set-FSLogixConfiguration.ps1
 │       └── Register-AvdAgent.ps1
+├── tests/                         # Pester unit tests for scripts/ops
 ├── ps-rule.yaml                   # PSRule for Azure configuration
 ├── docs/
 └── .github/workflows/
@@ -78,6 +88,7 @@ avd-landing-zone/
 - [`docs/design-decisions.md`](docs/design-decisions.md): the opinions this repo takes and how it compares with the LZA
 - [`docs/architecture.md`](docs/architecture.md): resource layout, traffic flows, identity and RBAC model
 - [`docs/deploy.md`](docs/deploy.md): prerequisites, deployment, post-deployment steps, scaling out, teardown
+- [`docs/operations.md`](docs/operations.md): preflight with fix mode, demo host pool with sign-in validation, cleanup
 - [`docs/ci.md`](docs/ci.md): validation and deployment pipelines, OIDC setup
 - [`docs/gotchas.md`](docs/gotchas.md): the things that bite
 - [`docs/out-of-scope.md`](docs/out-of-scope.md): what this repo does not do
