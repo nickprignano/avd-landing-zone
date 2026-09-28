@@ -4,7 +4,7 @@ Two workflows:
 
 | Workflow | Trigger | Jobs |
 |---|---|---|
-| [`validate.yml`](../.github/workflows/validate.yml) | PRs and pushes to `master` touching Bicep, parameters, scripts or config | **bicep** (lint + build template and param files) · **scripts** (PSScriptAnalyzer over `scripts/`, Pester unit tests in `tests/`, shellcheck) · **psrule** (Well-Architected rules, a gate) · **what-if** (opt-in) |
+| [`validate.yml`](../.github/workflows/validate.yml) | PRs and pushes to `master` touching Bicep, parameters, scripts or config | **bicep** (lint + build template and param files) · **scripts** (PSScriptAnalyzer over `scripts/`, Pester: unit tests, offline end-to-end scenarios (`tests/offline`) and template guards, with a standalone Bicep CLI; shellcheck) · **psrule** (Well-Architected rules, a gate) · **what-if** (opt-in) |
 | [`deploy.yml`](../.github/workflows/deploy.yml) | Manual (`workflow_dispatch`) | Deploys `parameters/<env>.bicepparam` to the matching GitHub Environment, with optional what-if only |
 
 The **bicep** and **scripts** jobs need no setup: the parameter files compile with placeholder identity values set in the workflow. `bicepconfig.json` makes security-relevant linter findings errors.
