@@ -10,6 +10,7 @@ on:
       - 'scripts/**'
       - 'bicepconfig.json'
       - 'ps-rule.yaml'
+      - '.ps-rule/**'
       - '.github/workflows/validate.yml'
   push:
     branches:
@@ -20,6 +21,7 @@ on:
       - 'scripts/**'
       - 'bicepconfig.json'
       - 'ps-rule.yaml'
+      - '.ps-rule/**'
       - '.github/workflows/validate.yml'
   workflow_dispatch:
 
@@ -75,9 +77,8 @@ jobs:
     name: PSRule for Azure (Well-Architected)
     runs-on: ubuntu-latest
     needs: bicep
-    # Advisory until you have reviewed and baselined the findings for your org;
-    # remove continue-on-error to make it a gate.
-    continue-on-error: true
+    # A gate: every finding is either fixed or suppressed with a written
+    # justification in .ps-rule/Suppressions.Rule.yaml.
     steps:
       - uses: actions/checkout@v4
 

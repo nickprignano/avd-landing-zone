@@ -40,7 +40,8 @@ module sessionHostNsg 'br/public:avm/res/network/network-security-group:0.5.3' =
     name: 'nsg-${vnetName}-hosts'
     location: location
     tags: tags
-    // Session hosts accept no inbound connections: AVD uses reverse connect.
+    // Session hosts accept no inbound connections (AVD uses reverse connect) and
+    // may not RDP/SSH to anything else in the network (no lateral movement).
     securityRules: [
       {
         name: 'Deny-Internet-Inbound'
@@ -53,6 +54,22 @@ module sessionHostNsg 'br/public:avm/res/network/network-security-group:0.5.3' =
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
           destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'Deny-VirtualNetwork-RDP-SSH-Outbound'
+        properties: {
+          priority: 4000
+          direction: 'Outbound'
+          access: 'Deny'
+          protocol: 'Tcp'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'VirtualNetwork'
+          destinationPortRanges: [
+            '22'
+            '3389'
+          ]
         }
       }
     ]
@@ -104,6 +121,22 @@ module privateEndpointNsg 'br/public:avm/res/network/network-security-group:0.5.
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
           destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'Deny-VirtualNetwork-RDP-SSH-Outbound'
+        properties: {
+          priority: 4000
+          direction: 'Outbound'
+          access: 'Deny'
+          protocol: 'Tcp'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'VirtualNetwork'
+          destinationPortRanges: [
+            '22'
+            '3389'
+          ]
         }
       }
     ]

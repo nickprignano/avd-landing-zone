@@ -30,6 +30,12 @@ resource vault 'Microsoft.RecoveryServices/vaults@2024-04-01' = {
         softDeleteState: 'Enabled'
         softDeleteRetentionPeriodInDays: 14
       }
+      // Blocks operations that would shorten retention or delete recovery points
+      // early. 'Unlocked' can still be reverted; lock it in the portal once your
+      // retention policy is final (locking is irreversible).
+      immutabilitySettings: {
+        state: 'Unlocked'
+      }
     }
   }
 }

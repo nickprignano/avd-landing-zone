@@ -4,12 +4,12 @@ Two workflows:
 
 | Workflow | Trigger | Jobs |
 |---|---|---|
-| [`validate.yml`](../.github/workflows/validate.yml) | PRs and pushes to `master` touching Bicep, parameters, scripts or config | **bicep** (lint + build template and param files) · **scripts** (PSScriptAnalyzer, shellcheck) · **psrule** (Well-Architected rules, advisory) · **what-if** (opt-in) |
+| [`validate.yml`](../.github/workflows/validate.yml) | PRs and pushes to `master` touching Bicep, parameters, scripts or config | **bicep** (lint + build template and param files) · **scripts** (PSScriptAnalyzer, shellcheck) · **psrule** (Well-Architected rules, a gate) · **what-if** (opt-in) |
 | [`deploy.yml`](../.github/workflows/deploy.yml) | Manual (`workflow_dispatch`) | Deploys `parameters/<env>.bicepparam` to the matching GitHub Environment, with optional what-if only |
 
 The **bicep** and **scripts** jobs need no setup: the parameter files compile with placeholder identity values set in the workflow. `bicepconfig.json` makes security-relevant linter findings errors.
 
-**PSRule** runs with `continue-on-error: true` so you can review its findings and baseline them (`ps-rule.yaml`) before making it a gate.
+**PSRule** is a gate. Every finding must be fixed, or suppressed with a written justification in [`.ps-rule/Suppressions.Rule.yaml`](../.ps-rule/Suppressions.Rule.yaml); each suppression group's `# Synopsis:` line is the justification. Keep suppressions narrow (one rule, one resource type) so a new resource can't slip through an existing one.
 
 ## Azure access (OIDC, no stored secrets)
 
