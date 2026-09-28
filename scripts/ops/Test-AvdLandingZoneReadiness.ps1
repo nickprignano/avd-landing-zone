@@ -16,9 +16,11 @@
     Tooling        PowerShell, Bicep, az and bash (deploy.sh), Graph module
     Entra ID       the AVD Users/Admins security groups and the Azure Virtual
                    Desktop service principal exist; groups have members
-    Parameters     the .bicepparam compiles; effective values are shown
+    Parameters     the .bicepparam compiles; effective values are shown.
+                   -Location overrides the region (AVD_LOCATION)
     Subscription   your RBAC (incl. policy rights when guardrails are on),
-                   resource providers, EncryptionAtHost feature, VM size in
+                   resource providers, AVD host pools offered in the region,
+                   EncryptionAtHost feature, VM size in
                    the requested zones, vCPU quota, Premium file share SKU in
                    the region, no soft-deleted Key Vault blocking the name,
                    budget parameters
@@ -44,7 +46,7 @@
   Exit code 0 = no failures; 1 = at least one failure. Warnings don't fail.
 
 .EXAMPLE
-  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
+  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location westus2 -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
 
 .EXAMPLE
   ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix -AllowHostStart
@@ -57,6 +59,8 @@ param(
   # Entra security group name or object ID. With -Fix, a missing group (by name) is created.
   [Parameter(Mandatory, ParameterSetName = 'PreDeployment')][string] $UsersGroup,
   [Parameter(Mandatory, ParameterSetName = 'PreDeployment')][string] $AdminsGroup,
+  # Region to check and deploy to, instead of the parameter file's default (e.g. from the region latency page).
+  [Parameter(ParameterSetName = 'PreDeployment')][ValidatePattern('^[a-z0-9]+$')][string] $Location,
 
   # ---- Post-deployment ----
   [Parameter(Mandatory, ParameterSetName = 'PostDeployment')][ValidateLength(2, 8)][string] $NamePrefix,
@@ -89,7 +93,7 @@ Clear-AvdCheckResult
 if ($PreDeployment) {
   if (-not (Test-Path $ParameterFile)) { throw "Parameter file not found: $ParameterFile" }
   Write-Host "AVD landing zone PRE-DEPLOYMENT preflight - $ParameterFile in '$($ctx.Subscription.Name)'$(if ($Fix) { ' (FIX mode)' })" -ForegroundColor White
-  $pre = @{ ParameterFile = $ParameterFile; UsersGroup = $UsersGroup; AdminsGroup = $AdminsGroup; Fix = $Fix; SkipTenant = $SkipTenant; WhatIf = $WhatIfPreference }
+  $pre = @{ ParameterFile = $ParameterFile; UsersGroup = $UsersGroup; AdminsGroup = $AdminsGroup; Location = $Location; Fix = $Fix; SkipTenant = $SkipTenant; WhatIf = $WhatIfPreference }
   if ($Force) { $pre.Confirm = $false }
   $outcome = Test-AvdPreDeployment @pre
 }

@@ -75,15 +75,15 @@ param enrollInIntune = false
   --users-group "AVD Users" --admins-group "AVD Admins"
 ```
 
-Then do the [post-deployment steps](deploy.md#4-post-deployment). In a personal tenant you're the Global Administrator, so you can grant the admin consent yourself.
+Then do the [post-deployment steps](deploy.md#5-post-deployment). In a personal tenant you're the Global Administrator, so you can grant the admin consent yourself.
 
 ### 8. Verify
 
-Open the [Windows App](https://windows.cloud.microsoft), sign in with the same account, and connect to the desktop. See [deploy.md](deploy.md#5-verify).
+Open the [Windows App](https://windows.cloud.microsoft), sign in with the same account, and connect to the desktop. See [deploy.md](deploy.md#6-verify).
 
 ### 9. Tear it down (important — it's your card)
 
-Follow [deploy.md → Teardown](deploy.md#7-teardown). The dev parameters don't enable backup, so in practice:
+Follow [deploy.md → Teardown](deploy.md#8-teardown). The dev parameters don't enable backup, so in practice:
 
 ```bash
 for rg in hosts avd storage management network; do

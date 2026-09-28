@@ -112,3 +112,32 @@ Describe 'Invoke-AvdGraph' {
     @(Invoke-AvdGraph -Uri 'v1.0/empty').Count | Should -Be 0
   }
 }
+
+Describe 'Test-AvdHostPoolRegion' {
+  BeforeAll {
+    # Stand-in so Pester can mock it without the Az modules installed.
+    function global:Get-AzResourceProvider { param($ProviderNamespace, $ErrorAction) }
+  }
+  AfterAll { Remove-Item function:global:Get-AzResourceProvider -ErrorAction SilentlyContinue }
+  BeforeEach {
+    Clear-AvdCheckResult
+    Mock -ModuleName AvdLandingZone Get-AzResourceProvider {
+      [pscustomobject]@{ ResourceTypes = @(
+          [pscustomobject]@{ ResourceTypeName = 'workspaces'; Locations = @('Brazil South') }
+          [pscustomobject]@{ ResourceTypeName = 'hostpools'; Locations = @('North Central US', 'West US 2') }
+        ) }
+    }
+  }
+
+  It 'passes for a host pool region given by its ARM name' {
+    Test-AvdHostPoolRegion -Location 'westus2'
+    (Get-AvdCheckResult).Status | Should -Be 'Pass'
+  }
+
+  It 'fails for a region without host pools and lists the ones that have them' {
+    Test-AvdHostPoolRegion -Location 'brazilsouth'
+    $r = Get-AvdCheckResult
+    $r.Status | Should -Be 'Fail'
+    $r.Detail | Should -BeLike '*northcentralus, westus2*'
+  }
+}

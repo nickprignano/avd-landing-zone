@@ -54,7 +54,7 @@ Create GitHub Environments `dev` and `prod`, and add **required reviewers** to `
 | Secret | `AZURE_TENANT_ID` | tenant ID |
 | Secret | `AZURE_SUBSCRIPTION_ID` | landing zone subscription |
 | Secret | `AVD_LOCAL_ADMIN_PASSWORD` | break-glass password (stable) |
-| Variable | `AZURE_LOCATION` | e.g. `northcentralus` |
+| Variable | `AZURE_LOCATION` | The region the landing zone is deployed to, e.g. `northcentralus`. It overrides the parameter file's default through `AVD_LOCATION` |
 | Variable | `AVD_USERS_GROUP_ID` | group object ID |
 | Variable | `AVD_ADMINS_GROUP_ID` | group object ID |
 | Variable | `AVD_SERVICE_PRINCIPAL_ID` | `az ad sp show --id 9cdead84-a844-4324-93f2-b2e6bb768d07 --query id -o tsv` |

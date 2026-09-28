@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AVD Region Latency</title>
+<meta name="description" content="Ranks Azure regions by round-trip time from your browser and builds the Cloud Shell preflight and deploy commands for the closest one.">
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #62625d; --border: #deded8;
+    --accent: #0a5fb4; --accent-text: #ffffff; --code-bg: #f0f0ec;
+    --good: #1a7f37; --ok: #9a6700; --poor: #c62828; --bar: #0a5fb4; --row-sel: #e8f1fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151515; --panel: #1f1f1f; --text: #ececea; --muted: #a3a39e; --border: #34342f;
+      --accent: #4c9be8; --accent-text: #0b0b0b; --code-bg: #262624;
+      --good: #4ac26b; --ok: #d4a72c; --poor: #ff7b72; --bar: #4c9be8; --row-sel: #1d2b3a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151515; --panel: #1f1f1f; --text: #ececea; --muted: #a3a39e; --border: #34342f;
+    --accent: #4c9be8; --accent-text: #0b0b0b; --code-bg: #262624;
+    --good: #4ac26b; --ok: #d4a72c; --poor: #ff7b72; --bar: #4c9be8; --row-sel: #1d2b3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--muted); margin-bottom: 20px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  .field { display: flex; flex-direction: column; align-items: stretch; gap: 4px; flex: 1 1 180px; }
+  .field span { font-size: .85rem; color: var(--muted); }
+  input[type=text], select {
+    font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; width: 100%;
+  }
+  button {
+    font: inherit; font-weight: 600; border: 1px solid var(--accent); border-radius: 6px;
+    padding: 7px 14px; cursor: pointer; background: var(--accent); color: var(--accent-text);
+  }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { color: var(--muted); font-size: .9rem; }
+  progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td.region { white-space: normal; }
+  td.region .muted { display: block; font-size: .8rem; }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.sel td { background: var(--row-sel); }
+  tbody tr { cursor: pointer; }
+  .bar { height: 8px; background: var(--bar); border-radius: 4px; min-width: 2px; opacity: .8; }
+  .barcell { width: 25%; min-width: 60px; }
+  .good { color: var(--good); font-weight: 600; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .poor { color: var(--poor); font-weight: 600; }
+  .muted { color: var(--muted); }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+    overflow-x: auto; margin: 0 0 10px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre;
+  }
+  .cmd-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 14px 0 6px; }
+  .cmd-head h3 { font-size: .95rem; margin: 0; }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  a { color: var(--accent); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AVD region latency</h1>
+  <p class="lede">
+    Ranks Azure regions by round-trip time <strong>from this browser</strong>, then builds the Cloud Shell commands for the
+    <a href="https://github.com/nickprignano/avd-landing-zone" id="repo-link">AVD landing zone</a>
+    preflight and deployment in the region you pick. Run it from where your users work, not from Cloud Shell or a VPN.
+  </p>
+
+  <section>
+    <h2>1. Measure</h2>
+    <div class="row" id="geos">
+      <label><input type="checkbox" value="Americas" checked> Americas</label>
+      <label><input type="checkbox" value="Europe" checked> Europe</label>
+      <label><input type="checkbox" value="Asia Pacific" checked> Asia Pacific</label>
+      <label><input type="checkbox" value="Middle East &amp; Africa" checked> Middle East &amp; Africa</label>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="run">Measure latency</button>
+      <span class="status" id="status">Takes about 20 seconds. Each region gets a warm-up request and 5 timed ones.</span>
+    </div>
+    <progress id="progress" class="hidden" value="0" max="1"></progress>
+  </section>
+
+  <section id="results" class="hidden">
+    <h2>2. Pick a region</h2>
+    <p class="status">Median HTTPS round trip. The fastest region is selected; click a row to pick another. Under 100&nbsp;ms is good for AVD, 100–150&nbsp;ms is usable, above 150&nbsp;ms feels sluggish.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>#</th><th>Region</th><th>Geography</th><th class="num">Median</th><th class="barcell"></th><th>Rating</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="commands" class="hidden">
+    <h2>3. Run in Azure Cloud Shell (PowerShell)</h2>
+    <div class="row">
+      <label class="field"><span>Parameter file</span>
+        <select id="paramFile"><option value="dev">parameters/dev.bicepparam</option><option value="prod">parameters/prod.bicepparam</option></select>
+      </label>
+      <label class="field"><span>AVD users group</span><input type="text" id="usersGroup" value="AVD Users"></label>
+      <label class="field"><span>AVD admins group</span><input type="text" id="adminsGroup" value="AVD Admins"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label><input type="checkbox" id="fix"> Fix mode: register providers, create missing groups and the AVD service principal</label>
+    </div>
+
+    <div class="cmd-head"><h3>Preflight: repeat until it comes back clean</h3><button class="secondary" data-copy="preflight">Copy</button></div>
+    <pre id="preflight"></pre>
+
+    <div class="cmd-head"><h3>Then deploy, as a separate run</h3><button class="secondary" data-copy="deploy">Copy</button></div>
+    <pre id="deploy"></pre>
+
+    <div class="row" style="margin-top:6px">
+      <button id="copyAll">Copy results and commands</button>
+      <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Open Cloud Shell</a>
+      <span class="status" id="copied" role="status"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>How to read this</h2>
+    <ul>
+      <li>Each region is timed with small HTTPS requests to its regional Azure AI services endpoint. That's the network round trip plus a few milliseconds of server time, so treat the numbers as an upper bound and compare regions with each other.</li>
+      <li>A VPN, a secure web gateway (Zscaler, Netskope and the like) or a proxy sends traffic through its own path. Measure the way your users' desktops will actually connect.</li>
+      <li>The landing zone puts the host pool in the same region as the session hosts, so the region must offer AVD host pools. The preflight checks that, along with VM size and quota, the profile storage SKU and existing resources. If the closest region fails it, pick the next one.</li>
+      <li>The parameter files deploy without availability zones, which works in every region. For zone redundancy, edit <code>availabilityZones</code> and <code>profileStorageSku</code> in the file first.</li>
+      <li>Nothing leaves your browser except the timing requests. Your group names are only kept in this browser.</li>
+    </ul>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // Regions with a regional endpoint, grouped for the filters.
+  var REGIONS = [
+    ['eastus', 'East US', 'Americas'], ['eastus2', 'East US 2', 'Americas'], ['centralus', 'Central US', 'Americas'],
+    ['northcentralus', 'North Central US', 'Americas'], ['southcentralus', 'South Central US', 'Americas'],
+    ['westcentralus', 'West Central US', 'Americas'], ['westus', 'West US', 'Americas'], ['westus2', 'West US 2', 'Americas'],
+    ['westus3', 'West US 3', 'Americas'], ['canadacentral', 'Canada Central', 'Americas'], ['canadaeast', 'Canada East', 'Americas'],
+    ['brazilsouth', 'Brazil South', 'Americas'],
+    ['northeurope', 'North Europe', 'Europe'], ['westeurope', 'West Europe', 'Europe'], ['uksouth', 'UK South', 'Europe'],
+    ['ukwest', 'UK West', 'Europe'], ['francecentral', 'France Central', 'Europe'], ['germanywestcentral', 'Germany West Central', 'Europe'],
+    ['switzerlandnorth', 'Switzerland North', 'Europe'], ['norwayeast', 'Norway East', 'Europe'], ['swedencentral', 'Sweden Central', 'Europe'],
+    ['polandcentral', 'Poland Central', 'Europe'], ['italynorth', 'Italy North', 'Europe'], ['spaincentral', 'Spain Central', 'Europe'],
+    ['eastasia', 'East Asia', 'Asia Pacific'], ['southeastasia', 'Southeast Asia', 'Asia Pacific'], ['japaneast', 'Japan East', 'Asia Pacific'],
+    ['japanwest', 'Japan West', 'Asia Pacific'], ['koreacentral', 'Korea Central', 'Asia Pacific'], ['centralindia', 'Central India', 'Asia Pacific'],
+    ['southindia', 'South India', 'Asia Pacific'], ['australiaeast', 'Australia East', 'Asia Pacific'],
+    ['newzealandnorth', 'New Zealand North', 'Asia Pacific'], ['indonesiacentral', 'Indonesia Central', 'Asia Pacific'],
+    ['malaysiawest', 'Malaysia West', 'Asia Pacific'],
+    ['uaenorth', 'UAE North', 'Middle East & Africa'], ['qatarcentral', 'Qatar Central', 'Middle East & Africa'],
+    ['southafricanorth', 'South Africa North', 'Middle East & Africa']
+  ];
+  var SAMPLES = 5, TIMEOUT_MS = 4000, CONCURRENCY = 3;
+  var GRAPH_READ = ['Application.Read.All', 'Policy.Read.All', 'Group.Read.All', 'Directory.Read.All'];
+  var GRAPH_FIX = ['Group.ReadWrite.All', 'Application.ReadWrite.All', 'Policy.Read.All', 'Directory.Read.All'];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var results = [], selected = null, measuredAt = null;
+
+  // Clone URL: this repo, or the fork serving the page from <owner>.github.io/<repo>.
+  var repoUrl = 'https://github.com/nickprignano/avd-landing-zone';
+  var host = location.hostname, seg = location.pathname.split('/').filter(Boolean)[0];
+  if (/\.github\.io$/.test(host) && seg) repoUrl = 'https://github.com/' + host.split('.')[0] + '/' + seg;
+  var repoName = repoUrl.split('/').pop();
+  $('repo-link').href = repoUrl;
+
+  function store(k, v) { try { localStorage.setItem('avdlz.' + k, v); } catch (e) { /* storage unavailable */ } }
+  function load(k) { try { return localStorage.getItem('avdlz.' + k); } catch (e) { return null; } }
+  ['usersGroup', 'adminsGroup', 'paramFile'].forEach(function (id) {
+    var v = load(id); if (v) $(id).value = v;
+    $(id).addEventListener('input', function () { store(id, $(id).value); render(); });
+  });
+  $('fix').addEventListener('change', render);
+
+  function timeOnce(region) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
+    var url = 'https://' + region + '.api.cognitive.microsoft.com/?avdlz=' + Date.now() + Math.random().toString(36).slice(2);
+    var t0 = performance.now();
+    // no-cors: the response is opaque, but only the elapsed time is needed.
+    return fetch(url, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctrl.signal })
+      .then(function () { return performance.now() - t0; })
+      .finally(function () { clearTimeout(timer); });
+  }
+
+  function measure(region) {
+    // The warm-up pays for DNS, TCP and TLS; the timed requests reuse the connection.
+    return timeOnce(region).then(function () {
+      var times = [], chain = Promise.resolve();
+      for (var i = 0; i < SAMPLES; i++) chain = chain.then(function () { return timeOnce(region).then(function (t) { times.push(t); }); });
+      return chain.then(function () {
+        times.sort(function (a, b) { return a - b; });
+        return times[Math.floor(times.length / 2)];
+      });
+    });
+  }
+
+  function run() {
+    var geos = Array.prototype.map.call(document.querySelectorAll('#geos input:checked'), function (c) { return c.value; });
+    var todo = REGIONS.filter(function (r) { return geos.indexOf(r[2]) >= 0; });
+    if (!todo.length) { $('status').textContent = 'Pick at least one geography.'; return; }
+    $('run').disabled = true; results = []; selected = null;
+    var bar = $('progress'); bar.classList.remove('hidden'); bar.max = todo.length; bar.value = 0;
+    $('status').textContent = 'Measuring ' + todo.length + ' regions...';
+    var next = 0, done = 0;
+    function worker() {
+      if (next >= todo.length) return Promise.resolve();
+      var r = todo[next++];
+      return measure(r[0]).then(
+        function (m) { results.push({ name: r[0], display: r[1], geo: r[2], median: m }); },
+        function () { results.push({ name: r[0], display: r[1], geo: r[2], median: null }); }
+      ).then(function () { bar.value = ++done; }).then(worker);
+    }
+    var pool = [];
+    for (var i = 0; i < CONCURRENCY; i++) pool.push(worker());
+    Promise.all(pool).then(function () {
+      results.sort(function (a, b) { return (a.median === null) - (b.median === null) || a.median - b.median; });
+      measuredAt = new Date();
+      var ok = results.filter(function (r) { return r.median !== null; });
+      selected = ok.length ? ok[0].name : null;
+      $('status').textContent = ok.length
+        ? 'Closest: ' + ok[0].display + ' (' + Math.round(ok[0].median) + ' ms).' + (ok.length < results.length ? ' ' + (results.length - ok.length) + ' region(s) did not answer.' : '')
+        : 'No region answered. A firewall or content blocker may be stopping the requests.';
+      bar.classList.add('hidden'); $('run').disabled = false; $('run').textContent = 'Measure again';
+      render();
+    });
+  }
+
+  function rating(ms) {
+    if (ms === null) return ['No answer', 'muted'];
+    if (ms < 100) return ['Good', 'good'];
+    if (ms <= 150) return ['Usable', 'ok'];
+    return ['Sluggish', 'poor'];
+  }
+
+  function psQuote(s) { return "'" + s.replace(/'/g, "''") + "'"; }
+  function shQuote(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
+
+  function commands() {
+    var r = results.filter(function (x) { return x.name === selected; })[0];
+    var file = 'parameters/' + $('paramFile').value + '.bicepparam';
+    var users = $('usersGroup').value.trim() || 'AVD Users', admins = $('adminsGroup').value.trim() || 'AVD Admins';
+    var fix = $('fix').checked;
+    var scopes = (fix ? GRAPH_FIX : GRAPH_READ).map(psQuote).join(',');
+    var pre = [
+      '# Region: ' + r.name + (r.median !== null ? ', median ' + Math.round(r.median) + ' ms from the browser that measured it' : ''),
+      '# Set-AzContext -Subscription \'<landing zone subscription>\'   # if it is not your current one',
+      'if (-not (Test-Path ~/' + repoName + ')) { git clone ' + repoUrl + '.git ~/' + repoName + ' }',
+      'Set-Location ~/' + repoName + '; git pull --ff-only',
+      'Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -Scopes ' + scopes,
+      './scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile ' + file + ' -Location ' + r.name +
+        ' -UsersGroup ' + psQuote(users) + ' -AdminsGroup ' + psQuote(admins) + (fix ? ' -Fix' : '')
+    ].join('\n');
+    var dep = [
+      'Set-Location ~/' + repoName,
+      'bash ./scripts/deploy/deploy.sh -p ' + file + ' -l ' + r.name + ' --users-group ' + shQuote(users) + ' --admins-group ' + shQuote(admins)
+    ].join('\n');
+    return { pre: pre, dep: dep };
+  }
+
+  function render() {
+    if (!results.length) return;
+    $('results').classList.remove('hidden');
+    var max = Math.max.apply(null, results.map(function (r) { return r.median || 0; })) || 1;
+    var tbody = $('rows'); tbody.textContent = '';
+    results.forEach(function (r, i) {
+      var tr = document.createElement('tr');
+      if (r.name === selected) tr.className = 'sel';
+      var rt = rating(r.median);
+      var cells = [
+        '<input type="radio" name="region" aria-label="' + r.display + '"' + (r.name === selected ? ' checked' : '') + (r.median === null ? ' disabled' : '') + '>',
+        String(i + 1),
+        r.display + ' <span class="muted">' + r.name + '</span>',
+        r.geo,
+        r.median === null ? '–' : Math.round(r.median) + ' ms',
+        r.median === null ? '' : '<div class="bar" style="width:' + (100 * r.median / max).toFixed(1) + '%"></div>',
+        '<span class="' + rt[1] + '">' + rt[0] + '</span>'
+      ];
+      cells.forEach(function (html, c) {
+        var td = document.createElement('td');
+        if (c === 2) td.className = 'region';
+        if (c === 4) td.className = 'num';
+        if (c === 5) td.className = 'barcell';
+        td.innerHTML = html; tr.appendChild(td);
+      });
+      if (r.median !== null) tr.addEventListener('click', function () { selected = r.name; render(); });
+      tbody.appendChild(tr);
+    });
+    if (!selected) { $('commands').classList.add('hidden'); return; }
+    $('commands').classList.remove('hidden');
+    var c = commands();
+    $('preflight').textContent = c.pre;
+    $('deploy').textContent = c.dep;
+  }
+
+  function copy(text) {
+    var done = function () { $('copied').textContent = 'Copied.'; setTimeout(function () { $('copied').textContent = ''; }, 2000); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+    } else { fallback(text); done(); }
+  }
+  function fallback(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) { /* nothing else to try */ }
+    document.body.removeChild(ta);
+  }
+
+  function summary() {
+    var lines = ['AVD region latency, measured from a browser on ' + measuredAt.toLocaleString(), ''];
+    results.slice(0, 10).forEach(function (r, i) {
+      var ms = r.median === null ? 'no answer' : Math.round(r.median) + ' ms';
+      lines.push(((i + 1) + '.').padEnd(4) + r.name.padEnd(20) + ms.padStart(9) + '  ' + rating(r.median)[0]);
+    });
+    var c = commands();
+    lines.push('', 'Selected: ' + selected, '', '# Preflight (Cloud Shell, PowerShell)', c.pre, '', '# Deploy, once the preflight is clean', c.dep);
+    return lines.join('\n');
+  }
+
+  document.querySelectorAll('[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () { copy($(b.getAttribute('data-copy')).textContent); });
+  });
+  $('copyAll').addEventListener('click', function () { copy(summary()); });
+  $('run').addEventListener('click', run);
+})();
+</script>
+</body>
+</html>

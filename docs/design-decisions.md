@@ -36,7 +36,7 @@ Supporting several identity models is where most of the complexity in AVD deploy
 
 ### 2. Entra Kerberos for FSLogix, shared keys off
 Session hosts retrieve Kerberos tickets for the share from Entra ID (`CloudKerberosTicketRetrievalEnabled`). The storage account allows **only Kerberos over SMB 3.1.1 with AES-256**, has **shared-key access disabled**, and is reachable only through its private endpoint. Share-level access is RBAC on Entra groups.
-Trade-off: one tenant step (admin consent for the storage account's app registration) can't be done in Bicep. See [deploy.md](deploy.md#4-post-deployment).
+Trade-off: one tenant step (admin consent for the storage account's app registration) can't be done in Bicep. See [deploy.md](deploy.md#5-post-deployment).
 
 ### 3. Everything declarative, nothing downloaded from GitHub
 Run Commands (`Microsoft.Compute/virtualMachines/runCommands`) are ARM resources, so host configuration is part of the deployment graph and its success or failure is the deployment's (`treatFailureAsDeploymentFailure`). The PowerShell lives in `scripts/sessionhost/` and is compiled into the template, so the same commit always configures hosts the same way. The only runtime downloads are the AVD agent and boot loader, fetched from Microsoft's official links.

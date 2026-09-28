@@ -440,6 +440,20 @@ function Test-AvdVmCapacity {
   }
 }
 
+function Test-AvdHostPoolRegion {
+  <# The template puts the host pool (AVD metadata) in the same region as everything else. #>
+  param([Parameter(Mandatory)][string] $Location)
+  $area = 'Subscription'
+  $type = (Get-AzResourceProvider -ProviderNamespace Microsoft.DesktopVirtualization -ErrorAction SilentlyContinue | Select-Object -First 1).ResourceTypes |
+    Where-Object ResourceTypeName -eq 'hostpools' | Select-Object -First 1
+  if (-not $type) { Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Warn' -Detail 'Could not read the Microsoft.DesktopVirtualization regions.'; return }
+  $regions = @($type.Locations | ForEach-Object { ($_ -replace '\s', '').ToLower() })
+  if ($regions -contains $Location.ToLower()) { Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Pass' }
+  else {
+    Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Fail' -Detail "Host pool regions: $(($regions | Sort-Object) -join ', ')" -Remediation 'The landing zone deploys the host pool in its own region: pick one of these (the region latency page ranks them for you).'
+  }
+}
+
 # =====================================================================
 # Checks - landing zone resources and RBAC
 # =====================================================================
@@ -915,7 +929,9 @@ function Get-AvdDeploymentPlan {
     [Parameter(Mandatory)][string] $ParameterFile,
     [string] $UsersGroupId,
     [string] $AdminsGroupId,
-    [string] $AvdServicePrincipalId
+    [string] $AvdServicePrincipalId,
+    # Region override: the parameter files read it from AVD_LOCATION.
+    [string] $Location
   )
   $bicep = Get-Command bicep -ErrorAction SilentlyContinue
   if (-not $bicep) { throw 'The Bicep CLI is required to read the parameter file.' }
@@ -927,6 +943,7 @@ function Get-AvdDeploymentPlan {
     # Only used to compile the file; the preflight never deploys.
     AVD_LOCAL_ADMIN_PASSWORD = 'Preflight-placeholder-only-1!'
   }
+  if ($Location) { $vars.AVD_LOCATION = $Location }
   $saved = @{}
   foreach ($k in $vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $vars[$k]) }
   try {
@@ -994,6 +1011,7 @@ function Test-AvdPreDeployment {
     [Parameter(Mandatory)][string] $ParameterFile,
     [Parameter(Mandatory)][string] $UsersGroup,
     [Parameter(Mandatory)][string] $AdminsGroup,
+    [string] $Location,
     [switch] $Fix,
     [switch] $SkipTenant
   )
@@ -1034,7 +1052,7 @@ function Test-AvdPreDeployment {
   # ---- Parameter file ----
   Write-AvdSection 'Parameter file'
   try {
-    $plan = Get-AvdDeploymentPlan -ParameterFile $ParameterFile -UsersGroupId $users.id -AdminsGroupId $admins.id -AvdServicePrincipalId $avdSp.id
+    $plan = Get-AvdDeploymentPlan -ParameterFile $ParameterFile -UsersGroupId $users.id -AdminsGroupId $admins.id -AvdServicePrincipalId $avdSp.id -Location $Location
   }
   catch {
     Add-AvdCheckResult 'Parameters' "Compile $ParameterFile" 'Fail' -Detail $_.Exception.Message -Remediation 'Fix the parameter file (az bicep build-params).'
@@ -1042,7 +1060,11 @@ function Test-AvdPreDeployment {
   }
   $zones = @($plan.availabilityZones | ForEach-Object { [int]$_ })
   Add-AvdCheckResult 'Parameters' "Compile $ParameterFile" 'Pass' -Detail ("prefix {0}, env {1}, {2}, {3} x {4}, zones [{5}], {6}, Intune {7}" -f $plan.namePrefix, $plan.environmentName, $plan.location, $plan.sessionHostCount, $plan.sessionHostVmSize, ($zones -join ','), $plan.connectivityMode, $plan.enrollInIntune)
-  if (-not $plan.location) { Add-AvdCheckResult 'Parameters' 'location set' 'Fail' -Remediation 'Set param location in the parameter file.'; return }
+  if (-not $plan.location) { Add-AvdCheckResult 'Parameters' 'location set' 'Fail' -Remediation 'Set param location in the parameter file, or pass -Location.'; return }
+  if ($Location -and $plan.location -ne $Location) {
+    Add-AvdCheckResult 'Parameters' "Region override -Location $Location" 'Fail' -Detail "The file sets location = '$($plan.location)' instead of reading AVD_LOCATION." -Remediation "Use param location = readEnvironmentVariable('AVD_LOCATION', '<default>') in $ParameterFile."
+    return
+  }
   $lz = Get-AvdLandingZone -NamePrefix $plan.namePrefix -Environment $plan.environmentName
 
   # ---- Subscription ----
@@ -1051,6 +1073,7 @@ function Test-AvdPreDeployment {
   Test-AvdResourceProvider -Fix:$Fix -SkipEncryptionAtHost:(-not $plan.encryptionAtHost) -Namespace @('Microsoft.DesktopVirtualization', 'Microsoft.Compute', 'Microsoft.Storage', 'Microsoft.Network',
     'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.Security',
     'Microsoft.PolicyInsights', 'Microsoft.GuestConfiguration', 'Microsoft.Consumption')
+  Test-AvdHostPoolRegion -Location $plan.location
   if ($plan.sessionHostCount -gt 0) {
     Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones
   }
@@ -1094,7 +1117,11 @@ function Test-AvdPreDeployment {
   # ---- Existing deployment ----
   Write-AvdSection 'Landing zone'
   $present = @($lz.RgExists.Keys | Where-Object { $_ -ne 'Demo' -and $lz.RgExists[$_] })
-  if ($present.Count) { Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Use the same break-glass password as before.' }
+  $elsewhere = @($present | ForEach-Object { Get-AzResourceGroup -Name $lz.ResourceGroups[$_] -ErrorAction SilentlyContinue } | Where-Object { $_.Location -ne $plan.location })
+  if ($elsewhere.Count) {
+    Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' region" 'Fail' -Detail "Already deployed in $(($elsewhere.Location | Select-Object -Unique) -join ', '): $($elsewhere.ResourceGroupName -join ', ')" -Remediation 'Resource groups cannot change region. Deploy to that region, use another namePrefix or environment, or remove the existing landing zone first.'
+  }
+  elseif ($present.Count) { Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Use the same break-glass password as before.' }
   else { Add-AvdCheckResult 'Landing zone' "Name '$($lz.BaseName)' is free in this subscription" 'Pass' }
 
   # ---- Tenant readiness for after the deployment ----

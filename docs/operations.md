@@ -19,9 +19,10 @@ git clone https://github.com/nickprignano/avd-landing-zone.git
 cd avd-landing-zone
 Set-AzContext -Subscription '<landing zone subscription>'
 
-# 1. Before deploying: repeat until it comes back clean (-Fix remediates what it can)
-./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
-./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Fix
+# 1. Before deploying: repeat until it comes back clean (-Fix remediates what it can).
+#    -Location picks the region; omit it for the file's default (northcentralus).
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Fix
 
 # 2. Deploy, as a separate run (the clean preflight prints this command)
 bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins'
@@ -49,16 +50,16 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 
 ## Pre-deployment preflight
 
-`-PreDeployment` works before the landing zone exists. It compiles your `.bicepparam` file with the real group and service principal IDs and checks the subscription and tenant against the **effective** values (file values, else template defaults). Once it comes back clean, it prints the `deploy.sh` command to run as a separate step.
+`-PreDeployment` works before the landing zone exists. To choose the region, use the [region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/): it builds this command with `-Location` set to the region you pick. It compiles your `.bicepparam` file with the real group and service principal IDs and checks the subscription and tenant against the **effective** values (file values, else template defaults). Once it comes back clean, it prints the `deploy.sh` command to run as a separate step.
 
 | Area | Check | `-Fix` |
 |---|---|---|
 | Tooling | PowerShell 7, Bicep CLI, `az` and `bash` (used by `deploy.sh`), Microsoft.Graph.Authentication | — |
 | Entra ID | `-UsersGroup` / `-AdminsGroup` (name or object ID) resolve to exactly one security group each, with members; the Azure Virtual Desktop service principal exists | Creates missing groups (by name) and the service principal |
-| Parameters | The file compiles; prints prefix, environment, region, host count and size, zones, connectivity mode, Intune enrollment | — |
-| Subscription | Owner, or Contributor + RBAC Administrator, plus policy rights when `enablePolicyGuardrails`; every resource provider `deploy.sh` needs; `EncryptionAtHost` (when used); VM size offered in **every requested zone**; family and regional vCPU quota for the host count; the profile storage SKU (Premium ZRS/LRS file shares) in the region; no soft-deleted, purge-protected Key Vault holding the vault name; budget parameters complete | Registers providers and the feature |
+| Parameters | The file compiles, with `-Location` overriding its region; prints prefix, environment, region, host count and size, zones, connectivity mode, Intune enrollment | — |
+| Subscription | Owner, or Contributor + RBAC Administrator, plus policy rights when `enablePolicyGuardrails`; every resource provider `deploy.sh` needs; AVD host pools offered in the region; `EncryptionAtHost` (when used); VM size offered in **every requested zone**; family and regional vCPU quota for the host count; the profile storage SKU (Premium ZRS/LRS file shares) in the region; no soft-deleted, purge-protected Key Vault holding the vault name; budget parameters complete | Registers providers and the feature |
 | Network | HubPeered only: hub VNet readable; firewall IP set for egress; central DNS zone IDs present | — |
-| Landing zone | Whether `rg-<prefix>-<env>-*` already exists (deploying then updates in place) | — |
+| Landing zone | Whether `rg-<prefix>-<env>-*` already exists (deploying then updates in place), and fails if it exists in another region (resource groups can't move) | — |
 | Tenant | Intune licensing when `enrollInIntune = true` (the join fails without it); whether you hold active roles for the post-deployment steps; which Conditional Access policies will need the storage app excluded | — |
 
 ## Post-deployment preflight: what it checks and fixes
