@@ -31,7 +31,7 @@ The host pool is deployed in the same region, so the region must offer AVD host 
 | `AVD_USERS_GROUP_ID` | yes | `deploy.sh --users-group <name>` or you |
 | `AVD_ADMINS_GROUP_ID` | yes | `deploy.sh --admins-group <name>` or you |
 | `AVD_SERVICE_PRINCIPAL_ID` | yes | `deploy.sh` (looks up app `9cdead84-a844-4324-93f2-b2e6bb768d07`) |
-| `AVD_LOCAL_ADMIN_PASSWORD` | yes | you, or `deploy.sh` prompts. **Use the same value every time** |
+| `AVD_LOCAL_ADMIN_PASSWORD` | no | `deploy.sh` generates a random one if unset. Applied only to hosts it creates; see [gotchas](gotchas.md#the-break-glass-password-is-random-and-set-at-host-creation) |
 | `AVD_ALERT_EMAIL` | no | you |
 | `AVD_MONTHLY_BUDGET` | no (prod) | you |
 | `AVD_LOCATION` | no | `deploy.sh -l`, or the preflight's `-Location`. Defaults to `northcentralus` |
@@ -100,7 +100,7 @@ Configuring ACLs for Entra identities depends on your identity type (hybrid vs c
 - **Scale out:** raise `sessionHostCount` and redeploy. Existing hosts are untouched (their run commands see `IsRegistered = 1` and exit).
 - **New image:** change `sessionHostImage` or move to an Azure Compute Gallery image. Replace hosts by deploying a new `sessionHostNamePrefix`, drain the old hosts, then delete them.
 - **Exclude a host from autoscale:** tag the VM `avd-scaling-exclude`.
-- **Break-glass sign-in:** read `sessionhost-localadmin-password` from Key Vault (AVD Admins have Secrets User) from inside the VNet.
+- **Break-glass sign-in:** **VM → Reset password** sets a new local admin password on any host. The Key Vault secret `sessionhost-localadmin-password` (AVD Admins have Secrets User, readable from inside the VNet) holds the password of the hosts created by the latest deployment.
 
 ## 8. Teardown
 

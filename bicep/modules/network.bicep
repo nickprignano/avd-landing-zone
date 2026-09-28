@@ -25,6 +25,9 @@ param hubFirewallPrivateIp string
 param dnsServers array
 param logAnalyticsWorkspaceResourceId string
 
+@description('The landing zone\'s availability zones. Empty = the region has none (or regional deployment): the NAT Gateway public IP gets no zones.')
+param availabilityZones int[] = []
+
 var isHub = connectivityMode == 'HubPeered'
 var useRouteTable = isHub && !empty(hubFirewallPrivateIp)
 var diagnostics = [
@@ -155,6 +158,9 @@ module natGateway 'br/public:avm/res/network/nat-gateway:2.1.1' = if (!isHub) {
     publicIPAddresses: [
       {
         name: 'pip-ng-${vnetName}'
+        // The module defaults this IP to zones 1-3, which fails in regions without
+        // availability zones (e.g. North Central US). Zone-redundant only when zonal.
+        availabilityZones: empty(availabilityZones) ? [] : [1, 2, 3]
       }
     ]
   }

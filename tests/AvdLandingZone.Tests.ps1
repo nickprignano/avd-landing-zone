@@ -119,6 +119,35 @@ Describe 'Invoke-AvdGraph' {
   }
 }
 
+Describe 'Get-AvdProviderState' {
+  BeforeAll {
+    function global:Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = 'sub' } } }
+    function global:Get-AzResourceProvider { param($ProviderNamespace, $ErrorAction) }
+  }
+  AfterAll { 'Get-AzContext', 'Get-AzResourceProvider' | ForEach-Object { Remove-Item "function:global:$_" -ErrorAction SilentlyContinue } }
+
+  It 'reads every namespace from one provider list call' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm {
+      [pscustomobject]@{ value = @(
+          [pscustomobject]@{ namespace = 'Microsoft.Compute'; registrationState = 'Registered' }
+          [pscustomobject]@{ namespace = 'Microsoft.KeyVault'; registrationState = 'NotRegistered' }
+        ) }
+    }
+    Mock -ModuleName AvdLandingZone Get-AzResourceProvider { }
+    $s = Get-AvdProviderState -Namespace 'Microsoft.Compute', 'Microsoft.KeyVault'
+    $s['Microsoft.Compute'] | Should -Be 'Registered'
+    $s['Microsoft.KeyVault'] | Should -Be 'NotRegistered'
+    Should -Invoke -ModuleName AvdLandingZone Invoke-AvdArm -Times 1 -Exactly
+    Should -Invoke -ModuleName AvdLandingZone Get-AzResourceProvider -Times 0 -Exactly
+  }
+
+  It 'falls back to per-namespace lookups when the list call fails' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm { throw 'ARM GET failed (500)' }
+    Mock -ModuleName AvdLandingZone Get-AzResourceProvider { [pscustomobject]@{ RegistrationState = 'Registering' } }
+    (Get-AvdProviderState -Namespace 'Microsoft.Network')['Microsoft.Network'] | Should -Be 'Registering'
+  }
+}
+
 Describe 'Test-AvdGraphToken' {
   BeforeAll { function global:Invoke-MgGraphRequest { param($Method, $Uri, $Body, $ContentType, $OutputType) } }
   AfterAll { Remove-Item function:global:Invoke-MgGraphRequest -ErrorAction SilentlyContinue }
@@ -173,12 +202,11 @@ Describe 'Test-AvdHostPoolRegion' {
 Describe 'Test-AvdResourceProvider -Fix' {
   BeforeAll {
     # Stand-ins so Pester can mock them without the Az modules installed.
-    function global:Get-AzResourceProvider { param($ProviderNamespace, $ErrorAction) }
     function global:Get-AzProviderFeature { param($ProviderNamespace, $FeatureName, $ErrorAction) }
     function global:Register-AzProviderFeature { param($ProviderNamespace, $FeatureName) }
   }
   AfterAll {
-    'Get-AzResourceProvider', 'Get-AzProviderFeature', 'Register-AzProviderFeature' |
+    'Get-AzProviderFeature', 'Register-AzProviderFeature' |
       ForEach-Object { Remove-Item "function:global:$_" -ErrorAction SilentlyContinue }
   }
   BeforeEach {
@@ -188,7 +216,9 @@ Describe 'Test-AvdResourceProvider -Fix' {
     Mock -ModuleName AvdLandingZone Register-AvdResourceProvider { }
     Mock -ModuleName AvdLandingZone Register-AzProviderFeature { }
     # Everything turns Registered after the first poll.
-    Mock -ModuleName AvdLandingZone Get-AzResourceProvider { [pscustomobject]@{ RegistrationState = $(if ($global:AvdTestPolls) { 'Registered' } else { 'NotRegistered' }) } }
+    Mock -ModuleName AvdLandingZone Get-AvdProviderState {
+      $s = [ordered]@{}; foreach ($ns in $Namespace) { $s[$ns] = $(if ($global:AvdTestPolls) { 'Registered' } else { 'NotRegistered' }) }; $s
+    }
     Mock -ModuleName AvdLandingZone Get-AzProviderFeature { [pscustomobject]@{ RegistrationState = $(if ($global:AvdTestPolls) { 'Registered' } else { 'NotRegistered' }) } }
   }
   AfterEach { Remove-Variable AvdTestPolls -Scope Global -ErrorAction SilentlyContinue }
