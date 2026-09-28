@@ -116,11 +116,18 @@ function Connect-AvdGraph {
   Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
   $tenantId = (Get-AzContext).Tenant.Id
   $ctx = Get-MgContext
-  if ($ctx -and $ctx.TenantId -eq $tenantId -and -not ($scopes | Where-Object { $_ -notin $ctx.Scopes })) { return }
+  # An existing sign-in is reused when it covers every scope ('X.ReadWrite.All' covers 'X.Read.All').
+  $missing = @($scopes | Where-Object { $_ -notin $ctx.Scopes -and $_.Replace('.Read.', '.ReadWrite.') -notin $ctx.Scopes })
+  if ($ctx -and $ctx.TenantId -eq $tenantId -and -not $missing.Count) { return }
   Write-Host "  Signing in to Microsoft Graph ($($scopes -join ', '))" -ForegroundColor DarkGray
   $connect = @{ Scopes = $scopes; TenantId = $tenantId; NoWelcome = $true; ErrorAction = 'Stop' }
-  if (Test-AvdCloudShell) { $connect.UseDeviceCode = $true }
-  Connect-MgGraph @connect | Out-Null
+  if (Test-AvdCloudShell) {
+    $connect.UseDeviceCode = $true
+    Write-Host '  ACTION NEEDED: open https://microsoft.com/devicelogin and enter the code below. The script waits until you sign in.' -ForegroundColor Yellow
+  }
+  # Connect-MgGraph writes the device-code message to the output stream. Send it to the
+  # host so it is shown even when this runs inside a function whose output is captured.
+  Connect-MgGraph @connect | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
 }
 
 function Invoke-AvdGraph {
