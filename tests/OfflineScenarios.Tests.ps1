@@ -106,3 +106,40 @@ Describe 'Profile share root that never had an ACL set' {
     $out | Should -Match '\[FIXED\] Profile share root ACL follows FSLogix guidance'
   }
 }
+
+Describe 'Well-Architected review of the deployed landing zone' {
+  BeforeAll { $script:out = Invoke-OfflineScenario 'WellArchitected' }
+
+  It 'reports findings as warnings, so a dev landing zone is still ready' {
+    foreach ($step in 'dev', 'skip-psrule', 'production-grade', 'without-switch') { Get-StepExit $out $step | Should -Be 0 }
+  }
+  It 'marks the dev parameter file''s trade-offs as expected' {
+    $s = (Get-PortalState $out)[0]
+    $s.context.wellArchitected | Should -BeTrue
+    $waf = @($s.warnings | Where-Object { $_.id -like 'waf-*' })
+    ($waf | Where-Object { $_.data.accepted } | ForEach-Object id | Sort-Object) -join ',' |
+      Should -Be 'waf-budget,waf-defender-plans,waf-host-count,waf-log-retention,waf-profile-backup,waf-storage-redundancy,waf-zones'
+    ($waf | Where-Object { -not $_.data.accepted } | ForEach-Object id | Sort-Object) -join ',' |
+      Should -Be 'waf-advisor-highavailability,waf-defender-recommendations,waf-policy-compliance,waf-psrule-cost-optimization,waf-psrule-reliability'
+  }
+  It 'keeps only recommendations for the landing zone (any case), across pages' {
+    $out | Should -Match 'Use availability zones for better resiliency'
+    $out | Should -Match 'Machines should have vulnerability findings resolved'
+    $out | Should -Not -Match 'Right-size underused VM|Other workload'
+    $out | Should -Match 'assessmentPages=2'
+  }
+  It 'runs PSRule on the landing zone resource groups with the repo suppressions, unless skipped' {
+    $out | Should -Match 'RESULT dev-calls psruleExport=1 suppressions=1'
+    $out | Should -Match 'RESULT skip-psrule-calls psrule=0'
+  }
+  It 'passes every pillar for a production-grade landing zone' {
+    $s = Get-PortalState $out
+    @($s[2].warnings).Count | Should -Be 0
+    $out | Should -Match 'Reliability\s+7 of 7 pass'
+  }
+  It 'adds nothing without -WellArchitected' {
+    $s = Get-PortalState $out
+    $s[3].context.wellArchitected | Should -BeFalse
+    $out.Substring($out.IndexOf('######## without-switch')) | Should -Not -Match 'Well-Architected'
+  }
+}

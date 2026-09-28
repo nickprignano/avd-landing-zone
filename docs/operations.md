@@ -30,6 +30,7 @@ bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus -
 # 3. After deploying
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev          # check
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix     # fix
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -WellArchitected -SkipTenant -SkipNtfs   # Well-Architected review
 ./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix avdlz -Environment dev -TestUserUpn alex@contoso.com
 ./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix avdlz -Environment dev
 ```
@@ -44,6 +45,7 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 |---|---|---|
 | Pre-deployment preflight | Reader (check); Owner or Contributor to register providers with `-Fix` | Directory Readers (check); Groups Administrator + Application Administrator with `-Fix` (creates groups and the AVD service principal) |
 | Preflight (check) | Reader on the subscription, plus Role Based Access Control Administrator on the storage account for the NTFS step (it grants a temporary role) | Global Reader (or Security Reader + Directory Readers) |
+| Well-Architected review (`-WellArchitected`) | Reader on the subscription | — (with `-SkipTenant`) |
 | Preflight `-Fix` | Owner, or Contributor + Role Based Access Control Administrator | Cloud Application Administrator **and** Conditional Access Administrator |
 | Demo deploy | Owner, or Contributor + Role Based Access Control Administrator | Global Reader (Cloud Application Administrator with `-FixNtfs`) |
 | Cleanup | Owner | Intune Administrator + Cloud Device Administrator (to remove device objects) |
@@ -124,6 +126,23 @@ With `-IncludeLandingZone`, you must type the landing zone name to confirm (`-Fo
 5. **Defender plans**, set back to Free, only with `-ResetDefender`.
 
 The Key Vault stays soft-deleted under purge protection for 90 days.
+
+## Well-Architected review
+
+`-WellArchitected` adds a review of the **deployed** landing zone against the [Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/), grouped by pillar and ending with a scorecard. It needs only Reader; add `-SkipTenant -SkipNtfs` to leave out the tenant steps (no Graph sign-in). Findings are **warnings, never failures**: they are trade-offs to review, not deployment blockers. Why it is built this way: [decision 0009](decisions/0009-well-architected-review.md).
+
+| Pillar | Checks |
+|---|---|
+| Reliability | At least two session hosts; hosts in availability zones (and whether the region has any); zone-redundant profile storage; share soft delete; profile share backup; Azure Advisor reliability recommendations |
+| Security | Defender for Cloud plans for servers, storage and Key Vault; Trusted Launch and encryption at host; storage TLS 1.2, HTTPS only and no shared keys; Key Vault purge protection, RBAC and private access; open Defender for Cloud recommendations on landing zone resources |
+| Cost Optimization | A budget; a scaling plan enabled on the host pool; Advisor cost recommendations |
+| Operational Excellence | Host pool diagnostics to Log Analytics; log retention of 90 days or more; Azure Policy compliance of the landing zone resource groups; Advisor recommendations |
+| Performance Efficiency | Accelerated networking on the session hosts; Advisor recommendations |
+| All | **PSRule for Azure** on the live resources, with the same rules and suppressions CI applies to the templates, so drift since deployment shows up. It installs `PSRule.Rules.Azure` on first use and takes a minute or two; `-SkipPSRule` leaves it out |
+
+**Expected in dev.** `parameters/dev.bicepparam` keeps costs down on purpose: one host, locally redundant storage, no backup, Defender off, 30-day logs, no budget, and a region without zones by default. In dev and test those findings say *Expected in dev* and the scorecard counts them separately; in prod the same findings are plain warnings. `parameters/prod.bicepparam` fixes most of them; availability zones also need a region that has them.
+
+**Limits.** Advisor and Policy evaluate on their own schedule (about once a day), so a landing zone deployed today can look cleaner than it is; run the review again the next day. Microsoft's [Well-Architected assessment](https://learn.microsoft.com/assessments/) for Azure Virtual Desktop is a questionnaire about your requirements (recovery targets, operations, support) that no script can answer; this review gives you the evidence for most of its questions.
 
 ## Deployment portal
 

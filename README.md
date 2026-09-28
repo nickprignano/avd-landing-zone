@@ -16,6 +16,7 @@ It is deliberately *not* a general-purpose accelerator. Microsoft's [AVD Landing
 | **Operations** | Log Analytics, AVD Insights DCR, diagnostics on every resource, alerts (unhealthy hosts, FSLogix errors, connection errors, Service Health), activity log export | Day-2 visibility from day 1 |
 | **Governance** | Azure Policy guardrails (allowed locations, tag inheritance), Defender for Cloud (Servers P2, Storage, Key Vault), subscription budget | The subscription arrives governed |
 | **Delivery** | Strict Bicep linting, PSScriptAnalyzer, shellcheck, PSRule for Azure, subscription what-if on PRs, environment-gated deploy workflow (OIDC) | Changes are reviewed as code and promoted with approvals |
+| **Well-Architected** | PSRule's Well-Architected rules gate every template change; `-WellArchitected` reviews the **deployed** landing zone by pillar (design checks, Advisor, Defender for Cloud, Policy, PSRule on live resources) | Know where a deployment stands against a review, and what the dev settings trade away |
 
 Everything is built from pinned [Azure Verified Modules](https://aka.ms/avm).
 
@@ -96,7 +97,7 @@ avd-landing-zone/
 - [`docs/design-decisions.md`](docs/design-decisions.md): the opinions this repo takes and how it compares with the LZA
 - [`docs/architecture.md`](docs/architecture.md): resource layout, traffic flows, identity and RBAC model
 - [`docs/deploy.md`](docs/deploy.md): prerequisites, deployment, post-deployment steps, scaling out, teardown
-- [`docs/operations.md`](docs/operations.md): preflight with fix mode, demo host pool with sign-in validation, cleanup
+- [`docs/operations.md`](docs/operations.md): preflight with fix mode, Well-Architected review, demo host pool with sign-in validation, cleanup
 - [Deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/) ([how it works](docs/portal/README.md)): region by latency, then the next command from each pasted Cloud Shell output
 - [`docs/ci.md`](docs/ci.md): validation and deployment pipelines, OIDC setup
 - [`docs/gotchas.md`](docs/gotchas.md): the things that bite

@@ -222,7 +222,7 @@ test('portal commands only use parameters the scripts define', () => {
   const cfg = { ...P.DEFAULTS, testUserUpn: 'alex@contoso.com' };
   const commands = [
     P.commands.predeploy(cfg, true), P.commands.predeploy(cfg, false), P.commands.postdeploy(cfg, true), P.commands.postdeploy(cfg, false),
-    P.commands.demo(cfg), P.commands.removeDemo(cfg), P.commands.deploy(cfg)
+    P.commands.demo(cfg), P.commands.removeDemo(cfg), P.commands.deploy(cfg), P.commands.wellArchitected(cfg)
   ];
   let checked = 0;
   for (const c of commands) {
@@ -236,4 +236,30 @@ test('portal commands only use parameters the scripts define', () => {
     }
   }
   assert.ok(checked >= 15, `checked ${checked} parameters`);
+});
+
+test('state: post-deployment ready -> offers the Well-Architected review', () => {
+  const r = analyze('state-postdeploy-ready.txt');
+  const w = r.actions.find((a) => /Well-Architected/.test(a.title));
+  assert.ok(w, 'no Well-Architected action');
+  assert.equal(last(w.command), './scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -WellArchitected -SkipTenant -SkipNtfs');
+  assertSelfContained(r);
+});
+
+test('state: Well-Architected review of a dev landing zone -> findings by pillar, expected ones counted, sign-in not blocked', () => {
+  const r = analyze('state-postdeploy-waf.txt');
+  assert.equal(r.status, 'ready');
+  assert.equal(r.step, 'signin');
+  assert.equal(r.actions[0].title, 'Review the Well-Architected findings');
+  assert.match(r.actions[0].why, /^To review: /);
+  assert.match(r.actions[0].why, /7 are trade-offs the dev parameter file makes on purpose/);
+  assert.ok(r.warnings.some((w) => w.id === 'waf-zones' && w.data.accepted));
+  assert.ok(r.actions.some((a) => a.title === 'Sign in to the desktop'));
+  assert.ok(!r.actions.some((a) => a.title === 'Optional: Well-Architected review'), 'offers the review it just ran');
+});
+
+test('state: Well-Architected review with nothing to review', () => {
+  const r = analyze('state-postdeploy-waf-clean.txt');
+  assert.equal(r.actions[0].title, 'Well-Architected: every check passes');
+  assert.equal(r.warnings.length, 0);
 });

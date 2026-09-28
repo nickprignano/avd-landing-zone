@@ -1004,6 +1004,278 @@ function Get-AvdRunCommandState {
 }
 
 # =====================================================================
+# Well-Architected review of the deployed landing zone (-WellArchitected)
+# =====================================================================
+# Findings are warnings, never failures: they are design trade-offs to review, and a dev
+# landing zone makes several on purpose (docs/decisions/0009-well-architected-review.md).
+$script:WafPillars = @('Reliability', 'Security', 'Cost Optimization', 'Operational Excellence', 'Performance Efficiency')
+$script:AdvisorPillar = @{ HighAvailability = 'Reliability'; Security = 'Security'; Cost = 'Cost Optimization'; OperationalExcellence = 'Operational Excellence'; Performance = 'Performance Efficiency' }
+
+function Get-AvdArmList {
+  <# Every item of an ARM list, following nextLink. Stops on an error (Invoke-AvdArm throws), an empty page or MaxPages (lesson 0008). #>
+  param([Parameter(Mandatory)][string] $Path, [int] $MaxPages = 50)
+  $next = $Path; $page = 0
+  while ($next -and $page -lt $MaxPages) {
+    $page++
+    $r = Invoke-AvdArm -Path $next
+    if (-not $r -or -not $r.value) { break }
+    $r.value
+    $next = if ($r.nextLink) { ([uri]$r.nextLink).PathAndQuery } else { $null }
+  }
+}
+
+function Add-AvdWafResult {
+  <#
+    One Well-Architected finding: Pass, or Warn with id waf-<Key> and data { pillar, accepted }.
+    -TradeOff marks a choice the dev and test parameter files make on purpose; outside prod the
+    finding says so, in prod it is a plain warning.
+  #>
+  param(
+    [Parameter(Mandatory)][string] $Pillar,
+    [Parameter(Mandatory)][string] $Key,
+    [Parameter(Mandatory)][string] $Check,
+    [Parameter(Mandatory)][bool] $Ok,
+    [string] $Detail = '',
+    [string] $Remediation = '',
+    [string] $Environment = 'prod',
+    [switch] $TradeOff
+  )
+  $area = "WAF: $Pillar"
+  if ($Ok) { Add-AvdCheckResult $area $Check 'Pass' -Detail $Detail; return }
+  $accepted = $TradeOff -and $Environment -ne 'prod'
+  if ($accepted) {
+    if ($Detail -and $Detail -notmatch '[.!?]$') { $Detail += '.' }
+    $Detail = (@($Detail, "Expected in $Environment (parameters/$Environment.bicepparam); change it before production.") | Where-Object { $_ }) -join ' '
+  }
+  Add-AvdCheckResult $area $Check 'Warn' -Detail $Detail -Remediation $Remediation -Id "waf-$Key" -Data @{ pillar = $Pillar; accepted = [bool]$accepted }
+}
+
+function Get-AvdPSRuleFinding {
+  <#
+    PSRule for Azure (the rules CI applies to the templates) against the deployed resources,
+    with the repo's suppressions. Returns the failed rule records.
+  #>
+  param([Parameter(Mandatory)][string[]] $ResourceGroupName)
+  if (-not (Get-Command Export-AzRuleData -ErrorAction SilentlyContinue) -or -not (Get-Command Invoke-PSRule -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Module -ListAvailable -Name PSRule.Rules.Azure)) {
+      Write-Host '          Installing PSRule.Rules.Azure from the PowerShell Gallery (first run only) ...' -ForegroundColor DarkGray
+      Install-Module -Name PSRule.Rules.Azure -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+    }
+    Import-Module PSRule.Rules.Azure -ErrorAction Stop
+  }
+  $out = Join-Path ([IO.Path]::GetTempPath()) "avdlz-psrule-$([guid]::NewGuid().ToString('n'))"
+  $suppressions = Join-Path $PSScriptRoot '../../.ps-rule'
+  try {
+    Write-Host "          Exporting $($ResourceGroupName.Count) resource groups for PSRule ..." -ForegroundColor DarkGray
+    New-Item -ItemType Directory -Force -Path $out | Out-Null
+    Export-AzRuleData -ResourceGroupName $ResourceGroupName -OutputPath $out -ErrorAction Stop | Out-Null
+    # Run from the export folder: the repo's ps-rule.yaml limits input to the parameter files.
+    Push-Location $out
+    try {
+      $src = @('PSRule.Rules.Azure')
+      $invoke = @{ InputPath = (Join-Path $out '*.json'); Module = $src; Outcome = 'Fail'; WarningAction = 'SilentlyContinue'; ErrorAction = 'Stop' }
+      if (Test-Path $suppressions) { $invoke.Path = (Resolve-Path $suppressions).Path }
+      @(Invoke-PSRule @invoke)
+    }
+    finally { Pop-Location }
+  }
+  finally { Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+function Get-AvdPSRulePillar {
+  <# The Well-Architected pillar a PSRule for Azure rule belongs to (its Azure.WAF/pillar tag). #>
+  param([Parameter(Mandatory)] $Record)
+  $tag = $Record.Tag
+  if ($tag -and $tag['Azure.WAF/pillar']) { [string]$tag['Azure.WAF/pillar'] } else { '' }
+}
+
+function Test-AvdWellArchitected {
+  <#
+    Reviews the deployed landing zone against the Azure Well-Architected Framework:
+    design checks read from the resources, Azure Advisor and Defender for Cloud
+    recommendations, Azure Policy compliance, and PSRule for Azure on the live resources.
+  #>
+  param([Parameter(Mandatory)] $Lz, [switch] $SkipPSRule)
+  Write-AvdSection "Well-Architected review ($($Lz.BaseName))"
+  $envName = $Lz.Environment
+  $sub = "/subscriptions/$($Lz.SubscriptionId)"
+  $rgKeys = @($Lz.ResourceGroups.Keys | Where-Object { $_ -ne 'Demo' -and $Lz.RgExists[$_] })
+  $rgIds = @($rgKeys | ForEach-Object { $Lz.ResourceGroupIds[$_] })
+  $inLz = { param($id) [bool]($id -and ($rgIds | Where-Object { ([string]$id).StartsWith("$_/", [StringComparison]::OrdinalIgnoreCase) })) }
+  $waf = { param($pillar, $key, $check, $ok, $detail, $remediation, [switch] $tradeOff)
+    Add-AvdWafResult -Pillar $pillar -Key $key -Check $check -Ok $ok -Detail $detail -Remediation $remediation -Environment $envName -TradeOff:$tradeOff }
+  # Every source is read separately: one that fails is reported and the rest still run.
+  $read = { param($pillar, $what, [scriptblock] $block)
+    try { & $block }
+    catch { Add-AvdCheckResult "WAF: $pillar" "Read $what" 'Warn' -Detail $_.Exception.Message -Id 'waf-read-error' -Data @{ pillar = $pillar; accepted = $false } }
+  }
+  $top = { param($items) (@($items | Select-Object -Unique -First 5) -join '; ') + $(if (@($items | Select-Object -Unique).Count -gt 5) { '; ...' }) }
+
+  # ---------------------------------------------------------------- design checks
+  $vms = @(& $read 'Reliability' 'session hosts' { Get-AvdArmList -Path "$($Lz.ResourceGroupIds.Hosts)/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01" })
+  $regionZones = [bool](& $read 'Reliability' 'region availability zones' {
+      $loc = (Invoke-AvdArm -Path "$sub/locations?api-version=2022-12-01").value | Where-Object name -eq $Lz.Location
+      [bool]($loc -and @($loc.availabilityZoneMappings).Count)
+    })
+
+  & $waf 'Reliability' 'host-count' 'At least two session hosts' ($vms.Count -ge 2) "$($vms.Count) session host(s)" 'Set sessionHostCount to 2 or more in the parameter file and deploy again: one host is a single point of failure.' -tradeOff
+  $zoned = $vms.Count -and -not ($vms | Where-Object { -not @($_.zones).Count })
+  if (-not $regionZones) {
+    & $waf 'Reliability' 'zones' 'Session hosts spread across availability zones' $false "$($Lz.Location) has no availability zones, so hosts and profile storage are regional." 'For production, choose a region with availability zones (the deployment portal lists them by latency) and set availabilityZones = [1, 2, 3].' -tradeOff
+  }
+  else {
+    & $waf 'Reliability' 'zones' 'Session hosts spread across availability zones' $zoned $(if ($zoned) { 'Zones: ' + ((@($vms | ForEach-Object { $_.zones }) | Sort-Object -Unique) -join ', ') } else { "$($Lz.Location) offers zones; the hosts are regional." }) 'Set availabilityZones = [1, 2, 3] in the parameter file.' -tradeOff
+  }
+
+  if ($Lz.StorageAccount) {
+    & $read 'Reliability' 'profile storage' {
+      $sa = Invoke-AvdArm -Path "$($Lz.StorageAccount.Id)?api-version=2023-05-01"
+      $sku = $sa.sku.name
+      & $waf 'Reliability' 'storage-redundancy' 'Profile storage is zone-redundant' ($sku -match 'ZRS') "SKU $sku$(if (-not $regionZones) { '; ZRS needs a region with availability zones' })" 'Set profileStorageSku = Premium_ZRS where the region offers it.' -tradeOff
+      $p = $sa.properties
+      $hard = @()
+      if ($p.minimumTlsVersion -ne 'TLS1_2') { $hard += "minimum TLS $($p.minimumTlsVersion)" }
+      if ($p.supportsHttpsTrafficOnly -eq $false) { $hard += 'HTTP allowed' }
+      if ($p.allowSharedKeyAccess -ne $false) { $hard += 'shared key access allowed' }
+      & $waf 'Security' 'storage-hardening' 'Profile storage: TLS 1.2, HTTPS only, no shared keys' (-not $hard.Count) ($hard -join '; ') 'Redeploy the storage module (bicep/modules/storage.bicep sets all three).'
+      $fs = Invoke-AvdArm -Path "$($Lz.StorageAccount.Id)/fileServices/default?api-version=2023-05-01"
+      $sd = $fs.properties.shareDeleteRetentionPolicy
+      & $waf 'Reliability' 'share-soft-delete' 'Profile share soft delete' ([bool]$sd.enabled) $(if ($sd.enabled) { "$($sd.days) days" } else { 'Disabled' }) 'Enable soft delete for file shares on the storage account.'
+    }
+  }
+
+  & $read 'Reliability' 'profile backup' {
+    $protected = @()
+    if ($Lz.RecoveryVault) {
+      $vid = "$($Lz.ResourceGroupIds.Storage)/providers/Microsoft.RecoveryServices/vaults/$($Lz.RecoveryVault.Name)"
+      $filter = [uri]::EscapeDataString("backupManagementType eq 'AzureStorage'")
+      $protected = @(Get-AvdArmList -Path "$vid/backupProtectedItems?api-version=2024-04-01&`$filter=$filter")
+    }
+    & $waf 'Reliability' 'profile-backup' 'Profile share backed up' ([bool]$protected.Count) $(if ($protected.Count) { "$($protected.Count) protected item(s) in $($Lz.RecoveryVault.Name)" } else { 'No backup of the profile share.' }) 'Set enableProfileBackup = true in the parameter file and deploy again.' -tradeOff
+  }
+
+  & $read 'Security' 'Defender for Cloud plans' {
+    $pricing = @(Get-AvdArmList -Path "$sub/providers/Microsoft.Security/pricings?api-version=2024-01-01")
+    $free = @('VirtualMachines', 'StorageAccounts', 'KeyVaults' | Where-Object { $n = $_; -not ($pricing | Where-Object { $_.name -eq $n -and $_.properties.pricingTier -eq 'Standard' }) })
+    & $waf 'Security' 'defender-plans' 'Defender for Cloud plans for servers, storage and Key Vault' (-not $free.Count) $(if ($free.Count) { "Not enabled: $($free -join ', ')" } else { 'Standard' }) 'Set enableDefenderForCloud = true in the parameter file and deploy again.' -tradeOff
+  }
+
+  if ($vms.Count) {
+    $weak = @($vms | Where-Object { $_.properties.securityProfile.securityType -ne 'TrustedLaunch' -or -not $_.properties.securityProfile.encryptionAtHost } | ForEach-Object name)
+    & $waf 'Security' 'host-security' 'Session hosts: Trusted Launch and encryption at host' (-not $weak.Count) $(if ($weak.Count) { "Not on: $($weak -join ', ')" } else { "$($vms.Count) host(s)" }) 'Redeploy the hosts with encryptionAtHost = true (Trusted Launch is always on in bicep/modules/sessionHosts.bicep).'
+  }
+
+  if ($Lz.KeyVault) {
+    & $read 'Security' 'Key Vault' {
+      $kv = (Invoke-AvdArm -Path "$($Lz.KeyVault.ResourceId)?api-version=2023-07-01").properties
+      $gaps = @()
+      if (-not $kv.enablePurgeProtection) { $gaps += 'purge protection off' }
+      if (-not $kv.enableRbacAuthorization) { $gaps += 'access policies instead of RBAC' }
+      if ($kv.publicNetworkAccess -ne 'Disabled') { $gaps += "public network access $($kv.publicNetworkAccess)" }
+      & $waf 'Security' 'keyvault-hardening' 'Key Vault: purge protection, RBAC, private only' (-not $gaps.Count) ($gaps -join '; ') 'Redeploy the Key Vault module.'
+    }
+  }
+
+  & $read 'Cost Optimization' 'budgets' {
+    $budgets = @(Get-AvdArmList -Path "$sub/providers/Microsoft.Consumption/budgets?api-version=2023-11-01")
+    & $waf 'Cost Optimization' 'budget' 'A cost budget with alerts' ([bool]$budgets.Count) $(if ($budgets.Count) { ($budgets | ForEach-Object name) -join ', ' } else { 'No budget on the subscription.' }) 'Set AVD_MONTHLY_BUDGET (and alert emails) before deploy.sh, or create a budget in Cost Management.' -tradeOff
+  }
+  if ($Lz.HostPool) {
+    & $read 'Cost Optimization' 'scaling plans' {
+      $plans = @(Get-AvdArmList -Path "$($Lz.ResourceGroupIds.ControlPlane)/providers/Microsoft.DesktopVirtualization/scalingPlans?api-version=2024-04-03")
+      $on = $plans | Where-Object { $_.properties.hostPoolReferences | Where-Object { $_.hostPoolArmPath -eq $Lz.HostPool.ResourceId -and $_.scalingPlanEnabled } }
+      & $waf 'Cost Optimization' 'scaling-plan' 'Scaling plan enabled on the host pool' ([bool]$on) $(if ($on) { @($on)[0].name } else { 'Hosts run until stopped by hand.' }) 'Redeploy the control plane module (it assigns a scaling plan).'
+    }
+    & $read 'Operational Excellence' 'host pool diagnostics' {
+      $ds = @(Get-AvdArmList -Path "$($Lz.HostPool.ResourceId)/providers/Microsoft.Insights/diagnosticSettings?api-version=2021-05-01-preview")
+      $toLaw = @($ds | Where-Object { $_.properties.workspaceId })
+      & $waf 'Operational Excellence' 'diagnostics' 'Host pool diagnostics sent to Log Analytics' ([bool]$toLaw.Count) $(if ($toLaw.Count) { ($toLaw | ForEach-Object name) -join ', ' } else { 'No diagnostic setting.' }) 'Redeploy the control plane module.'
+    }
+  }
+  if ($Lz.LogAnalyticsId) {
+    & $read 'Operational Excellence' 'Log Analytics' {
+      $days = (Invoke-AvdArm -Path "$($Lz.LogAnalyticsId)?api-version=2023-09-01").properties.retentionInDays
+      & $waf 'Operational Excellence' 'log-retention' 'Log retention of 90 days or more' ($days -ge 90) "$days days" 'Set logRetentionDays = 90 or more in the parameter file.' -tradeOff
+    }
+  }
+  & $read 'Operational Excellence' 'Azure Policy compliance' {
+    $nonCompliant = 0; $assignments = @()
+    foreach ($id in $rgIds) {
+      $s = Invoke-AvdArm -Method POST -Path "$id/providers/Microsoft.PolicyInsights/policyStates/latest/summarize?api-version=2019-10-01"
+      $v = @($s.value)[0]
+      if (-not $v) { continue }
+      $nonCompliant += [int]$v.results.nonCompliantResources
+      $assignments += @($v.policyAssignments | Where-Object { $_.results.nonCompliantResources } | ForEach-Object { ($_.policyAssignmentId -split '/')[-1] })
+    }
+    & $waf 'Operational Excellence' 'policy-compliance' 'Resources compliant with the assigned policies' ($nonCompliant -eq 0) $(if ($nonCompliant) { "$nonCompliant non-compliant resource(s); assignments: $(& $top $assignments)" } else { 'Evaluation can take up to a day after a deployment.' }) 'Azure portal: Policy > Compliance, filtered to the landing zone resource groups.'
+  }
+  if ($vms.Count) {
+    & $read 'Performance Efficiency' 'network interfaces' {
+      $nics = @(Get-AvdArmList -Path "$($Lz.ResourceGroupIds.Hosts)/providers/Microsoft.Network/networkInterfaces?api-version=2024-05-01")
+      $slow = @($nics | Where-Object { -not $_.properties.enableAcceleratedNetworking } | ForEach-Object name)
+      & $waf 'Performance Efficiency' 'accelerated-networking' 'Accelerated networking on session hosts' ($nics.Count -and -not $slow.Count) $(if ($slow.Count) { "Off: $($slow -join ', ')" } else { "$($nics.Count) NIC(s)" }) 'Use a VM size that supports accelerated networking and enable it on the NICs.'
+    }
+  }
+
+  # ---------------------------------------------------------------- Defender for Cloud and Advisor
+  & $read 'Security' 'Defender for Cloud recommendations' {
+    Write-Host '          Reading Defender for Cloud recommendations ...' -ForegroundColor DarkGray
+    $bad = @(Get-AvdArmList -Path "$sub/providers/Microsoft.Security/assessments?api-version=2021-06-01" |
+        Where-Object { $_.properties.status.code -eq 'Unhealthy' -and (& $inLz $_.id) })
+    $bySeverity = ($bad | Group-Object { $_.properties.metadata.severity } | Sort-Object Name | ForEach-Object { "$($_.Count) $($_.Name)" }) -join ', '
+    & $waf 'Security' 'defender-recommendations' 'Defender for Cloud: no open recommendations on landing zone resources' (-not $bad.Count) $(if ($bad.Count) { "$($bad.Count) open ($bySeverity): $(& $top @($bad | ForEach-Object { $_.properties.displayName }))" } else { '' }) 'Azure portal: Defender for Cloud > Recommendations, filtered to the landing zone resource groups.'
+  }
+  & $read 'Reliability' 'Azure Advisor recommendations' {
+    Write-Host '          Reading Azure Advisor recommendations (Advisor refreshes about once a day; a landing zone deployed today may have none yet) ...' -ForegroundColor DarkGray
+    $recs = @(Get-AvdArmList -Path "$sub/providers/Microsoft.Advisor/recommendations?api-version=2023-01-01" |
+        Where-Object { & $inLz $(if ($_.properties.resourceMetadata.resourceId) { $_.properties.resourceMetadata.resourceId } else { $_.id }) })
+    foreach ($cat in 'HighAvailability', 'Security', 'Cost', 'OperationalExcellence', 'Performance') {
+      $pillar = $script:AdvisorPillar[$cat]
+      $mine = @($recs | Where-Object { $_.properties.category -eq $cat })
+      $detail = if ($mine.Count) { "$($mine.Count): $(& $top @($mine | ForEach-Object { '{0} ({1} impact)' -f $_.properties.shortDescription.problem, $_.properties.impact }))" } else { '' }
+      & $waf $pillar "advisor-$($cat.ToLower())" "Azure Advisor: no $($pillar.ToLower()) recommendations" (-not $mine.Count) $detail 'Azure portal: Advisor > Recommendations, filtered to the landing zone resource groups.'
+    }
+  }
+
+  # ---------------------------------------------------------------- PSRule for Azure on the live resources
+  if ($SkipPSRule) {
+    Add-AvdCheckResult 'WAF: PSRule' 'PSRule for Azure on the deployed resources' 'Skip' -Detail '-SkipPSRule'
+  }
+  else {
+    Write-Host '          Running PSRule for Azure on the deployed resources (a minute or two) ...' -ForegroundColor DarkGray
+    try {
+      $failed = @(Get-AvdPSRuleFinding -ResourceGroupName @($rgKeys | ForEach-Object { $Lz.ResourceGroups[$_] }))
+      foreach ($pillar in $script:WafPillars) {
+        $mine = @($failed | Where-Object { (Get-AvdPSRulePillar $_) -eq $pillar })
+        $slug = ($pillar -replace ' ', '-').ToLower()
+        & $waf $pillar "psrule-$slug" "PSRule for Azure: $($pillar.ToLower()) rules pass" (-not $mine.Count) $(if ($mine.Count) { "$($mine.Count): $(& $top @($mine | ForEach-Object { "$($_.RuleName) on $($_.TargetName)" }))" } else { '' }) 'Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.'
+      }
+      $other = @($failed | Where-Object { (Get-AvdPSRulePillar $_) -notin $script:WafPillars })
+      if ($other.Count) {
+        Add-AvdCheckResult 'WAF: PSRule' 'PSRule for Azure: rules without a pillar' 'Warn' -Detail "$($other.Count): $(& $top @($other | ForEach-Object { "$($_.RuleName) on $($_.TargetName)" }))" -Id 'waf-psrule-other' -Data @{ pillar = ''; accepted = $false }
+      }
+    }
+    catch {
+      Add-AvdCheckResult 'WAF: PSRule' 'PSRule for Azure on the deployed resources' 'Warn' -Detail $_.Exception.Message -Remediation 'Rerun with -SkipPSRule to skip it; CI runs the same rules on the templates.' -Id 'waf-read-error' -Data @{ pillar = 'Security'; accepted = $false }
+    }
+  }
+
+  # ---------------------------------------------------------------- scorecard
+  $all = @(Get-AvdCheckResult | ForEach-Object { $_ } | Where-Object { $_.Area -like 'WAF: *' })
+  Write-Host ''
+  Write-Host '  Well-Architected scorecard' -ForegroundColor White
+  foreach ($pillar in $script:WafPillars) {
+    $mine = @($all | Where-Object Area -eq "WAF: $pillar")
+    $pass = @($mine | Where-Object Status -eq 'Pass').Count
+    $warn = @($mine | Where-Object Status -eq 'Warn')
+    $accepted = @($warn | Where-Object { $_.Data -and $_.Data.accepted }).Count
+    $line = '  {0,-24} {1} of {2} pass' -f $pillar, $pass, $mine.Count
+    if ($warn.Count) { $line += "; $($warn.Count) to review$(if ($accepted) { " ($accepted expected in $envName)" })" }
+    Write-Host $line -ForegroundColor $(if ($warn.Count - $accepted) { 'Yellow' } elseif ($warn.Count) { 'DarkYellow' } else { 'Green' })
+  }
+}
+
+# =====================================================================
 # Orchestrated readiness (used by the preflight and the demo script)
 # =====================================================================
 function Invoke-AvdReadinessCheck {

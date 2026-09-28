@@ -1,0 +1,100 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -WellArchitected -SkipTenant -SkipNtfs
+AVD landing zone preflight - avdlz/dev in 'AVD LZ Dev'
+...
+== Well-Architected review (avdlz-dev)
+  [WARN ] At least two session hosts
+          1 session host(s). Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set sessionHostCount to 2 or more in the parameter file and deploy again: one host is a single point of failure.
+  [WARN ] Session hosts spread across availability zones
+          eastus2 has no availability zones, so hosts and profile storage are regional. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> For production, choose a region with availability zones (the deployment portal lists them by latency) and set availabilityZones = [1, 2, 3].
+  [WARN ] Profile storage is zone-redundant
+          SKU Premium_LRS; ZRS needs a region with availability zones. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set profileStorageSku = Premium_ZRS where the region offers it.
+  [PASS ] Profile storage: TLS 1.2, HTTPS only, no shared keys
+  [PASS ] Profile share soft delete
+          14 days
+  [WARN ] Profile share backed up
+          No backup of the profile share. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set enableProfileBackup = true in the parameter file and deploy again.
+  [WARN ] Defender for Cloud plans for servers, storage and Key Vault
+          Not enabled: VirtualMachines, StorageAccounts, KeyVaults. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set enableDefenderForCloud = true in the parameter file and deploy again.
+  [PASS ] Session hosts: Trusted Launch and encryption at host
+          1 host(s)
+  [PASS ] Key Vault: purge protection, RBAC, private only
+  [WARN ] A cost budget with alerts
+          No budget on the subscription. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set AVD_MONTHLY_BUDGET (and alert emails) before deploy.sh, or create a budget in Cost Management.
+  [PASS ] Scaling plan enabled on the host pool
+          vdscaling-avdlz-dev
+  [PASS ] Host pool diagnostics sent to Log Analytics
+          diag-vdpool
+  [WARN ] Log retention of 90 days or more
+          30 days. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set logRetentionDays = 90 or more in the parameter file.
+  [WARN ] Resources compliant with the assigned policies
+          1 non-compliant resource(s); assignments: avdlz-guest-attestation
+          -> Azure portal: Policy > Compliance, filtered to the landing zone resource groups.
+  [PASS ] Accelerated networking on session hosts
+          1 NIC(s)
+          Reading Defender for Cloud recommendations ...
+  [WARN ] Defender for Cloud: no open recommendations on landing zone resources
+          1 open (1 Medium): Machines should have vulnerability findings resolved
+          -> Azure portal: Defender for Cloud > Recommendations, filtered to the landing zone resource groups.
+          Reading Azure Advisor recommendations (Advisor refreshes about once a day; a landing zone deployed today may have none yet) ...
+  [WARN ] Azure Advisor: no reliability recommendations
+          1: Use availability zones for better resiliency (Medium impact)
+          -> Azure portal: Advisor > Recommendations, filtered to the landing zone resource groups.
+  [PASS ] Azure Advisor: no security recommendations
+  [PASS ] Azure Advisor: no cost optimization recommendations
+  [PASS ] Azure Advisor: no operational excellence recommendations
+  [PASS ] Azure Advisor: no performance efficiency recommendations
+          Running PSRule for Azure on the deployed resources (a minute or two) ...
+          Exporting 5 resource groups for PSRule ...
+  [WARN ] PSRule for Azure: reliability rules pass
+          1: Azure.Storage.ContainerSoftDelete on stavdlzdevabc123
+          -> Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.
+  [PASS ] PSRule for Azure: security rules pass
+  [WARN ] PSRule for Azure: cost optimization rules pass
+          1: Azure.VM.UseHybridUseBenefit on avdlzdsh-001
+          -> Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.
+  [PASS ] PSRule for Azure: operational excellence rules pass
+  [PASS ] PSRule for Azure: performance efficiency rules pass
+
+  Well-Architected scorecard
+  Reliability              1 of 7 pass; 6 to review (4 expected in dev)
+  Security                 5 of 7 pass; 2 to review (1 expected in dev)
+  Cost Optimization        2 of 4 pass; 2 to review (1 expected in dev)
+  Operational Excellence   3 of 5 pass; 2 to review (1 expected in dev)
+  Performance Efficiency   3 of 3 pass
+
+== Summary: 51 Pass, 1 Skip, 12 Warn
+
+Status Area                        Check                                                                 Remediation
+------ ----                        -----                                                                 -----------
+Warn   WAF: Reliability            At least two session hosts                                            Set sessionHostCount to 2 or more in the parameter file and deploy again: one host is a single
+                                                                                                         point of failure.
+Warn   WAF: Reliability            Session hosts spread across availability zones                        For production, choose a region with availability zones (the deployment portal lists them by la
+                                                                                                         tency) and set availabilityZones = [1, 2, 3].
+Warn   WAF: Reliability            Profile storage is zone-redundant                                     Set profileStorageSku = Premium_ZRS where the region offers it.
+Warn   WAF: Reliability            Profile share backed up                                               Set enableProfileBackup = true in the parameter file and deploy again.
+Warn   WAF: Security               Defender for Cloud plans for servers, storage and Key Vault           Set enableDefenderForCloud = true in the parameter file and deploy again.
+Warn   WAF: Cost Optimization      A cost budget with alerts                                             Set AVD_MONTHLY_BUDGET (and alert emails) before deploy.sh, or create a budget in Cost Manageme
+                                                                                                         nt.
+Warn   WAF: Operational Excellence Log retention of 90 days or more                                      Set logRetentionDays = 90 or more in the parameter file.
+Warn   WAF: Operational Excellence Resources compliant with the assigned policies                        Azure portal: Policy > Compliance, filtered to the landing zone resource groups.
+Warn   WAF: Security               Defender for Cloud: no open recommendations on landing zone resources Azure portal: Defender for Cloud > Recommendations, filtered to the landing zone resource group
+                                                                                                         s.
+Warn   WAF: Reliability            Azure Advisor: no reliability recommendations                         Azure portal: Advisor > Recommendations, filtered to the landing zone resource groups.
+Warn   WAF: Reliability            PSRule for Azure: reliability rules pass                              Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix
+                                                                                                          it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.
+Warn   WAF: Cost Optimization      PSRule for Azure: cost optimization rules pass                        Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix
+                                                                                                          it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.
+
+
+Ready.
+
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"postdeploy","status":"ready","fix":false,"context":{"environment":"dev","wellArchitected":true,"namePrefix":"avdlz"},"counts":{"pass":51,"fail":0,"warn":12,"fixed":0,"skip":1},"failures":[],"warnings":[{"id":"waf-host-count","area":"WAF: Reliability","check":"At least two session hosts","detail":"1 session host(s). Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set sessionHostCount to 2 or more in the parameter file and deploy again: one host is a single point of failure.","data":{"accepted":true,"pillar":"Reliability"}},{"id":"waf-zones","area":"WAF: Reliability","check":"Session hosts spread across availability zones","detail":"eastus2 has no availability zones, so hosts and profile storage are regional. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"For production, choose a region with availability zones (the deployment portal lists them by latency) and set availabilityZones = [1, 2, 3].","data":{"accepted":true,"pillar":"Reliability"}},{"id":"waf-storage-redundancy","area":"WAF: Reliability","check":"Profile storage is zone-redundant","detail":"SKU Premium_LRS; ZRS needs a region with availability zones. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set profileStorageSku = Premium_ZRS where the region offers it.","data":{"accepted":true,"pillar":"Reliability"}},{"id":"waf-profile-backup","area":"WAF: Reliability","check":"Profile share backed up","detail":"No backup of the profile share. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set enableProfileBackup = true in the parameter file and deploy again.","data":{"accepted":true,"pillar":"Reliability"}},{"id":"waf-defender-plans","area":"WAF: Security","check":"Defender for Cloud plans for servers, storage and Key Vault","detail":"Not enabled: VirtualMachines, StorageAccounts, KeyVaults. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set enableDefenderForCloud = true in the parameter file and deploy again.","data":{"accepted":true,"pillar":"Security"}},{"id":"waf-budget","area":"WAF: Cost Optimization","check":"A cost budget with alerts","detail":"No budget on the subscription. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set AVD_MONTHLY_BUDGET (and alert emails) before deploy.sh, or create a budget in Cost Management.","data":{"accepted":true,"pillar":"Cost Optimization"}},{"id":"waf-log-retention","area":"WAF: Operational Excellence","check":"Log retention of 90 days or more","detail":"30 days. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set logRetentionDays = 90 or more in the parameter file.","data":{"accepted":true,"pillar":"Operational Excellence"}},{"id":"waf-policy-compliance","area":"WAF: Operational Excellence","check":"Resources compliant with the assigned policies","detail":"1 non-compliant resource(s); assignments: avdlz-guest-attestation","remediation":"Azure portal: Policy > Compliance, filtered to the landing zone resource groups.","data":{"accepted":false,"pillar":"Operational Excellence"}},{"id":"waf-defender-recommendations","area":"WAF: Security","check":"Defender for Cloud: no open recommendations on landing zone resources","detail":"1 open (1 Medium): Machines should have vulnerability findings resolved","remediation":"Azure portal: Defender for Cloud > Recommendations, filtered to the landing zone resource groups.","data":{"accepted":false,"pillar":"Security"}},{"id":"waf-advisor-highavailability","area":"WAF: Reliability","check":"Azure Advisor: no reliability recommendations","detail":"1: Use availability zones for better resiliency (Medium impact)","remediation":"Azure portal: Advisor > Recommendations, filtered to the landing zone resource groups.","data":{"accepted":false,"pillar":"Reliability"}},{"id":"waf-psrule-reliability","area":"WAF: Reliability","check":"PSRule for Azure: reliability rules pass","detail":"1: Azure.Storage.ContainerSoftDelete on stavdlzdevabc123","remediation":"Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.","data":{"accepted":false,"pillar":"Reliability"}},{"id":"waf-psrule-cost-optimization","area":"WAF: Cost Optimization","check":"PSRule for Azure: cost optimization rules pass","detail":"1: Azure.VM.UseHybridUseBenefit on avdlzdsh-001","remediation":"Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.","data":{"accepted":false,"pillar":"Cost Optimization"}}]} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>

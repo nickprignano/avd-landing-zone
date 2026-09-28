@@ -30,9 +30,9 @@ Written by `Write-AvdPortalState` (PowerShell scripts) and `portal_state` (`depl
 | `stage` | `predeploy`, `deploy`, `postdeploy`, `demo` or `cleanup`. |
 | `status` | `ready` / `notready` (preflight, demo, cleanup); `started` / `succeeded` / `failed` / `whatif` (`deploy.sh`). A deployment prints `started` before it begins, so output cut off by a disconnect still says what is running. |
 | `fix` | Whether the run used `-Fix`. |
-| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone` (whichever apply). |
+| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected` (whichever apply). |
 | `counts` | `pass`, `fail`, `warn`, `fixed`, `skip`. |
-| `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognise the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`. |
+| `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognise the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
 
 Add fields; don't rename or remove them without bumping `v` and keeping the old reading in `portal-core.js`.
 
