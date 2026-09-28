@@ -118,7 +118,11 @@ function Connect-AvdGraph {
   $ctx = Get-MgContext
   # An existing sign-in is reused when it covers every scope ('X.ReadWrite.All' covers 'X.Read.All').
   $missing = @($scopes | Where-Object { $_ -notin $ctx.Scopes -and $_.Replace('.Read.', '.ReadWrite.') -notin $ctx.Scopes })
-  if ($ctx -and $ctx.TenantId -eq $tenantId -and -not $missing.Count) { return }
+  if ($ctx -and $ctx.TenantId -eq $tenantId -and -not $missing.Count) {
+    if (Test-AvdGraphToken) { return }
+    Write-Host '  The existing Microsoft Graph sign-in cannot get a token; signing in again.' -ForegroundColor Yellow
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+  }
   Write-Host "  Signing in to Microsoft Graph ($($scopes -join ', '))" -ForegroundColor DarkGray
   $connect = @{ Scopes = $scopes; TenantId = $tenantId; NoWelcome = $true; ErrorAction = 'Stop' }
   if (Test-AvdCloudShell) {
@@ -128,6 +132,21 @@ function Connect-AvdGraph {
   # Connect-MgGraph writes the device-code message to the output stream. Send it to the
   # host so it is shown even when this runs inside a function whose output is captured.
   Connect-MgGraph @connect | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+  if (-not (Test-AvdGraphToken)) {
+    throw 'Signed in to Microsoft Graph, but requests still fail to get a token. Run Disconnect-MgGraph, close and reopen Cloud Shell, and try again.'
+  }
+}
+
+function Test-AvdGraphToken {
+  <#
+    False only when the sign-in cannot produce a token. A permission error (403)
+    still proves a token was issued, so it counts as working.
+  #>
+  $graphErr = $null; $r = $null
+  try { $r = Invoke-MgGraphRequest -Method GET -Uri 'v1.0/organization?$select=id' -OutputType PSObject -ErrorAction Stop -ErrorVariable graphErr }
+  catch { $graphErr = @($_) }
+  if ($graphErr) { return "$($graphErr[0])" -notmatch 'authentication failed|Credential|token' }
+  return $null -ne $r
 }
 
 function Invoke-AvdGraph {
@@ -145,7 +164,11 @@ function Invoke-AvdGraph {
   $items = [System.Collections.Generic.List[object]]::new()
   $next = $Uri
   while ($next) {
-    $r = Invoke-MgGraphRequest @p -Uri $next
+    $graphErr = $null
+    $r = Invoke-MgGraphRequest @p -Uri $next -ErrorVariable graphErr
+    # A failed request must end the loop, even if the error came back non-terminating.
+    if ($graphErr) { throw "Graph GET $next failed: $($graphErr[0])" }
+    if ($null -eq $r) { throw "Graph GET $next returned no response." }
     if ($r.PSObject.Properties['value']) {
       foreach ($v in $r.value) { $items.Add($v) }
       $link = $r.PSObject.Properties['@odata.nextLink']
@@ -1068,7 +1091,9 @@ function Resolve-AvdGroup {
 
 function Test-AvdSignInMatch {
   <# The Graph device code is completed in a browser, which may be signed in as someone else. #>
-  $az = (Get-AzContext).Account.Id
+  # In Cloud Shell the Az context account reads 'MSI@<port>', so ask Entra who is signed in.
+  $az = try { (Get-AzADUser -SignedIn -ErrorAction Stop).UserPrincipalName } catch { $null }
+  if (-not $az -and (Get-AzContext).Account.Id -notlike 'MSI@*') { $az = (Get-AzContext).Account.Id }
   $mg = (Get-MgContext).Account
   if (-not $az -or -not $mg) { return }
   if ($az -eq $mg) { Add-AvdCheckResult 'Entra ID' "Microsoft Graph and Azure signed in as $az" 'Pass'; return }
