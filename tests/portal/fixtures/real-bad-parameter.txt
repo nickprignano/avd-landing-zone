@@ -1,0 +1,3 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -FixC;
+Test-AvdLandingZoneReadiness.ps1: A parameter cannot be found that matches parameter name 'FixC'.
+PS /home/admin/avd-landing-zone>

@@ -103,15 +103,31 @@ export AVD_USERS_GROUP_ID AVD_ADMINS_GROUP_ID AVD_SERVICE_PRINCIPAL_ID AVD_LOCAL
 
 DEPLOY_NAME="avdlz-$(basename "$PARAM_FILE" .bicepparam)-$(date +%Y%m%d-%H%M%S)"
 
+# Machine-readable state for the deployment portal (docs/portal). Schema: docs/portal/README.md.
+PORTAL_URL="https://nickprignano.github.io/avd-landing-zone/portal/"
+json_str() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }
+portal_state() {
+  # $1 = status (started | succeeded | failed | whatif); $2 = extra context JSON members (optional)
+  printf '\nDeployment portal: paste this output into %s for the next step.\n' "$PORTAL_URL"
+  printf '<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"%s","context":{"parameterFile":%s,"location":%s,"usersGroup":%s,"adminsGroup":%s,"deploymentName":%s%s}} AVDLZ-STATE>>>\n' \
+    "$1" "$(json_str "$PARAM_FILE")" "$(json_str "$LOCATION")" "$(json_str "$USERS_GROUP")" "$(json_str "$ADMINS_GROUP")" "$(json_str "$DEPLOY_NAME")" "${2:-}"
+}
+
 if $WHATIF; then
   echo "==> What-if ($DEPLOY_NAME) — no changes applied"
   az deployment sub what-if -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE"
+  portal_state whatif
   exit 0
 fi
 
 echo "==> Deploying ($DEPLOY_NAME). A first deployment takes 30-45 minutes."
-az deployment sub create -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE" \
-  --query properties.outputs -o jsonc
+echo "    If Cloud Shell disconnects, the deployment keeps running in Azure."
+portal_state started
+if ! az deployment sub create -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE" \
+  --query properties.outputs -o jsonc; then
+  portal_state failed
+  exit 1
+fi
 
 STORAGE_NAME=$(az deployment sub show -n "$DEPLOY_NAME" --query properties.outputs.storageAccountName.value -o tsv)
 # rg-<prefix>-<env>-avd -> <prefix> and <env>, for the post-deployment command.
@@ -131,3 +147,4 @@ applies all three. From Azure Cloud Shell (PowerShell):
 
 To do them by hand instead (storage account $STORAGE_NAME), see docs/deploy.md#5-post-deployment.
 EOF
+portal_state succeeded ",\"namePrefix\":$(json_str "${BASE_NAME%-*}"),\"environment\":$(json_str "${BASE_NAME##*-}"),\"storageAccount\":$(json_str "$STORAGE_NAME")"

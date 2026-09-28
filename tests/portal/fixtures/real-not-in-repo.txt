@@ -1,0 +1,8 @@
+Requesting a Cloud Shell.Succeeded.
+Connecting terminal...
+
+VERBOSE: Authenticating to Azure ...
+PS /home/admin> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix -AllowHostStart
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1: The term './scripts/ops/Test-AvdLandingZoneReadiness.ps1' is not recognized as a name of a cmdlet, function, script file, or executable program.
+Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+PS /home/admin>

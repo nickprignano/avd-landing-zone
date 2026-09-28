@@ -18,6 +18,7 @@ AVD_SERVICE_PRINCIPAL_ID=00000000-0000-0000-0000-000000000003 AVD_LOCAL_ADMIN_PA
 pwsh -c "Invoke-ScriptAnalyzer -Path scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit"
 pwsh -c "Invoke-Pester -Path ./tests -CI"            # unit tests, offline scenarios, template guards
 shellcheck scripts/deploy/deploy.sh .claude/hooks/session-start.sh
+node --test "tests/portal/*.test.mjs"                # deployment portal engine
 ```
 
 Without Pester, run an offline scenario directly: `pwsh -File tests/offline/PostDeployment.Scenario.ps1` and read its `RESULT` lines.
@@ -36,7 +37,8 @@ Without Pester, run an offline scenario directly: `pwsh -File tests/offline/Post
 - **Optional env vars in `.bicepparam`:** guard with `empty(...)`, because the default argument doesn't cover set-but-empty. (0004)
 - **Never make operators remember secrets.** (0002)
 - **Commands given to operators are self-contained Cloud Shell blocks:** clone or update, `Set-Location`, `Connect-MgGraph` when needed. Sessions are ephemeral and disconnect. (0015)
-- **When the offline mock disagrees with a real run, fix the mock and add the case.** `tests/offline/AzMock.psm1` must not be more permissive than Azure.
+- **When the offline mock disagrees with a real run, fix the mock and add the case.** `tests/offline/AzMock.psm1` must not be more permissive than Azure. Offline tests provide every tool they touch. (0020)
+- **The deployment portal (`docs/portal`) reads the scripts' state line.** Changing a script's output, parameters or a check the portal recognises means updating `portal-core.js` and its tests (`node --test "tests/portal/*.test.mjs"`). A real paste analysed wrongly becomes a fixture. (decision 0007)
 
 ## Git and PRs
 - Work on the designated branch; open PRs only when asked. The PR template asks for a Lessons section.

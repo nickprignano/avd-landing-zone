@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Stand-in so the preflight's tooling check finds az (used by deploy.sh). The scenarios never call it.
+exit 0

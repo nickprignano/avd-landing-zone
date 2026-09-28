@@ -31,7 +31,10 @@ function Add-AvdCheckResult {
     [Parameter(Mandatory)][string] $Check,
     [Parameter(Mandatory)][ValidateSet('Pass', 'Fail', 'Warn', 'Fixed', 'Skip')][string] $Status,
     [string] $Detail = '',
-    [string] $Remediation = ''
+    [string] $Remediation = '',
+    # Stable identifier and structured data for the deployment portal (see Write-AvdPortalState).
+    [string] $Id = '',
+    [hashtable] $Data
   )
   $script:Results.Add([pscustomobject]@{
       Area        = $Area
@@ -39,11 +42,58 @@ function Add-AvdCheckResult {
       Status      = $Status
       Detail      = $Detail
       Remediation = $Remediation
+      Id          = $Id
+      Data        = $Data
     })
   $color = @{ Pass = 'Green'; Fixed = 'Cyan'; Fail = 'Red'; Warn = 'Yellow'; Skip = 'DarkGray' }[$Status]
   Write-Host ('  [{0,-5}] {1}' -f $Status.ToUpper(), $Check) -ForegroundColor $color
   if ($Detail) { Write-Host "          $Detail" -ForegroundColor DarkGray }
   if ($Remediation -and $Status -in 'Fail', 'Warn') { Write-Host "          -> $Remediation" -ForegroundColor DarkYellow }
+}
+
+$script:PortalUrl = 'https://nickprignano.github.io/avd-landing-zone/portal/'
+
+function Get-AvdPortalState {
+  <#
+    Machine-readable result of a run for the deployment portal (docs/portal): what stage ran,
+    whether it succeeded, the context needed to build the next command, and every failure and
+    warning with its stable Id and Data. Schema: docs/portal/README.md.
+  #>
+  param(
+    [Parameter(Mandatory)][ValidateSet('predeploy', 'postdeploy', 'demo', 'cleanup')][string] $Stage,
+    [switch] $Fix,
+    [hashtable] $Context = @{}
+  )
+  $all = @(Get-AvdCheckResult | ForEach-Object { $_ })
+  $trim = { param($t) if ($t -and $t.Length -gt 400) { $t.Substring(0, 400) + '...' } else { $t } }
+  $item = {
+    param($r)
+    $o = [ordered]@{ id = $r.Id; area = $r.Area; check = $r.Check; detail = (& $trim $r.Detail); remediation = (& $trim $r.Remediation) }
+    if ($r.Data) { $o.data = $r.Data }
+    $o
+  }
+  $failed = @($all | Where-Object Status -eq 'Fail')
+  $counts = [ordered]@{}
+  foreach ($st in 'Pass', 'Fail', 'Warn', 'Fixed', 'Skip') { $counts[$st.ToLower()] = @($all | Where-Object Status -eq $st).Count }
+  [ordered]@{
+    v        = 1
+    stage    = $Stage
+    status   = if ($failed.Count) { 'notready' } else { 'ready' }
+    fix      = [bool]$Fix
+    context  = $Context
+    counts   = $counts
+    failures = @($failed | ForEach-Object { & $item $_ })
+    warnings = @($all | Where-Object Status -eq 'Warn' | ForEach-Object { & $item $_ })
+  }
+}
+
+function Write-AvdPortalState {
+  <# Prints the portal state between markers. The portal reads it from anything pasted around it. #>
+  param([Parameter(Mandatory)] $State)
+  $json = $State | ConvertTo-Json -Compress -Depth 8
+  Write-Host ''
+  Write-Host "Deployment portal: paste this output into $script:PortalUrl for the next step." -ForegroundColor DarkGray
+  Write-Host "<<<AVDLZ-STATE $json AVDLZ-STATE>>>" -ForegroundColor DarkGray
 }
 
 function Write-AvdSummary {
@@ -478,10 +528,10 @@ function Test-AvdResourceProvider {
     $s = $state[$ns]
     if ($s -eq 'Registered') { Add-AvdCheckResult $area "Provider $ns registered" 'Pass' }
     elseif ($Fix -and $ns -in $waitFor -and -not $WhatIfPreference) {
-      if ($ns -in $stillPending) { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Detail "Still registering after $WaitMinutes min." -Remediation 'Rerun in a few minutes.' }
+      if ($ns -in $stillPending) { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Detail "Still registering after $WaitMinutes min." -Remediation 'Rerun in a few minutes.' -Id 'registering' }
       else { Add-AvdCheckResult $area "Provider $ns registered" 'Fixed' }
     }
-    elseif ($s -eq 'Registering') { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Detail 'Registration in progress.' -Remediation 'Wait a few minutes and rerun (or rerun with -Fix to wait for it).' }
+    elseif ($s -eq 'Registering') { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Id 'registering' -Detail 'Registration in progress.' -Remediation 'Wait a few minutes and rerun (or rerun with -Fix to wait for it).' }
     else { Add-AvdCheckResult $area "Provider $ns registered" 'Fail' -Detail "State: $s" -Remediation "Register-AzResourceProvider -ProviderNamespace $ns (or rerun with -Fix)" }
   }
   if ($SkipEncryptionAtHost) { return }
@@ -496,8 +546,8 @@ function Test-AvdResourceProvider {
   }
   if ($featureState -eq 'Registered') { Add-AvdCheckResult $area $featureName 'Pass' -Detail $computeNote }
   elseif ($featureDone) { Add-AvdCheckResult $area $featureName 'Fixed' -Detail $computeNote }
-  elseif ($Fix -and $waitFeature -and -not $WhatIfPreference) { Add-AvdCheckResult $area $featureName 'Warn' -Detail "Still registering after $WaitMinutes min." -Remediation 'Rerun with -Fix in a few minutes; it re-registers Microsoft.Compute once the feature is on.' }
-  elseif ($featureState -eq 'Registering') { Add-AvdCheckResult $area $featureName 'Warn' -Detail 'Registration in progress (can take ~15 minutes).' -Remediation 'Rerun with -Fix to wait for it and re-register Microsoft.Compute.' }
+  elseif ($Fix -and $waitFeature -and -not $WhatIfPreference) { Add-AvdCheckResult $area $featureName 'Warn' -Id 'registering' -Detail "Still registering after $WaitMinutes min." -Remediation 'Rerun with -Fix in a few minutes; it re-registers Microsoft.Compute once the feature is on.' }
+  elseif ($featureState -eq 'Registering') { Add-AvdCheckResult $area $featureName 'Warn' -Id 'registering' -Detail 'Registration in progress (can take ~15 minutes).' -Remediation 'Rerun with -Fix to wait for it and re-register Microsoft.Compute.' }
   else { Add-AvdCheckResult $area $featureName 'Fail' -Detail "State: $featureState" -Remediation 'Rerun with -Fix, or set encryptionAtHost = false.' }
 }
 
@@ -532,8 +582,9 @@ function Test-AvdVmCapacity {
     if (-not $u) { continue }
     $free = $u.Limit - $u.CurrentValue
     $label = if ($name -eq 'cores') { 'Regional vCPU quota' } else { "$name vCPU quota" }
-    if ($free -ge $need) { Add-AvdCheckResult $area $label 'Pass' -Detail "$free free, $need needed" }
-    else { Add-AvdCheckResult $area $label 'Fail' -Detail "$free free, $need needed" -Remediation 'Request a quota increase (Portal > Quotas) or reduce host count/size.' }
+    $quota = @{ location = $Location; quotaName = $name; limit = [int]$u.Limit; used = [int]$u.CurrentValue; needed = $need }
+    if ($free -ge $need) { Add-AvdCheckResult $area $label 'Pass' -Detail "$free free, $need needed" -Id 'quota' -Data $quota }
+    else { Add-AvdCheckResult $area $label 'Fail' -Detail "$free free, $need needed" -Remediation 'Request a quota increase (Portal > Quotas) or reduce host count/size.' -Id 'quota' -Data $quota }
   }
 }
 
@@ -553,7 +604,7 @@ function Test-AvdHostPoolRegion {
   $regions = @($type.locations | ForEach-Object { ($_ -replace '\s', '').ToLower() })
   if ($regions -contains $Location.ToLower()) { Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Pass' }
   else {
-    Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Fail' -Detail "Host pool regions: $(($regions | Sort-Object) -join ', ')" -Remediation 'The landing zone deploys the host pool in its own region: pick one of these (the region latency page ranks them for you).'
+    Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Fail' -Id 'hostpool-region' -Data @{ location = $Location; regions = @($regions | Sort-Object) } -Detail "Host pool regions: $(($regions | Sort-Object) -join ', ')" -Remediation 'The landing zone deploys the host pool in its own region: pick one of these (the deployment portal ranks them by latency).'
   }
 }
 
@@ -986,7 +1037,8 @@ function Invoke-AvdReadinessCheck {
       'Landing zones in this subscription: ' + (($found | ForEach-Object { "-NamePrefix $($_.NamePrefix) -Environment $($_.Environment)" }) -join '; ')
     }
     else { 'No landing zone resource groups (rg-<prefix>-<env>-network) in this subscription.' }
-    Add-AvdCheckResult 'Landing zone' "Landing zone '$($Lz.BaseName)' deployed in subscription '$sub'" 'Fail' -Detail $detail `
+    Add-AvdCheckResult 'Landing zone' "Landing zone '$($Lz.BaseName)' deployed in subscription '$sub'" 'Fail' -Detail $detail -Id 'lz-missing' `
+      -Data @{ subscription = $sub; found = @($found | ForEach-Object { @{ namePrefix = $_.NamePrefix; environment = $_.Environment } }) } `
       -Remediation "Check the subscription (Get-AzContext / Set-AzContext) and -NamePrefix/-Environment. Not deployed yet? Run the pre-deployment preflight: ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/$($Lz.Environment).bicepparam -UsersGroup '<AVD Users>' -AdminsGroup '<AVD Admins>'"
     Add-AvdCheckResult 'Landing zone' 'Landing zone resource, RBAC, tenant and NTFS checks' 'Skip' -Detail 'Nothing to check until the landing zone exists.'
     return
@@ -1260,7 +1312,7 @@ function Test-AvdPreDeployment {
   $kvPrefix = "kv$($lz.NamePrefix)$($lz.Environment)"
   $deleted = @(Get-AzKeyVault -InRemovedState -ErrorAction SilentlyContinue | Where-Object { $_.VaultName -like "$kvPrefix*" -and $_.Location -eq $plan.location })
   if ($deleted.Count) {
-    Add-AvdCheckResult 'Subscription' 'No soft-deleted Key Vault blocking the vault name' 'Fail' -Detail "Deleted, purge-protected: $($deleted.VaultName -join ', ')" -Remediation 'Recover it (Undo-AzKeyVaultRemoval) and redeploy into it, or change namePrefix.'
+    Add-AvdCheckResult 'Subscription' 'No soft-deleted Key Vault blocking the vault name' 'Fail' -Id 'kv-softdeleted' -Data @{ vaults = @($deleted.VaultName) } -Detail "Deleted, purge-protected: $($deleted.VaultName -join ', ')" -Remediation 'Recover it (Undo-AzKeyVaultRemoval) and redeploy into it, or change namePrefix.'
   }
   else { Add-AvdCheckResult 'Subscription' 'No soft-deleted Key Vault blocking the vault name' 'Pass' }
 
@@ -1289,7 +1341,7 @@ function Test-AvdPreDeployment {
   $present = @($lz.RgExists.Keys | Where-Object { $_ -ne 'Demo' -and $lz.RgExists[$_] })
   $elsewhere = @($present | ForEach-Object { Get-AzResourceGroup -Name $lz.ResourceGroups[$_] -ErrorAction SilentlyContinue } | Where-Object { $_.Location -ne $plan.location })
   if ($elsewhere.Count) {
-    Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' region" 'Fail' -Detail "Already deployed in $(($elsewhere.Location | Select-Object -Unique) -join ', '): $($elsewhere.ResourceGroupName -join ', ')" -Remediation 'Resource groups cannot change region. Deploy to that region, use another namePrefix or environment, or remove the existing landing zone first.'
+    Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' region" 'Fail' -Id 'lz-region' -Data @{ deployedIn = @($elsewhere.Location | Select-Object -Unique) } -Detail "Already deployed in $(($elsewhere.Location | Select-Object -Unique) -join ', '): $($elsewhere.ResourceGroupName -join ', ')" -Remediation 'Resource groups cannot change region. Deploy to that region, use another namePrefix or environment, or remove the existing landing zone first.'
   }
   elseif ($present.Count) { Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Existing session hosts keep their break-glass password.' }
   else { Add-AvdCheckResult 'Landing zone' "Name '$($lz.BaseName)' is free in this subscription" 'Pass' }

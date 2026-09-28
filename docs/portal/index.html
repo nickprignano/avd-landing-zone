@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AVD Deployment Portal</title>
+<meta name="description" content="Guides an AVD landing zone deployment step by step: pick a region by latency, paste Cloud Shell output, get the next command.">
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #62625d; --border: #deded8;
+    --accent: #0a5fb4; --accent-text: #ffffff; --code-bg: #f0f0ec; --chip: #eef3f9;
+    --good: #1a7f37; --ok: #9a6700; --poor: #c62828; --bar: #0a5fb4; --row-sel: #e8f1fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151515; --panel: #1f1f1f; --text: #ececea; --muted: #a3a39e; --border: #34342f;
+      --accent: #4c9be8; --accent-text: #0b0b0b; --code-bg: #262624; --chip: #1d2b3a;
+      --good: #4ac26b; --ok: #d4a72c; --poor: #ff7b72; --bar: #4c9be8; --row-sel: #1d2b3a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151515; --panel: #1f1f1f; --text: #ececea; --muted: #a3a39e; --border: #34342f;
+    --accent: #4c9be8; --accent-text: #0b0b0b; --code-bg: #262624; --chip: #1d2b3a;
+    --good: #4ac26b; --ok: #d4a72c; --poor: #ff7b72; --bar: #4c9be8; --row-sel: #1d2b3a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  h3 { font-size: 1rem; margin: 0 0 4px; }
+  p { margin: 0 0 12px; }
+  a { color: var(--accent); }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .lede { color: var(--muted); margin-bottom: 20px; }
+  section, details.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  details.panel > summary { cursor: pointer; font-weight: 600; font-size: 1.05rem; }
+  details.panel[open] > summary { margin-bottom: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  .field { display: flex; flex-direction: column; align-items: stretch; gap: 4px; flex: 1 1 170px; }
+  .field span { font-size: .85rem; color: var(--muted); }
+  input[type=text], select, textarea {
+    font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; width: 100%;
+  }
+  textarea { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 160px; resize: vertical; }
+  button { font: inherit; font-weight: 600; border: 1px solid var(--accent); border-radius: 6px; padding: 7px 14px; cursor: pointer; background: var(--accent); color: var(--accent-text); }
+  button.secondary { background: transparent; color: var(--accent); }
+  button.linkbtn { background: none; border: 0; padding: 4px 0; color: var(--accent); text-decoration: underline; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .status, .muted { color: var(--muted); }
+  .status { font-size: .9rem; }
+  .hidden { display: none !important; }
+
+  /* Progress tracker */
+  ol.steps { list-style: none; display: flex; gap: 6px; padding: 0; margin: 0 0 16px; flex-wrap: wrap; }
+  ol.steps li { flex: 1 1 140px; }
+  ol.steps button { width: 100%; text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--border); font-weight: 500; padding: 8px 10px; }
+  ol.steps .n { display: inline-block; width: 1.5em; font-weight: 700; color: var(--muted); }
+  ol.steps li.done button { border-color: var(--good); }
+  ol.steps li.done .n { color: var(--good); }
+  ol.steps li.current button { border-color: var(--accent); background: var(--row-sel); font-weight: 700; }
+
+  /* Actions */
+  .action { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+  .action:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+  .action .why { color: var(--muted); margin: 2px 0 8px; }
+  .cmd-head { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+  .chip { display: inline-block; font-size: .8rem; font-weight: 600; border-radius: 999px; padding: 2px 10px; background: var(--chip); }
+  .chip.good { color: var(--good); } .chip.ok { color: var(--ok); } .chip.poor { color: var(--poor); }
+  #findings { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  ul.findings { margin: 8px 0 0; padding-left: 20px; }
+  ul.findings li { margin-bottom: 6px; }
+  .headline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+
+  /* Latency table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+  td.region { white-space: normal; }
+  td.region .muted { display: block; font-size: .8rem; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.sel td { background: var(--row-sel); }
+  tbody tr { cursor: pointer; }
+  .bar { height: 8px; background: var(--bar); border-radius: 4px; min-width: 2px; opacity: .8; }
+  .barcell { width: 25%; min-width: 60px; }
+  .good { color: var(--good); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; } .poor { color: var(--poor); font-weight: 600; }
+  progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>AVD deployment portal</h1>
+  <p class="lede">
+    Deploys the <a href="https://github.com/nickprignano/avd-landing-zone" id="repo-link">AVD landing zone</a> step by step.
+    Run each command in <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Azure Cloud Shell (PowerShell)</a>,
+    paste the output back here, and the portal tells you what to run next. Everything happens in your browser: pasted output is never sent anywhere.
+  </p>
+
+  <ol class="steps" id="steps" aria-label="Deployment progress"></ol>
+
+  <section id="next" aria-live="polite">
+    <div class="headline"><h2 id="next-title" style="margin:0">Next step</h2><span id="next-chip" class="chip hidden"></span></div>
+    <p id="next-headline" class="status hidden"></p>
+    <div id="findings" class="hidden"></div>
+    <div id="actions"></div>
+    <p class="status" style="margin-top:12px">Copy a block, paste it into <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Cloud Shell</a>, then paste the output below. Keep the Cloud Shell tab in front while it runs.</p>
+  </section>
+
+  <section>
+    <h2>Paste Cloud Shell output</h2>
+    <textarea id="paste" spellcheck="false" placeholder="Paste everything from the command to the prompt that follows it. The scripts end with a line starting &lt;&lt;&lt;AVDLZ-STATE, which is what this page reads."></textarea>
+    <div class="row" style="margin-top:10px">
+      <button id="analyze">Analyse output</button>
+      <button class="secondary" id="clear-paste">Clear</button>
+      <span class="status" id="paste-status" role="status"></span>
+    </div>
+  </section>
+
+  <details class="panel" id="region-panel">
+    <summary>Region: <span id="region-summary"></span></summary>
+    <p class="status">Ranks Azure regions by round-trip time <strong>from this browser</strong>. Run it from where your users work, not from Cloud Shell or a VPN. Under 100&nbsp;ms is good for AVD, 100–150&nbsp;ms is usable, above 150&nbsp;ms feels sluggish.</p>
+    <div class="row" id="geos">
+      <label><input type="checkbox" value="Americas" checked> Americas</label>
+      <label><input type="checkbox" value="Europe" checked> Europe</label>
+      <label><input type="checkbox" value="Asia Pacific" checked> Asia Pacific</label>
+      <label><input type="checkbox" value="Middle East &amp; Africa" checked> Middle East &amp; Africa</label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="run">Measure latency</button>
+      <span class="status" id="lat-status">About 20 seconds: each region gets a warm-up request and 5 timed ones.</span>
+    </div>
+    <progress id="progress" class="hidden" value="0" max="1"></progress>
+    <div id="results" class="hidden" style="margin-top:12px">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th>#</th><th>Region</th><th>Geography</th><th class="num">Median</th><th class="barcell"></th><th>Rating</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <button type="button" class="linkbtn hidden" id="more" aria-controls="rows" aria-expanded="false"></button>
+    </div>
+  </details>
+
+  <details class="panel" id="settings-panel">
+    <summary>Deployment settings</summary>
+    <p class="status">Used to build the commands. Values from pasted output fill these in automatically; they are kept only in this browser.</p>
+    <div class="row">
+      <label class="field"><span>Parameter file</span>
+        <select id="parameterFile"><option value="parameters/dev.bicepparam">parameters/dev.bicepparam</option><option value="parameters/prod.bicepparam">parameters/prod.bicepparam</option></select>
+      </label>
+      <label class="field"><span>Region</span><input type="text" id="location" autocomplete="off"></label>
+      <label class="field"><span>AVD users group</span><input type="text" id="usersGroup" autocomplete="off"></label>
+      <label class="field"><span>AVD admins group</span><input type="text" id="adminsGroup" autocomplete="off"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field"><span>Name prefix</span><input type="text" id="namePrefix" autocomplete="off"></label>
+      <label class="field"><span>Environment</span>
+        <select id="environment"><option>dev</option><option>test</option><option>prod</option></select>
+      </label>
+      <label class="field"><span>Test user (optional, for the demo)</span><input type="text" id="testUserUpn" autocomplete="off" placeholder="user@contoso.com"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="secondary" id="reset">Start over</button>
+      <span class="status">Clears the saved progress and settings.</span>
+    </div>
+  </details>
+</main>
+
+<script src="portal-core.js"></script>
+<script>
+(function () {
+  'use strict';
+  var P = window.PortalCore;
+  var $ = function (id) { return document.getElementById(id); };
+  var FIELDS = ['parameterFile', 'location', 'usersGroup', 'adminsGroup', 'namePrefix', 'environment', 'testUserUpn'];
+
+  // ---------------------------------------------------------------- persistence (this browser only)
+  function load(k, fallback) { try { var v = localStorage.getItem('avdlz.portal.' + k); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
+  function save(k, v) { try { localStorage.setItem('avdlz.portal.' + k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } }
+
+  // Clone URL: this repo, or the fork serving the page from <owner>.github.io/<repo>.
+  var repoUrl = P.DEFAULTS.repoUrl;
+  var host = location.hostname, seg = location.pathname.split('/').filter(Boolean)[0];
+  if (/\.github\.io$/.test(host) && seg) repoUrl = 'https://github.com/' + host.split('.')[0] + '/' + seg;
+  $('repo-link').href = repoUrl;
+
+  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl });
+  var step = load('step', null);
+  var ranked = load('ranked', null);
+  var lastAnalysis = null;
+
+  function config() { return cfg; }
+  function setConfig(patch) {
+    Object.keys(patch || {}).forEach(function (k) { if (FIELDS.indexOf(k) >= 0 && patch[k]) cfg[k] = patch[k]; });
+    var keep = {}; FIELDS.forEach(function (k) { keep[k] = cfg[k]; }); save('config', keep);
+    FIELDS.forEach(function (k) { var el = $(k); if (el && el.value !== cfg[k]) el.value = cfg[k] || ''; });
+    $('region-summary').textContent = cfg.location + (ranked && ranked.length ? (ranked[0] === cfg.location ? ' (closest measured)' : '') : ' (not measured yet)');
+  }
+  FIELDS.forEach(function (k) {
+    $(k).addEventListener('change', function () { var p = {}; p[k] = $(k).value.trim(); setConfig(p); lastAnalysis = null; render(); });
+  });
+
+  // ---------------------------------------------------------------- progress tracker
+  function stepIndex(id) { for (var i = 0; i < P.STEPS.length; i++) if (P.STEPS[i].id === id) return i; return 0; }
+  function renderSteps() {
+    var cur = stepIndex(step || 'region'), ol = $('steps');
+    ol.textContent = '';
+    P.STEPS.forEach(function (s, i) {
+      var li = document.createElement('li');
+      if (i < cur) li.className = 'done';
+      if (i === cur) li.className = 'current';
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-current', i === cur ? 'step' : 'false');
+      b.innerHTML = '<span class="n">' + (i < cur ? '✓' : (i + 1)) + '</span>';
+      b.appendChild(document.createTextNode(s.title));
+      b.addEventListener('click', function () { step = s.id; save('step', step); lastAnalysis = null; render(); if (s.id === 'region') $('region-panel').open = true; });
+      li.appendChild(b); ol.appendChild(li);
+    });
+  }
+
+  // ---------------------------------------------------------------- next step
+  function copy(text, btn) {
+    var done = function () { var t = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = t; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+    else { fallback(text); done(); }
+  }
+  function fallback(text) {
+    var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) { /* nothing else to try */ } document.body.removeChild(ta);
+  }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+  function renderActions(actions) {
+    var box = $('actions'); box.textContent = '';
+    actions.forEach(function (a, i) {
+      var d = el('div', 'action');
+      d.appendChild(el('h3', '', (actions.length > 1 ? (i + 1) + '. ' : '') + a.title));
+      if (a.why) d.appendChild(el('p', 'why', a.why));
+      if (a.command) {
+        var head = el('div', 'cmd-head'), b = el('button', 'secondary', 'Copy');
+        b.type = 'button'; b.addEventListener('click', function () { copy(a.command, b); });
+        head.appendChild(b); d.appendChild(head);
+        d.appendChild(el('pre', '', a.command));
+      }
+      box.appendChild(d);
+    });
+  }
+
+  function renderFindings(r) {
+    var box = $('findings'); box.textContent = '';
+    var items = [];
+    (r.failures || []).forEach(function (f) { items.push({ cls: 'poor', label: 'Fail', f: f }); });
+    (r.warnings || []).forEach(function (f) { items.push({ cls: 'ok', label: 'Warn', f: f }); });
+    if (!items.length) { box.classList.add('hidden'); return; }
+    var det = el('details'); det.open = items.length <= 6;
+    det.appendChild(el('summary', '', items.length + ' finding' + (items.length > 1 ? 's' : '') + ' in this run'));
+    var ul = el('ul', 'findings');
+    items.forEach(function (it) {
+      var li = el('li'); var tag = el('span', it.cls, it.label + ': '); li.appendChild(tag);
+      li.appendChild(document.createTextNode(it.f.check || ''));
+      var extra = [it.f.detail, it.f.remediation ? '→ ' + it.f.remediation : ''].filter(Boolean).join(' ');
+      if (extra) { li.appendChild(el('br')); li.appendChild(el('span', 'muted', extra)); }
+      ul.appendChild(li);
+    });
+    det.appendChild(ul); box.appendChild(det); box.classList.remove('hidden');
+  }
+
+  function render() {
+    renderSteps();
+    var chip = $('next-chip'), head = $('next-headline');
+    if (lastAnalysis) {
+      var r = lastAnalysis;
+      $('next-title').textContent = r.recognised ? 'What to do next' : 'Not recognised';
+      chip.textContent = r.status ? (r.status === 'ready' || r.status === 'succeeded' || r.status === 'done' ? 'Done' : r.status === 'started' ? 'Running' : 'Action needed') : 'Action needed';
+      chip.className = 'chip ' + (/ready|succeeded|done/.test(r.status || '') ? 'good' : r.status === 'started' ? 'ok' : 'poor');
+      head.textContent = r.headline; head.classList.remove('hidden');
+      renderFindings(r);
+      renderActions(r.actions);
+    }
+    else {
+      $('next-title').textContent = 'Next step: ' + P.STEPS[stepIndex(step || 'region')].title;
+      chip.className = 'chip hidden'; head.classList.add('hidden'); $('findings').classList.add('hidden');
+      renderActions(P.actionsForStep(step || 'region', config()));
+    }
+  }
+
+  function analyzePaste() {
+    var text = $('paste').value;
+    if (!text.trim()) { $('paste-status').textContent = 'Paste some output first.'; return; }
+    var r = P.analyze(text, config(), { rankedRegions: ranked, currentStep: step || 'predeploy' });
+    setConfig(r.config);
+    if (r.step) { step = r.step; save('step', step); }
+    lastAnalysis = r;
+    $('paste-status').textContent = r.recognised ? 'Analysed: ' + r.headline : 'Nothing recognisable in the pasted text.';
+    render();
+    $('next').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  $('analyze').addEventListener('click', analyzePaste);
+  $('paste').addEventListener('paste', function () { setTimeout(analyzePaste, 0); });
+  $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); });
+  $('reset').addEventListener('click', function () {
+    try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
+    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl }); step = null; ranked = null; lastAnalysis = null; latency = [];
+    $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render();
+  });
+
+  // ---------------------------------------------------------------- region latency
+  // Regions with a regional endpoint that resolves in-region (checked in DNS), grouped for the filters.
+  var REGIONS = [
+    ['eastus', 'East US', 'Americas'], ['eastus2', 'East US 2', 'Americas'], ['centralus', 'Central US', 'Americas'],
+    ['northcentralus', 'North Central US', 'Americas'], ['southcentralus', 'South Central US', 'Americas'],
+    ['westcentralus', 'West Central US', 'Americas'], ['westus', 'West US', 'Americas'], ['westus2', 'West US 2', 'Americas'],
+    ['westus3', 'West US 3', 'Americas'], ['canadacentral', 'Canada Central', 'Americas'], ['canadaeast', 'Canada East', 'Americas'],
+    ['brazilsouth', 'Brazil South', 'Americas'],
+    ['northeurope', 'North Europe', 'Europe'], ['westeurope', 'West Europe', 'Europe'], ['uksouth', 'UK South', 'Europe'],
+    ['ukwest', 'UK West', 'Europe'], ['francecentral', 'France Central', 'Europe'], ['germanywestcentral', 'Germany West Central', 'Europe'],
+    ['switzerlandnorth', 'Switzerland North', 'Europe'], ['norwayeast', 'Norway East', 'Europe'], ['swedencentral', 'Sweden Central', 'Europe'],
+    ['polandcentral', 'Poland Central', 'Europe'], ['italynorth', 'Italy North', 'Europe'], ['spaincentral', 'Spain Central', 'Europe'],
+    ['eastasia', 'East Asia', 'Asia Pacific'], ['southeastasia', 'Southeast Asia', 'Asia Pacific'], ['japaneast', 'Japan East', 'Asia Pacific'],
+    ['japanwest', 'Japan West', 'Asia Pacific'], ['koreacentral', 'Korea Central', 'Asia Pacific'], ['centralindia', 'Central India', 'Asia Pacific'],
+    ['southindia', 'South India', 'Asia Pacific'], ['australiaeast', 'Australia East', 'Asia Pacific'],
+    ['newzealandnorth', 'New Zealand North', 'Asia Pacific'], ['indonesiacentral', 'Indonesia Central', 'Asia Pacific'],
+    ['malaysiawest', 'Malaysia West', 'Asia Pacific'],
+    ['uaenorth', 'UAE North', 'Middle East & Africa'], ['qatarcentral', 'Qatar Central', 'Middle East & Africa'],
+    ['southafricanorth', 'South Africa North', 'Middle East & Africa']
+  ];
+  var SAMPLES = 5, TIMEOUT_MS = 4000, CONCURRENCY = 3, TOP = 5;
+  var latency = [], expanded = false;
+
+  function timeOnce(region) {
+    var ctrl = new AbortController(), timer = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
+    var url = 'https://' + region + '.api.cognitive.microsoft.com/?avdlz=' + Date.now() + Math.random().toString(36).slice(2);
+    var t0 = performance.now();
+    // no-cors: the response is opaque, but only the elapsed time is needed.
+    return fetch(url, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctrl.signal })
+      .then(function () { return performance.now() - t0; }).finally(function () { clearTimeout(timer); });
+  }
+  function measure(region) {
+    // The warm-up pays for DNS, TCP and TLS; the timed requests reuse the connection.
+    return timeOnce(region).then(function () {
+      var times = [], chain = Promise.resolve();
+      for (var i = 0; i < SAMPLES; i++) chain = chain.then(function () { return timeOnce(region).then(function (t) { times.push(t); }); });
+      return chain.then(function () { times.sort(function (a, b) { return a - b; }); return times[Math.floor(times.length / 2)]; });
+    });
+  }
+  function rating(ms) {
+    if (ms === null) return ['No answer', 'muted'];
+    if (ms < 100) return ['Good', 'good'];
+    if (ms <= 150) return ['Usable', 'ok'];
+    return ['Sluggish', 'poor'];
+  }
+  function runLatency() {
+    var geos = Array.prototype.map.call(document.querySelectorAll('#geos input:checked'), function (c) { return c.value; });
+    var todo = REGIONS.filter(function (r) { return geos.indexOf(r[2]) >= 0; });
+    if (!todo.length) { $('lat-status').textContent = 'Pick at least one geography.'; return; }
+    $('run').disabled = true; latency = [];
+    var bar = $('progress'); bar.classList.remove('hidden'); bar.max = todo.length; bar.value = 0;
+    $('lat-status').textContent = 'Measuring ' + todo.length + ' regions...';
+    var next = 0, done = 0;
+    function worker() {
+      if (next >= todo.length) return Promise.resolve();
+      var r = todo[next++];
+      return measure(r[0]).then(
+        function (m) { latency.push({ name: r[0], display: r[1], geo: r[2], median: m }); },
+        function () { latency.push({ name: r[0], display: r[1], geo: r[2], median: null }); }
+      ).then(function () { bar.value = ++done; }).then(worker);
+    }
+    var pool = []; for (var i = 0; i < CONCURRENCY; i++) pool.push(worker());
+    Promise.all(pool).then(function () {
+      latency.sort(function (a, b) { return (a.median === null) - (b.median === null) || a.median - b.median; });
+      var ok = latency.filter(function (r) { return r.median !== null; });
+      ranked = ok.map(function (r) { return r.name; }); save('ranked', ranked);
+      expanded = false;
+      bar.classList.add('hidden'); $('run').disabled = false; $('run').textContent = 'Measure again';
+      if (ok.length) {
+        $('lat-status').textContent = 'Closest: ' + ok[0].display + ' (' + Math.round(ok[0].median) + ' ms). Selected for the deployment; click another row to change it.';
+        setConfig({ location: ok[0].name });
+        if (!step || step === 'region') { step = 'predeploy'; save('step', step); }
+      }
+      else $('lat-status').textContent = 'No region answered. A firewall or content blocker may be stopping the requests.';
+      lastAnalysis = null;
+      renderLatency(); render();
+    });
+  }
+  function renderLatency() {
+    if (!latency.length) return;
+    $('results').classList.remove('hidden');
+    var max = Math.max.apply(null, latency.map(function (r) { return r.median || 0; })) || 1, tbody = $('rows');
+    tbody.textContent = '';
+    latency.forEach(function (r, i) {
+      if (!expanded && i >= TOP && r.name !== cfg.location) return;
+      var tr = document.createElement('tr'); if (r.name === cfg.location) tr.className = 'sel';
+      var rt = rating(r.median);
+      var cells = [
+        '<input type="radio" name="region" aria-label="' + r.display + '"' + (r.name === cfg.location ? ' checked' : '') + (r.median === null ? ' disabled' : '') + '>',
+        String(i + 1), r.display + ' <span class="muted">' + r.name + '</span>', r.geo,
+        r.median === null ? '–' : Math.round(r.median) + ' ms',
+        r.median === null ? '' : '<div class="bar" style="width:' + (100 * r.median / max).toFixed(1) + '%"></div>',
+        '<span class="' + rt[1] + '">' + rt[0] + '</span>'
+      ];
+      cells.forEach(function (html, c) {
+        var td = document.createElement('td');
+        if (c === 2) td.className = 'region'; if (c === 4) td.className = 'num'; if (c === 5) td.className = 'barcell';
+        td.innerHTML = html; tr.appendChild(td);
+      });
+      if (r.median !== null) tr.addEventListener('click', function () { setConfig({ location: r.name }); lastAnalysis = null; renderLatency(); render(); });
+      tbody.appendChild(tr);
+    });
+    var more = $('more');
+    more.classList.toggle('hidden', latency.length <= TOP);
+    more.textContent = expanded ? 'Show top ' + TOP + ' only' : 'Show all ' + latency.length + ' regions';
+    more.setAttribute('aria-expanded', String(expanded));
+  }
+  $('run').addEventListener('click', runLatency);
+  $('more').addEventListener('click', function () { expanded = !expanded; renderLatency(); });
+
+  // ---------------------------------------------------------------- start
+  if (location.hash === '#region' || !step) $('region-panel').open = true;
+  setConfig({});
+  render();
+})();
+</script>
+</body>
+</html>

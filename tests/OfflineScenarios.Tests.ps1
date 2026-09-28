@@ -13,6 +13,10 @@ BeforeAll {
     if ($LASTEXITCODE -ne 0) { throw "Scenario $Name crashed (exit $LASTEXITCODE):`n$out" }
     $out
   }
+  # The machine-readable state lines the deployment portal reads (docs/portal/README.md).
+  function Get-PortalState([string] $Output) {
+    @([regex]::Matches($Output, '<<<AVDLZ-STATE (.*?) AVDLZ-STATE>>>') | ForEach-Object { $_.Groups[1].Value | ConvertFrom-Json })
+  }
   function Get-StepExit([string] $Output, [string] $Step) {
     $m = [regex]::Match($Output, "RESULT $([regex]::Escape($Step)) EXIT=(\d+)")
     if (-not $m.Success) { throw "No RESULT line for step '$Step'." }
@@ -39,6 +43,14 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     Get-StepExit $out 'remove-lz' | Should -Be 0
     $out | Should -Match 'RESULT remove-lz remainingRgs=0'
   }
+  It 'ends every run with a portal state line (none under -WhatIf)' {
+    $s = Get-PortalState $out
+    ($s | ForEach-Object { "$($_.stage):$($_.status):$($_.fix)" }) -join ' ' |
+      Should -Be 'postdeploy:notready:False postdeploy:ready:True postdeploy:ready:False demo:ready:False cleanup:ready:False cleanup:ready:False'
+    $s[0].context.namePrefix | Should -Be 'avdlz'
+    $s[0].failures.Count | Should -Be $s[0].counts.fail
+    $s[5].context.includeLandingZone | Should -BeTrue
+  }
 }
 
 Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
@@ -55,6 +67,17 @@ Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
     Get-StepExit $out 'prod-zone-and-vault' | Should -Be 1
     $out | Should -Match '\[FAIL \] No soft-deleted Key Vault blocking the vault name'
   }
+  It 'gives the portal the context and structured failures it needs' {
+    $s = Get-PortalState $out
+    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' | Should -Be 'predeploy:notready predeploy:ready predeploy:ready predeploy:notready'
+    $s[1].context.parameterFile | Should -Be 'parameters/dev.bicepparam'
+    $s[1].context.location | Should -Be 'northcentralus'
+    $s[1].context.usersGroup | Should -Be 'AVD Users'
+    $quota = $s[3].failures | Where-Object id -eq 'quota'
+    $quota.data.quotaName | Should -Be 'standardDASv5Family'
+    $quota.data.needed | Should -Be 16
+    ($s[3].failures | Where-Object id -eq 'kv-softdeleted').data.vaults | Should -Contain 'kvavdlzprodabc123'
+  }
 }
 
 Describe 'No landing zone in the subscription' {
@@ -64,6 +87,10 @@ Describe 'No landing zone in the subscription' {
     Get-StepExit $out 'check' | Should -Be 1
     $out | Should -Match '-NamePrefix contoso -Environment prod'
     $out | Should -Match 'Nothing to check until the landing zone exists'
+  }
+  It 'tells the portal which landing zones do exist' {
+    $f = (Get-PortalState $out)[0].failures | Where-Object id -eq 'lz-missing'
+    $f.data.found[0].namePrefix | Should -Be 'contoso'
   }
 }
 

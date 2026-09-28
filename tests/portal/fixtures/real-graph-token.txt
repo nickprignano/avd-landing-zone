@@ -1,0 +1,8 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Fix
+AVD landing zone PRE-DEPLOYMENT preflight - parameters/dev.bicepparam in 'Azure subscription 1' (FIX mode)
+
+== Entra ID tenant
+Invoke-MgGraphRequest: DeviceCodeCredential authentication failed: Object reference not set to an instance of an object.
+InvalidOperation: Cannot index into a null array.
+Invoke-MgGraphRequest: DeviceCodeCredential authentication failed: Object reference not set to an instance of an object.
+InvalidOperation: Cannot index into a null array.

@@ -1,0 +1,24 @@
+PS /home/admin/avd-landing-zone> bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins'
+==> Checking az and Bicep
+    Generated a random break-glass password for new session hosts (stored in Key Vault as sessionhost-localadmin-password).
+==> Deploying (avdlz-dev-20260928-213126). A first deployment takes 30-45 minutes.
+{
+  "sessionHostNames": {
+    "type": "Array",
+    "value": [
+      "avdlzdsh-001"
+    ]
+  },
+  "storageAccountName": {
+    "type": "String",
+    "value": "stavdlzdevabc123"
+  }
+}
+
+==> Landing zone deployed.
+
+One-time tenant steps Bicep cannot do (see docs/deploy.md#5-post-deployment):
+  1. Grant admin consent to the storage account's Entra app so Entra Kerberos works:
+  2. Exclude that app from Conditional Access policies that require MFA.
+  3. Set NTFS permissions on the profile share (docs/deploy.md#ntfs-permissions).
+PS /home/admin/avd-landing-zone>

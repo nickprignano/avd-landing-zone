@@ -16,7 +16,7 @@
 
 ## 2. Region
 
-Pick the region closest to your users: session latency matters more than anything else about the region. The [region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/) measures round-trip time from your browser to each Azure region and builds the preflight and deploy commands for the one you pick. Open it from the network your users are on, not over a VPN, and not from Cloud Shell, which runs in an Azure datacenter.
+Pick the region closest to your users: session latency matters more than anything else about the region. The [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/) measures round-trip time from your browser to each Azure region, then guides the whole deployment: it gives you each command and reads the output you paste back. Open it from the network your users are on, not over a VPN, and not from Cloud Shell, which runs in an Azure datacenter.
 
 The parameter files default to `northcentralus`. `deploy.sh -l <region>` and the preflight's `-Location <region>` override that through the `AVD_LOCATION` environment variable, so you don't edit the file to change region. The files deploy without availability zones, which works in every region. For zone redundancy, pick a zonal region and set `availabilityZones = [1, 2, 3]` and `profileStorageSku = 'Premium_ZRS'`.
 

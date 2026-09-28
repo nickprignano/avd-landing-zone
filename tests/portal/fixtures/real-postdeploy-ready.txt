@@ -1,0 +1,12 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix -AllowHostStart
+AVD landing zone preflight - avdlz/dev in 'Azure subscription 1' (FIX mode)
+
+== Profile share NTFS permissions
+          granting avdlzdsh-001 temporary 'Storage File Data Privileged Contributor' on the storage account
+  [FIXED] Profile share root ACL follows FSLogix guidance
+          Users: AVD Users; Admins: AVD Admins
+          removed temporary 'Storage File Data Privileged Contributor' from avdlzdsh-001
+
+== Summary: 1 Fixed, 44 Pass
+Ready.
+PS /home/admin/avd-landing-zone>

@@ -1,0 +1,5 @@
+PS /home/admin/avd-landing-zone> (command)
+...
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"cleanup","status":"ready","fix":false,"context":{"environment":"dev","namePrefix":"avdlz","includeLandingZone":true},"counts":{"pass":1,"fail":0,"warn":1,"fixed":15,"skip":0},"failures":[],"warnings":[{"id":"","area":"Subscription","check":"Key Vault kvavdlzdevabc is soft-deleted with purge protection","detail":"The name is reserved for 90 days.","remediation":"Change namePrefix to redeploy sooner, or recover it with Undo-AzKeyVaultRemoval."}]} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>
