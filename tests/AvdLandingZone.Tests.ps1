@@ -111,6 +111,32 @@ Describe 'Invoke-AvdGraph' {
     Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest { [pscustomobject]@{ value = @() } }
     @(Invoke-AvdGraph -Uri 'v1.0/empty').Count | Should -Be 0
   }
+
+  It 'throws instead of looping when a page request fails' {
+    Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest { }
+    { Invoke-AvdGraph -Uri 'v1.0/groups' } | Should -Throw
+    Should -Invoke -ModuleName AvdLandingZone Invoke-MgGraphRequest -Times 1 -Exactly
+  }
+}
+
+Describe 'Test-AvdGraphToken' {
+  BeforeAll { function global:Invoke-MgGraphRequest { param($Method, $Uri, $Body, $ContentType, $OutputType) } }
+  AfterAll { Remove-Item function:global:Invoke-MgGraphRequest -ErrorAction SilentlyContinue }
+
+  It 'is false when the sign-in cannot produce a token' {
+    Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest { throw 'DeviceCodeCredential authentication failed: Object reference not set to an instance of an object.' }
+    Test-AvdGraphToken | Should -BeFalse
+  }
+
+  It 'is true on a permission error, which still proves a token was issued' {
+    Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest { throw 'Response status code does not indicate success: Forbidden (Forbidden).' }
+    Test-AvdGraphToken | Should -BeTrue
+  }
+
+  It 'is true when the request succeeds' {
+    Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest { [pscustomobject]@{ value = @([pscustomobject]@{ id = 'org' }) } }
+    Test-AvdGraphToken | Should -BeTrue
+  }
 }
 
 Describe 'Test-AvdHostPoolRegion' {
