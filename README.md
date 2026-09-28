@@ -21,6 +21,8 @@ Everything is built from pinned [Azure Verified Modules](https://aka.ms/avm).
 
 ## Quick start
 
+**Pick a region first:** the [region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/) ranks Azure regions by round-trip time from your browser and gives you the preflight and deploy commands for the one you pick, ready to paste into Cloud Shell. Run it from where your users work.
+
 Prerequisites (details in [`docs/deploy.md`](docs/deploy.md)):
 - A **dedicated subscription** where you are Owner, plus Azure CLI ≥ 2.65.
 - Two Entra ID security groups: AVD users and AVD admins.
@@ -32,10 +34,11 @@ az login && az account set --subscription "<subscription-id>"
 
 # Preflight first (Cloud Shell, PowerShell): repeat until clean; -Fix registers providers,
 # creates the groups and the AVD service principal
+# (-Location <region> checks another region than the file's default, northcentralus)
 pwsh ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam \
   -UsersGroup "AVD Users" -AdminsGroup "AVD Admins"
 
-# What-if
+# What-if (-l is the region the landing zone is deployed to)
 ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
   --users-group "AVD Users" --admins-group "AVD Admins" --what-if
 
@@ -94,6 +97,7 @@ avd-landing-zone/
 - [`docs/architecture.md`](docs/architecture.md): resource layout, traffic flows, identity and RBAC model
 - [`docs/deploy.md`](docs/deploy.md): prerequisites, deployment, post-deployment steps, scaling out, teardown
 - [`docs/operations.md`](docs/operations.md): preflight with fix mode, demo host pool with sign-in validation, cleanup
+- [Region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/) ([source](docs/region-latency/index.html)): pick the closest region and get the commands
 - [`docs/ci.md`](docs/ci.md): validation and deployment pipelines, OIDC setup
 - [`docs/gotchas.md`](docs/gotchas.md): the things that bite
 - [`docs/out-of-scope.md`](docs/out-of-scope.md): what this repo does not do

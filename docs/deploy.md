@@ -14,7 +14,15 @@
 - Someone with **Cloud Application Administrator** or **Application Administrator** for the post-deployment admin consent.
 - Profiles on Azure Files through Entra Kerberos: hybrid (synced) identities are fully supported. Check [Microsoft's current guidance](https://learn.microsoft.com/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable) on cloud-only identity support before relying on it.
 
-## 2. Parameters
+## 2. Region
+
+Pick the region closest to your users: session latency matters more than anything else about the region. The [region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/) measures round-trip time from your browser to each Azure region and builds the preflight and deploy commands for the one you pick. Open it from the network your users are on, not over a VPN, and not from Cloud Shell, which runs in an Azure datacenter.
+
+The parameter files default to `northcentralus`. `deploy.sh -l <region>` and the preflight's `-Location <region>` override that through the `AVD_LOCATION` environment variable, so you don't edit the file to change region. The files deploy without availability zones, which works in every region. For zone redundancy, pick a zonal region and set `availabilityZones = [1, 2, 3]` and `profileStorageSku = 'Premium_ZRS'`.
+
+The host pool is deployed in the same region, so the region must offer AVD host pools. The preflight checks that.
+
+## 3. Parameters
 
 `parameters/dev.bicepparam` and `parameters/prod.bicepparam` are committed. They hold no tenant data: identity values and secrets come from environment variables.
 
@@ -26,15 +34,16 @@
 | `AVD_LOCAL_ADMIN_PASSWORD` | yes | you, or `deploy.sh` prompts. **Use the same value every time** |
 | `AVD_ALERT_EMAIL` | no | you |
 | `AVD_MONTHLY_BUDGET` | no (prod) | you |
+| `AVD_LOCATION` | no | `deploy.sh -l`, or the preflight's `-Location`. Defaults to `northcentralus` |
 
-Things you'll most likely change in the file: `namePrefix`, `location`, address ranges, `sessionHostCount`/`sessionHostVmSize`, `scalingTimeZone`, and for hub-peered mode the hub settings (examples are in `prod.bicepparam`).
+Things you'll most likely change in the file: `namePrefix`, address ranges, `sessionHostCount`/`sessionHostVmSize`, `scalingTimeZone`, and for hub-peered mode the hub settings (examples are in `prod.bicepparam`).
 
-## 3. Deploy
+## 4. Deploy
 
 Run the pre-deployment preflight first, and repeat it until it comes back clean. `-Fix` registers providers and creates the groups and the AVD service principal. It checks your parameter file against the subscription (zones, quota, storage SKU, Key Vault name) and the tenant (Intune, roles). See [operations.md](operations.md#pre-deployment-preflight).
 
 ```powershell
-./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/prod.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/prod.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
 ```
 
 ```bash
@@ -50,7 +59,7 @@ az account set --subscription "<subscription-id>"
 
 `deploy.sh` registers the resource providers and the `EncryptionAtHost` feature, resolves the group and service principal IDs, and runs `az deployment sub create`. A first deployment takes roughly 30–45 minutes. Session hosts are registered to the pool and FSLogix-configured as part of it. There are no post-deployment scripts.
 
-## 4. Post-deployment
+## 5. Post-deployment
 
 These are tenant-level steps that ARM can't perform. Each is done once per storage account.
 
@@ -77,7 +86,7 @@ icacls P: /remove "Authenticated Users" "Users"
 
 Configuring ACLs for Entra identities depends on your identity type (hybrid vs cloud-only). Follow [Configure directory and file-level permissions](https://learn.microsoft.com/azure/storage/files/storage-files-identity-configure-file-level-permissions).
 
-## 5. Verify
+## 6. Verify
 
 `./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix <prefix> -Environment <env> -TestUserUpn <user>` deploys a demo host pool and validates everything below automatically ([operations.md](operations.md)). To check by hand:
 
@@ -86,14 +95,14 @@ Configuring ACLs for Entra identities depends on your identity type (hybrid vs c
 - On the host, `frx list-redirects` or the `Microsoft-FSLogix-Apps/Operational` log shows the profile attached from `\\<storage>.file.core.windows.net\profiles`.
 - **AVD Insights** (host pool → Insights) shows data within about 15 minutes.
 
-## 6. Day-2 operations
+## 7. Day-2 operations
 
 - **Scale out:** raise `sessionHostCount` and redeploy. Existing hosts are untouched (their run commands see `IsRegistered = 1` and exit).
 - **New image:** change `sessionHostImage` or move to an Azure Compute Gallery image. Replace hosts by deploying a new `sessionHostNamePrefix`, drain the old hosts, then delete them.
 - **Exclude a host from autoscale:** tag the VM `avd-scaling-exclude`.
 - **Break-glass sign-in:** read `sessionhost-localadmin-password` from Key Vault (AVD Admins have Secrets User) from inside the VNet.
 
-## 7. Teardown
+## 8. Teardown
 
 1. Recovery Services vault → Backup items → Azure Storage (Azure Files) → **Stop backup** and delete the data. Registration puts a delete lock on the storage account.
 2. `az group delete` the five `rg-<prefix>-<env>-*` groups (hosts first).

@@ -5,6 +5,9 @@
 #   ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
 #       --users-group "AVD Users" --admins-group "AVD Admins" [--what-if]
 #
+# -l is the region the landing zone is deployed to (it sets AVD_LOCATION, which
+# the parameter files read).
+#
 # Environment variables (any flag above overrides):
 #   AVD_USERS_GROUP_ID, AVD_ADMINS_GROUP_ID   Entra group object IDs
 #   AVD_LOCAL_ADMIN_PASSWORD                  break-glass password (prompted if unset)
@@ -20,7 +23,7 @@ WHATIF=false
 AVD_APP_ID="9cdead84-a844-4324-93f2-b2e6bb768d07"   # Azure Virtual Desktop first-party app
 
 usage() {
-  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -89,7 +92,8 @@ if [[ -z "${AVD_LOCAL_ADMIN_PASSWORD:-}" ]]; then
   read -r -s -p "Break-glass local admin password: " AVD_LOCAL_ADMIN_PASSWORD; echo
 fi
 
-export AVD_USERS_GROUP_ID AVD_ADMINS_GROUP_ID AVD_SERVICE_PRINCIPAL_ID AVD_LOCAL_ADMIN_PASSWORD
+AVD_LOCATION="$LOCATION"
+export AVD_USERS_GROUP_ID AVD_ADMINS_GROUP_ID AVD_SERVICE_PRINCIPAL_ID AVD_LOCAL_ADMIN_PASSWORD AVD_LOCATION
 
 DEPLOY_NAME="avdlz-$(basename "$PARAM_FILE" .bicepparam)-$(date +%Y%m%d-%H%M%S)"
 
@@ -109,7 +113,7 @@ cat <<EOF
 
 ==> Landing zone deployed.
 
-One-time tenant steps Bicep cannot do (see docs/deploy.md#4-post-deployment):
+One-time tenant steps Bicep cannot do (see docs/deploy.md#5-post-deployment):
   1. Grant admin consent to the storage account's Entra app so Entra Kerberos works:
        Entra ID > App registrations > All applications > "[Storage Account] $STORAGE_NAME.file.core.windows.net"
        > API permissions > Grant admin consent

@@ -5,7 +5,10 @@ using '../bicep/main.bicep'
 
 param namePrefix = 'avdlz'
 param environmentName = 'prod'
-param location = 'northcentralus'
+// Default region; deploy.sh -l and the preflight's -Location override it (AVD_LOCATION).
+param location = empty(readEnvironmentVariable('AVD_LOCATION', ''))
+  ? 'northcentralus'
+  : readEnvironmentVariable('AVD_LOCATION', '')
 
 // ---- Identity (Entra ID) ----
 param avdUsersGroupObjectId = readEnvironmentVariable('AVD_USERS_GROUP_ID')
@@ -28,7 +31,7 @@ param privateEndpointSubnetPrefix = '10.100.2.0/27'
 // ---- Session hosts ----
 param sessionHostCount = 4
 param sessionHostVmSize = 'Standard_D4as_v5'
-// North Central US has no availability zones, so hosts are regional and profiles
+// Regional hosts work in every region (North Central US has no zones) and profiles
 // use locally redundant storage. For zone redundancy, use a zonal region (e.g.
 // centralus) with availabilityZones = [1, 2, 3] and profileStorageSku = 'Premium_ZRS'.
 param availabilityZones = []
