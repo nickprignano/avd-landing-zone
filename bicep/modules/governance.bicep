@@ -35,6 +35,10 @@ resource inheritRgTagDefinition 'Microsoft.Authorization/policyDefinitions@2023-
 }
 
 var tagContributorRoleId = '4a9ae827-6dc8-4573-8ac7-8239d42aa03f'
+var assignmentMetadata = {
+  assignedBy: 'AVD landing zone (Bicep)'
+  source: 'https://github.com/nickprignano/avd-landing-zone'
+}
 var governedTags = [
   'environment'
   'workload'
@@ -45,6 +49,8 @@ resource allowedLocationsAssignment 'Microsoft.Authorization/policyAssignments@2
   name: 'avdlz-allowed-locations'
   properties: {
     displayName: 'AVD LZ: allowed locations for resources'
+    description: 'Denies resources outside the regions approved for this AVD landing zone.'
+    metadata: assignmentMetadata
     policyDefinitionId: allowedLocationsDefinition.id
     parameters: {
       listOfAllowedLocations: { value: allowedLocations }
@@ -56,6 +62,8 @@ resource allowedRgLocationsAssignment 'Microsoft.Authorization/policyAssignments
   name: 'avdlz-allowed-rg-locations'
   properties: {
     displayName: 'AVD LZ: allowed locations for resource groups'
+    description: 'Denies resource groups outside the regions approved for this AVD landing zone.'
+    metadata: assignmentMetadata
     policyDefinitionId: allowedRgLocationsDefinition.id
     parameters: {
       listOfAllowedLocations: { value: allowedLocations }
@@ -75,6 +83,8 @@ resource inheritTagAssignments 'Microsoft.Authorization/policyAssignments@2024-0
     }
     properties: {
       displayName: 'AVD LZ: inherit tag "${tag}" from resource group'
+      description: 'Copies the "${tag}" tag from the resource group to resources that lack it, for cost and ownership reporting.'
+      metadata: assignmentMetadata
       policyDefinitionId: inheritRgTagDefinition.id
       parameters: {
         tagName: { value: tag }

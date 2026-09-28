@@ -1,0 +1,86 @@
+# PSRule suppressions for this landing zone.
+# Each group suppresses one rule for a stated reason. Review these when the
+# design changes; everything not listed here must pass for CI to go green.
+
+---
+# Synopsis: Profile shares keep 14 days of soft delete; the rule checks for exactly 7 days, not a minimum.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: FileShareSoftDeleteRetentionLongerThanDefault
+spec:
+  rule:
+    - Azure.Storage.FileShareSoftDelete
+  if:
+    field: type
+    in:
+      - Microsoft.Storage/storageAccounts
+      - Microsoft.Storage/storageAccounts/fileServices
+
+---
+# Synopsis: Session hosts are patched by Intune (Windows Update for Business) and drained/replaced by image, not by Azure maintenance configurations.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: SessionHostPatchingViaIntune
+spec:
+  rule:
+    - Azure.VM.MaintenanceConfig
+  if:
+    field: type
+    equals: Microsoft.Compute/virtualMachines
+
+---
+# Synopsis: Log Analytics workspace replication doubles ingestion cost; enable it per organisation DR requirements.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: LogAnalyticsReplicationIsAnOrgDecision
+spec:
+  rule:
+    - Azure.Log.Replication
+  if:
+    field: type
+    equals: Microsoft.OperationalInsights/workspaces
+
+---
+# Synopsis: False positive in the AVM Key Vault module's 'keys' parameter (key definitions, not secret values); this landing zone creates no keys.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: AvmKeyVaultKeysParameter
+spec:
+  rule:
+    - Azure.Deployment.SecureParameter
+  if:
+    name: '.'
+    equals: key-vault
+
+---
+# Synopsis: Defender for Storage malware scanning covers blobs; the profile account is FileStorage with SMB shares only.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: MalwareScanNotApplicableToFileStorage
+spec:
+  rule:
+    - Azure.Defender.Storage.MalwareScan
+  if:
+    allOf:
+      - field: type
+        equals: Microsoft.Security/pricings
+      - name: '.'
+        equals: StorageAccounts
+
+---
+# Synopsis: Replication alerts apply to Azure Site Recovery, which this landing zone does not use; backup job alerts go through Azure Monitor.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: NoSiteRecoveryReplication
+spec:
+  rule:
+    - Azure.RSV.ReplicationAlert
+  if:
+    field: type
+    equals: Microsoft.RecoveryServices/vaults
