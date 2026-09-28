@@ -2,7 +2,7 @@
 # Deploy the cloud-native AVD landing zone at subscription scope.
 #
 # Usage:
-#   ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 \
+#   ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
 #       --users-group "AVD Users" --admins-group "AVD Admins" [--what-if]
 #
 # Environment variables (any flag above overrides):

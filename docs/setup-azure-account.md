@@ -47,7 +47,7 @@ If `az` isn't installed: https://learn.microsoft.com/cli/azure/install-azure-cli
 Brand-new subscriptions often start with **very low vCPU quota** — this is the most common thing that blocks an AVD demo.
 
 ```bash
-az vm list-usage --location eastus2 -o table | grep -i "standard d"
+az vm list-usage --location northcentralus -o table | grep -i "standard d"
 ```
 
 The dev parameters deploy one `Standard_D4as_v5` (4 vCPUs). If you're below that, request an increase: Portal → **Subscriptions → Usage + quotas**.
@@ -71,7 +71,7 @@ param enrollInIntune = false
 ### 7. Deploy
 
 ```bash
-./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 \
+./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
   --users-group "AVD Users" --admins-group "AVD Admins"
 ```
 

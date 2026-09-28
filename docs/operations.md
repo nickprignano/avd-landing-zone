@@ -24,7 +24,7 @@ Set-AzContext -Subscription '<landing zone subscription>'
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Fix
 
 # 2. Deploy, as a separate run (the clean preflight prints this command)
-bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 --users-group 'AVD Users' --admins-group 'AVD Admins'
+bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins'
 
 # 3. After deploying
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev          # check

@@ -41,10 +41,10 @@ Run the pre-deployment preflight first, and repeat it until it comes back clean.
 az login
 az account set --subscription "<subscription-id>"
 
-./scripts/deploy/deploy.sh -p parameters/prod.bicepparam -l eastus2 \
+./scripts/deploy/deploy.sh -p parameters/prod.bicepparam -l northcentralus \
   --users-group "AVD Users" --admins-group "AVD Admins" --what-if
 
-./scripts/deploy/deploy.sh -p parameters/prod.bicepparam -l eastus2 \
+./scripts/deploy/deploy.sh -p parameters/prod.bicepparam -l northcentralus \
   --users-group "AVD Users" --admins-group "AVD Admins"
 ```
 

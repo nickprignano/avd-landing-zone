@@ -36,11 +36,11 @@ pwsh ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFil
   -UsersGroup "AVD Users" -AdminsGroup "AVD Admins"
 
 # What-if
-./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 \
+./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
   --users-group "AVD Users" --admins-group "AVD Admins" --what-if
 
 # Deploy (≈30-45 min the first time)
-./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 \
+./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
   --users-group "AVD Users" --admins-group "AVD Admins"
 ```
 

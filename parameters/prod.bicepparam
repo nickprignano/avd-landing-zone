@@ -5,7 +5,7 @@ using '../bicep/main.bicep'
 
 param namePrefix = 'avdlz'
 param environmentName = 'prod'
-param location = 'eastus2'
+param location = 'northcentralus'
 
 // ---- Identity (Entra ID) ----
 param avdUsersGroupObjectId = readEnvironmentVariable('AVD_USERS_GROUP_ID')
@@ -28,17 +28,20 @@ param privateEndpointSubnetPrefix = '10.100.2.0/27'
 // ---- Session hosts ----
 param sessionHostCount = 4
 param sessionHostVmSize = 'Standard_D4as_v5'
-param availabilityZones = [1, 2, 3]
+// North Central US has no availability zones, so hosts are regional and profiles
+// use locally redundant storage. For zone redundancy, use a zonal region (e.g.
+// centralus) with availabilityZones = [1, 2, 3] and profileStorageSku = 'Premium_ZRS'.
+param availabilityZones = []
 param maxSessionLimit = 8
 
 // ---- Profiles ----
-param profileStorageSku = 'Premium_ZRS'
+param profileStorageSku = 'Premium_LRS'
 param profileShareQuotaGiB = 1024
 param enableProfileBackup = true
 param profileBackupRetentionDays = 30
 
 // ---- Scaling ----
-param scalingTimeZone = 'Eastern Standard Time'
+param scalingTimeZone = 'Central Standard Time'
 
 // ---- Operations & governance ----
 param logRetentionDays = 90
