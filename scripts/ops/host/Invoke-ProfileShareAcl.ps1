@@ -41,7 +41,7 @@ $script:step = 'start'
 
 $base = "https://$StorageFqdn/$ShareName"
 
-function New-FileHeaders {
+function Get-FileRequestHeader {
   # x-ms-date is required on authorized requests; Get/Create Permission reject a request without it.
   @{
     Authorization              = "Bearer $token"
@@ -59,10 +59,10 @@ function Get-ResponseHeader($Response, [string] $Name) {
 
 function Get-RootSddl {
   $script:step = 'get root directory properties'
-  $dir = Invoke-WebRequest -UseBasicParsing -Method Get -Uri ($base + '?restype=directory') -Headers (New-FileHeaders)
+  $dir = Invoke-WebRequest -UseBasicParsing -Method Get -Uri ($base + '?restype=directory') -Headers (Get-FileRequestHeader)
   $key = Get-ResponseHeader $dir 'x-ms-file-permission-key'
   if (-not $key) { throw 'The root directory response had no x-ms-file-permission-key header.' }
-  $h = New-FileHeaders
+  $h = Get-FileRequestHeader
   $h['x-ms-file-permission-key'] = $key
   $script:step = 'get share permission'
   (Invoke-RestMethod -UseBasicParsing -Method Get -Uri ($base + '?restype=share&comp=filepermission') -Headers $h).permission
@@ -76,10 +76,10 @@ try {
     $body = @{ permission = $sddl } | ConvertTo-Json -Compress
     $script:step = 'create share permission'
     $created = Invoke-WebRequest -UseBasicParsing -Method Put -Uri ($base + '?restype=share&comp=filepermission') `
-      -Headers (New-FileHeaders) -Body $body -ContentType 'application/json'
+      -Headers (Get-FileRequestHeader) -Body $body -ContentType 'application/json'
     $newKey = Get-ResponseHeader $created 'x-ms-file-permission-key'
     if (-not $newKey) { throw 'Create Permission returned no x-ms-file-permission-key header.' }
-    $h = New-FileHeaders
+    $h = Get-FileRequestHeader
     $h['x-ms-file-permission-key'] = $newKey
     $h['x-ms-file-attributes'] = 'preserve'
     $h['x-ms-file-creation-time'] = 'preserve'
