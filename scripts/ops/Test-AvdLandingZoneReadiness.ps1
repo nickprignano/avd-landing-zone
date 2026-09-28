@@ -45,6 +45,16 @@
     -Fix           registers providers/feature, grants admin consent, tags the
                    app, excludes the app from the affected CA policies (you
                    confirm each), sets the FSLogix-recommended root ACL
+    -WellArchitected
+                   reviews the deployed landing zone by Well-Architected pillar:
+                   design checks (host count, zones, storage redundancy,
+                   backup, Defender plans, host and storage hardening, budget,
+                   scaling plan, diagnostics, log retention, accelerated
+                   networking), Azure Advisor and Defender for Cloud
+                   recommendations, Azure Policy compliance, and PSRule for
+                   Azure on the live resources (-SkipPSRule to leave it out).
+                   Findings are warnings; the ones the dev parameter file makes
+                   on purpose are marked as expected.
 
   Exit code 0 = no failures; 1 = at least one failure. Warnings don't fail.
 
@@ -53,6 +63,9 @@
 
 .EXAMPLE
   ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix -AllowHostStart
+
+.EXAMPLE
+  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -WellArchitected -SkipTenant -SkipNtfs
 #>
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'PostDeployment')]
 param(
@@ -77,6 +90,10 @@ param(
   [Parameter(ParameterSetName = 'PostDeployment')][string] $NtfsHostName,
   [Parameter(ParameterSetName = 'PostDeployment')][switch] $AllowHostStart,
   [Parameter(ParameterSetName = 'PostDeployment')][switch] $SkipNtfs,
+  # Review the deployed landing zone against the Well-Architected Framework (warnings only).
+  [Parameter(ParameterSetName = 'PostDeployment')][switch] $WellArchitected,
+  # With -WellArchitected: skip PSRule for Azure on the live resources (it installs a module and takes a minute or two).
+  [Parameter(ParameterSetName = 'PostDeployment')][switch] $SkipPSRule,
 
   # ---- Both ----
   [string] $SubscriptionId,
@@ -118,6 +135,10 @@ else {
   }
   if ($Force) { $checkParams.Confirm = $false }
   Invoke-AvdReadinessCheck @checkParams
+  if ($WellArchitected) {
+    if (@($lz.RgExists.Keys | Where-Object { $_ -ne 'Demo' -and $lz.RgExists[$_] }).Count) { Test-AvdWellArchitected -Lz $lz -SkipPSRule:$SkipPSRule }
+    else { Add-AvdCheckResult 'WAF: Reliability' 'Well-Architected review' 'Skip' -Detail 'Nothing to review until the landing zone exists.' }
+  }
 }
 
 $summary = Write-AvdSummary
@@ -137,7 +158,7 @@ if ($PreDeployment) {
   $portalState = Get-AvdPortalState -Stage predeploy -Fix:$Fix -Context $portalContext
 }
 else {
-  $portalState = Get-AvdPortalState -Stage postdeploy -Fix:$Fix -Context @{ namePrefix = $NamePrefix; environment = $Environment }
+  $portalState = Get-AvdPortalState -Stage postdeploy -Fix:$Fix -Context @{ namePrefix = $NamePrefix; environment = $Environment; wellArchitected = [bool]$WellArchitected }
 }
 if ($summary.Failed) {
   Write-Host "Not ready: $($summary.Failed) failure(s).$(if (-not $Fix) { ' Rerun with -Fix to remediate what can be fixed automatically.' })" -ForegroundColor Red

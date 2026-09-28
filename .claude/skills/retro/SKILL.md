@@ -8,6 +8,7 @@ description: Turn a real-run failure or surprise into a lesson plus a guard so i
 A finding is only captured when something automated would fail if it came back. Work through all steps; skip one only with a stated reason.
 
 ## 1. Pin the evidence
+- A `portal-report` issue (from the deployment portal) already has the output, redacted, and what the portal made of it. Before copying any of it into the repo, check it for private values the redaction missed. If you find one, that is a finding too: add a pattern to `docs/portal/report.js` and a line to `tests/portal/fixtures/pii-sample.txt`.
 - Quote the real output: the failing line, error code, status and headers. If the output doesn't say *why*, the first fix is better diagnostics (lesson 0012), not a guess.
 - Check `docs/lessons/README.md` for an existing lesson in the same area. If one exists, extend it instead of adding a new one.
 

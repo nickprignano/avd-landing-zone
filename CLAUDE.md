@@ -39,6 +39,9 @@ Without Pester, run an offline scenario directly: `pwsh -File tests/offline/Post
 - **Commands given to operators are self-contained Cloud Shell blocks:** clone or update, `Set-Location`, `Connect-MgGraph` when needed. Sessions are ephemeral and disconnect. (0015)
 - **When the offline mock disagrees with a real run, fix the mock and add the case.** `tests/offline/AzMock.psm1` must not be more permissive than Azure. Offline tests provide every tool they touch. (0020)
 - **The deployment portal (`docs/portal`) reads the scripts' state line.** Changing a script's output, parameters or a check the portal recognises means updating `portal-core.js` and its tests (`node --test "tests/portal/*.test.mjs"`). A real paste analysed wrongly becomes a fixture. (decision 0007)
+- **Portal issue reports are redacted in the browser (`docs/portal/report.js`).** A new kind of private value in output means a pattern, a line in `fixtures/pii-sample.txt`, and a test. New GUIDs in `bicep/` or `scripts/` go into `PUBLIC_IDS`. Check a `portal-report` issue for anything the patterns missed before committing it as a fixture. (decision 0008)
+
+- **Well-Architected findings (`-WellArchitected`) are warnings, never failures,** and each carries `waf-<check>` with `data.pillar`/`data.accepted`. A new check reads through REST, gets a mock response in `AzMock.psm1` and an assertion in the WellArchitected scenario. (decision 0009)
 
 ## Git and PRs
 - Work on the designated branch; open PRs only when asked. The PR template asks for a Lessons section.

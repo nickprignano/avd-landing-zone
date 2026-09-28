@@ -11,3 +11,5 @@ Short records of choices that shape this repo, so they are not reopened without 
 | 0005 | [Set the profile share root ACL through the Azure Files REST API from a session host](0005-ntfs-via-rest.md) | Accepted |
 | 0006 | [Every real-run finding becomes a lesson and a guard](0006-lessons-and-guards.md) | Accepted |
 | 0007 | [The deployment portal reads a state line from the scripts, in the browser only](0007-portal-state-line.md) | Accepted |
+| 0008 | [Problem reports from the portal: redacted in the browser, submitted by the reporter](0008-portal-issue-reports.md) | Accepted |
+| 0009 | [The Well-Architected review runs against the deployed landing zone and only warns](0009-well-architected-review.md) | Accepted |

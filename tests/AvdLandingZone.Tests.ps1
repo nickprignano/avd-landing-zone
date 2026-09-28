@@ -299,3 +299,58 @@ Describe 'Profile share ACL error reporting' {
     Get-AvdShareAclRemediation ([pscustomobject]@{ status = 'Error'; httpStatus = 403; error = 'x'; resolvedIp = '20.60.1.5' }) | Should -BeLike '*private IP*'
   }
 }
+
+Describe 'Get-AvdArmList' {
+  It 'follows nextLink as a path and returns a flat list' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm {
+      if ($Path -notmatch 'skipToken') { [pscustomobject]@{ value = @([pscustomobject]@{ n = 1 }, [pscustomobject]@{ n = 2 }); nextLink = 'https://management.azure.com/subscriptions/s/things?api-version=1&$skipToken=2' } }
+      else { [pscustomobject]@{ value = @([pscustomobject]@{ n = 3 }) } }
+    }
+    $items = @(Get-AvdArmList -Path '/subscriptions/s/things?api-version=1')
+    ($items | ForEach-Object n) -join ',' | Should -Be '1,2,3'
+    Should -Invoke -ModuleName AvdLandingZone Invoke-AvdArm -ParameterFilter { $Path -eq '/subscriptions/s/things?api-version=1&$skipToken=2' } -Times 1 -Exactly
+  }
+
+  It 'stops at MaxPages when nextLink never ends' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm { [pscustomobject]@{ value = @([pscustomobject]@{ n = 1 }); nextLink = 'https://management.azure.com/again' } }
+    @(Get-AvdArmList -Path '/x' -MaxPages 3).Count | Should -Be 3
+    Should -Invoke -ModuleName AvdLandingZone Invoke-AvdArm -Times 3 -Exactly
+  }
+
+  It 'stops on an empty page and passes an error through' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm { [pscustomobject]@{ value = @(); nextLink = 'https://management.azure.com/again' } }
+    @(Get-AvdArmList -Path '/x').Count | Should -Be 0
+    Should -Invoke -ModuleName AvdLandingZone Invoke-AvdArm -Times 1 -Exactly
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm { throw 'ARM GET /x failed (403)' }
+    { Get-AvdArmList -Path '/x' } | Should -Throw '*403*'
+  }
+}
+
+Describe 'Well-Architected findings' {
+  BeforeEach { Clear-AvdCheckResult }
+
+  It 'marks a dev trade-off as expected, and the same finding in prod as a plain warning' {
+    Add-AvdWafResult -Pillar Reliability -Key host-count -Check 'Two hosts' -Ok $false -Detail '1 session host(s)' -Environment dev -TradeOff
+    Add-AvdWafResult -Pillar Reliability -Key host-count -Check 'Two hosts' -Ok $false -Detail '1 session host(s)' -Environment prod -TradeOff
+    $r = Get-AvdCheckResult
+    $r[0].Status | Should -Be 'Warn'
+    $r[0].Id | Should -Be 'waf-host-count'
+    $r[0].Data.accepted | Should -BeTrue
+    $r[0].Detail | Should -Be '1 session host(s). Expected in dev (parameters/dev.bicepparam); change it before production.'
+    $r[1].Data.accepted | Should -BeFalse
+    $r[1].Detail | Should -Be '1 session host(s)'
+  }
+
+  It 'never fails a run: a finding is Pass or Warn' {
+    Add-AvdWafResult -Pillar Security -Key x -Check 'Hardened' -Ok $true
+    Add-AvdWafResult -Pillar Security -Key y -Check 'Hardened' -Ok $false
+    $r = Get-AvdCheckResult
+    ($r | ForEach-Object Status) -join ',' | Should -Be 'Pass,Warn'
+    $r[1].Data.pillar | Should -Be 'Security'
+  }
+
+  It 'reads the pillar from a PSRule record tag' {
+    Get-AvdPSRulePillar ([pscustomobject]@{ Tag = @{ 'Azure.WAF/pillar' = 'Cost Optimization' } }) | Should -Be 'Cost Optimization'
+    Get-AvdPSRulePillar ([pscustomobject]@{ Tag = $null }) | Should -Be ''
+  }
+}

@@ -1,0 +1,4 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -WellArchitected -SkipTenant -SkipNtfs
+...
+<<<AVDLZ-STATE {"v":1,"stage":"postdeploy","status":"ready","fix":false,"context":{"environment":"dev","wellArchitected":true,"namePrefix":"avdlz"},"counts":{"pass":63,"fail":0,"warn":0,"fixed":0,"skip":1},"failures":[],"warnings":[]} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>

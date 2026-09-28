@@ -78,6 +78,10 @@
       return block(cfg, ['./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
         (fix ? ' -Fix -AllowHostStart' : '')]);
     },
+    wellArchitected: function (cfg) {
+      return block(cfg, ['./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
+        ' -WellArchitected -SkipTenant -SkipNtfs']);
+    },
     demo: function (cfg) {
       return block(cfg, ['./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
         (cfg.testUserUpn ? ' -TestUserUpn ' + psQuote(cfg.testUserUpn) : '')]);
@@ -196,10 +200,11 @@
 
   // Which of our commands the pasted output was running, read from the prompt line, e.g.
   // "PS /home/builder> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ... -Fix".
+  // A redacted report (docs/portal/report.js) has "PS /home/<user-1>>".
   function commandInText(text) {
     var lines = text.split('\n'), i, m;
     for (i = lines.length - 1; i >= 0; i--) {
-      m = /^PS [^>]*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo)\b.*)$/.exec(lines[i]);
+      m = /^PS (?:<[a-z]+-\d+>|[^>])*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo)\b.*)$/.exec(lines[i]);
       if (!m) continue;
       var c = m[1], fix = /\s-Fix\b/.test(c);
       if (/Test-AvdLandingZoneReadiness/.test(c)) return { step: /-PreDeployment\b/.test(c) ? 'predeploy' : 'postdeploy', fix: fix };
@@ -286,8 +291,20 @@
         return { step: found.length ? 'postdeploy' : 'predeploy', actions: a };
       }
       if (state.status === 'ready') {
+        var waf = (state.warnings || []).filter(function (w) { return /^waf-/.test(w.id || ''); });
+        if (state.context && state.context.wellArchitected) {
+          var open = waf.filter(function (w) { return !(w.data && w.data.accepted); }), expected = waf.length - open.length;
+          var pillars = {};
+          open.forEach(function (w) { var p = (w.data && w.data.pillar) || 'Other'; pillars[p] = (pillars[p] || 0) + 1; });
+          note(waf.length ? 'Review the Well-Architected findings' : 'Well-Architected: every check passes',
+            waf.length ? (open.length ? 'To review: ' + ['Reliability', 'Security', 'Cost Optimization', 'Operational Excellence', 'Performance Efficiency', 'Other'].filter(function (p) { return pillars[p]; }).map(function (p) { return pillars[p] + ' ' + p; }).join(', ') + '.' : 'Nothing beyond the expected ones.') +
+              (expected ? ' ' + expected + ' are trade-offs the ' + cfg.environment + ' parameter file makes on purpose; change them before production.' : '') + ' The findings are listed above; none of them blocks sign-in.'
+              : 'Design checks, Azure Advisor, Defender for Cloud, Azure Policy and PSRule for Azure found nothing to review.', '');
+        }
         note('Sign in to the desktop', 'Everything checks out. Open https://windows.cloud.microsoft (or the Windows App) as a member of ' + cfg.usersGroup + ' and open the desktop. New group members can take up to an hour to see it; a stopped host starts on the first connection.', '');
         note('Optional: validate sign-in end to end with a demo host pool', 'Deploys a separate demo host pool, checks the host and your test user, and tells you how to remove it.', cmd.demo(cfg));
+        if (!(state.context && state.context.wellArchitected))
+          note('Optional: Well-Architected review', 'Reviews the deployed landing zone by pillar (reliability, security, cost, operations, performance): design checks, Azure Advisor, Defender for Cloud, Azure Policy and PSRule for Azure. Findings are warnings; no Graph sign-in needed. A few minutes.', cmd.wellArchitected(cfg));
         return { step: 'signin', actions: a };
       }
       if (hasFixable(failures) && !state.fix) {
@@ -395,7 +412,8 @@
         { title: 'Already started? Check on it', why: 'Shows the latest deployment and any failed resources.', command: cmd.deployStatus(cfg) }];
       case 'postdeploy': return [{ title: 'Run the post-deployment setup', why: 'Admin consent for the storage app, the Conditional Access exclusion and the profile share permissions. It asks for a Microsoft Graph device code.', command: cmd.postdeploy(cfg, true) }];
       case 'signin': return [{ title: 'Sign in to the desktop', why: 'Open https://windows.cloud.microsoft (or the Windows App) as a member of ' + cfg.usersGroup + '.', command: '' },
-        { title: 'Optional: validate sign-in with a demo host pool', why: 'Deploys a separate demo host pool and checks the host and your test user.', command: cmd.demo(cfg) }];
+        { title: 'Optional: validate sign-in with a demo host pool', why: 'Deploys a separate demo host pool and checks the host and your test user.', command: cmd.demo(cfg) },
+        { title: 'Optional: Well-Architected review', why: 'Reviews the deployed landing zone by pillar. Findings are warnings; no Graph sign-in needed.', command: cmd.wellArchitected(cfg) }];
       default: return [firstStep(cfg)];
     }
   }

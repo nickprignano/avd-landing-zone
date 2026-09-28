@@ -60,6 +60,43 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   if ($Path -match 'policyAssignments\?') { return & $ok @{ value=@(@{name='avdlz-allowed-locations';id="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-allowed-locations"},@{name='avdlz-inherit-rg-tag-workload';id="$S/pa2";identity=@{principalId='44444444-0000-0000-0000-000000000000'}},@{name='someone-else';id='x'}) } }
   if ($Path -match 'budgets/' -and $Method -eq 'GET') { return [pscustomobject]@{StatusCode=404;Content=''} }
   if ($Path -match 'diagnosticSettings/' -and $Method -eq 'GET') { return & $ok @{ name='avdlz-activity-log' } }
+  # ---- Well-Architected review (Test-AvdWellArchitected). $global:St.waf.good: a production-grade
+  # landing zone; otherwise the dev parameter file's trade-offs in a region without zones.
+  $g = [bool]$global:St.waf.good
+  if ($Path -match '^/subscriptions/[^/]+/locations\?api-version') { return & $ok @{ value=@(@{ name='eastus2'; availabilityZoneMappings=@(if ($global:St.waf.regionZones) { @{logicalZone='1';physicalZone='eastus2-az1'} }) }) } }
+  if ($Path -match 'Microsoft.Compute/virtualMachines\?api-version') {
+    $n = if ($g) { 2 } else { 1 }
+    return & $ok @{ value=@(1..$n | ForEach-Object { @{ name="avdlzdsh-00$_"; zones=@(if ($g) { "$_" }); properties=@{ securityProfile=@{ securityType='TrustedLaunch'; encryptionAtHost=$true } } } }) }
+  }
+  if ($Path -match 'Microsoft.Network/networkInterfaces\?') { return & $ok @{ value=@(@{ name='avdlzdsh-001-nic'; properties=@{ enableAcceleratedNetworking=$true } }) } }
+  if ($Path -match "storageAccounts/$saName/fileServices/default\?") { return & $ok @{ properties=@{ shareDeleteRetentionPolicy=@{ enabled=$true; days=14 } } } }
+  if ($Path -match "storageAccounts/$saName\?api-version") { return & $ok @{ sku=@{ name=$(if ($g) { 'Premium_ZRS' } else { 'Premium_LRS' }) }; properties=@{ minimumTlsVersion='TLS1_2'; supportsHttpsTrafficOnly=$true; allowSharedKeyAccess=$false } } }
+  if ($Path -match 'backupProtectedItems\?') { return & $ok @{ value=@(if ($g) { @{ name='AzureFileShare;profiles' } }) } }
+  if ($Path -match 'Microsoft.Security/pricings\?') { return & $ok @{ value=@('VirtualMachines','StorageAccounts','KeyVaults','Containers' | ForEach-Object { @{ name=$_; properties=@{ pricingTier=$(if ($g) { 'Standard' } else { 'Free' }) } } }) } }
+  if ($Path -match '/rg/kv\?api-version') { return & $ok @{ properties=@{ enablePurgeProtection=$true; enableRbacAuthorization=$true; publicNetworkAccess='Disabled' } } }
+  if ($Path -match 'Microsoft.Consumption/budgets\?') { return & $ok @{ value=@(if ($g) { @{ name='budget-avdlz-prod' } }) } }
+  if ($Path -match 'scalingPlans\?') { return & $ok @{ value=@(@{ name='vdscaling-avdlz-dev'; properties=@{ hostPoolReferences=@(@{ hostPoolArmPath=$hpId; scalingPlanEnabled=$true }) } }) } }
+  if ($Path -match 'hostPools/vdpool-avdlz-dev/providers/Microsoft.Insights/diagnosticSettings\?') { return & $ok @{ value=@(@{ name='diag-vdpool'; properties=@{ workspaceId="$S/rg/law" } }) } }
+  if ($Path -match '/rg/law\?api-version') { return & $ok @{ properties=@{ retentionInDays=$(if ($g) { 90 } else { 30 }) } } }
+  if ($Path -match 'policyStates/latest/summarize') {
+    $nc = if (-not $g -and $Path -match 'rg-avdlz-dev-hosts') { 1 } else { 0 }
+    return & $ok @{ value=@(@{ results=@{ nonCompliantResources=$nc }; policyAssignments=@(@{ policyAssignmentId="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-guest-attestation"; results=@{ nonCompliantResources=$nc } }) }) }
+  }
+  # Two pages (nextLink), and an unhealthy assessment outside the landing zone that must be ignored.
+  if ($Path -match 'Microsoft.Security/assessments\?') {
+    if ($Path -notmatch 'skipToken') {
+      return & $ok @{ nextLink="https://management.azure.com$S/providers/Microsoft.Security/assessments?api-version=2021-06-01&`$skipToken=page2"; value=@(
+          @{ id="$S/resourceGroups/rg-other/providers/Microsoft.Compute/virtualMachines/vm1/providers/Microsoft.Security/assessments/a1"; properties=@{ displayName='Other workload'; status=@{ code='Unhealthy' }; metadata=@{ severity='High' } } },
+          @{ id="$saId/providers/Microsoft.Security/assessments/a2"; properties=@{ displayName='Storage healthy'; status=@{ code='Healthy' }; metadata=@{ severity='Low' } } }) }
+    }
+    return & $ok @{ value=@(if (-not $g) { @{ id="$S/resourceGroups/rg-avdlz-dev-hosts/providers/Microsoft.Compute/virtualMachines/avdlzdsh-001/providers/Microsoft.Security/assessments/a3"; properties=@{ displayName='Machines should have vulnerability findings resolved'; status=@{ code='Unhealthy' }; metadata=@{ severity='Medium' } } } }) }
+  }
+  # Advisor returns resource IDs in any case; one recommendation is for another workload.
+  if ($Path -match 'Microsoft.Advisor/recommendations\?') {
+    return & $ok @{ value=@(
+        @{ id='r1'; properties=@{ category='Cost'; impact='High'; shortDescription=@{ problem='Right-size underused VM' }; resourceMetadata=@{ resourceId="/subscriptions/$sub/resourcegroups/rg-other/providers/microsoft.compute/virtualmachines/vm1" } } }
+        if (-not $g) { @{ id='r2'; properties=@{ category='HighAvailability'; impact='Medium'; shortDescription=@{ problem='Use availability zones for better resiliency' }; resourceMetadata=@{ resourceId="/subscriptions/$sub/resourcegroups/RG-AVDLZ-DEV-HOSTS/providers/Microsoft.Compute/virtualMachines/avdlzdsh-001" } } } }) }
+  }
   return & $ok @{}
 }
 function Get-AzRoleAssignment { param($Scope,$RoleDefinitionName,$ObjectId,$ObjectType,[switch]$ExpandPrincipalGroups,$ErrorAction)
@@ -129,6 +166,15 @@ function Unregister-AzRecoveryServicesBackupContainer { param($Container,$VaultI
 function Get-AzResourceLock { param($Scope,$ErrorAction) @([pscustomobject]@{Name='AzureBackupProtectionLock';LockId='lock1'}) }
 function Remove-AzResourceLock { param($LockId,[switch]$Force) Log "unlock $LockId" }
 function Start-Sleep { param($Seconds) }
+# PSRule for Azure (Get-AvdPSRuleFinding). Record shape: RuleName, TargetName, Tag['Azure.WAF/pillar'].
+$global:St.waf = @{ good = $false; regionZones = $false }
+function Export-AzRuleData { param([string[]]$ResourceGroupName,$OutputPath,$ErrorAction) Log "psrule export $($ResourceGroupName -join ',')"; New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null }
+function Invoke-PSRule { param($InputPath,$Module,$Outcome,$Path,$WarningAction,$ErrorAction)
+  Log "psrule invoke outcome=$Outcome suppressions=$([bool]$Path)"
+  if ($global:St.waf.good) { return }
+  [pscustomobject]@{ RuleName='Azure.VM.UseHybridUseBenefit'; TargetName='avdlzdsh-001'; Tag=@{ 'Azure.WAF/pillar'='Cost Optimization' } }
+  [pscustomobject]@{ RuleName='Azure.Storage.ContainerSoftDelete'; TargetName=$saName; Tag=@{ 'Azure.WAF/pillar'='Reliability' } }
+}
 
 # ---- Graph ----
 function Get-MgContext { $global:MgCtx }

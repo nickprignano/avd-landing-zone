@@ -1,0 +1,28 @@
+# Labels issues sent from the deployment portal's "Report a problem" (decision 0008).
+# The portal's labels URL parameter only works for people with triage access.
+name: Label portal reports
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    if: contains(github.event.issue.body, '<!-- avdlz-portal-report')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add the portal-report label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: 'portal-report' });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.issues.createLabel({ owner, repo, name: 'portal-report', color: '0a5fb4', description: 'Sent from the deployment portal (redacted in the browser)' });
+            }
+            await github.rest.issues.addLabels({ owner, repo, issue_number: context.issue.number, labels: ['portal-report'] });
