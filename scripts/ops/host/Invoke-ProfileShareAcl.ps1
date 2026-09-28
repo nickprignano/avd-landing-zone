@@ -61,7 +61,11 @@ function Get-RootSddl {
   $script:step = 'get root directory properties'
   $dir = Invoke-WebRequest -UseBasicParsing -Method Get -Uri ($base + '?restype=directory') -Headers (Get-FileRequestHeader)
   $key = Get-ResponseHeader $dir 'x-ms-file-permission-key'
-  if (-not $key) { throw 'The root directory response had no x-ms-file-permission-key header.' }
+  if (-not $key) {
+    # Say exactly what came back, so the next step is based on facts rather than guesses.
+    $names = @($dir.Headers.Keys | Sort-Object) -join ', '
+    throw "The root directory response (HTTP $($dir.StatusCode), x-ms-version $(Get-ResponseHeader $dir 'x-ms-version')) had no x-ms-file-permission-key header. Headers returned: $names"
+  }
   $h = Get-FileRequestHeader
   $h['x-ms-file-permission-key'] = $key
   $script:step = 'get share permission'
