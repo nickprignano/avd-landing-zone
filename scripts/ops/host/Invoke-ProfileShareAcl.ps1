@@ -62,9 +62,11 @@ function Get-RootSddl {
   $dir = Invoke-WebRequest -UseBasicParsing -Method Get -Uri ($base + '?restype=directory') -Headers (Get-FileRequestHeader)
   $key = Get-ResponseHeader $dir 'x-ms-file-permission-key'
   if (-not $key) {
-    # Say exactly what came back, so the next step is based on facts rather than guesses.
-    $names = @($dir.Headers.Keys | Sort-Object) -join ', '
-    throw "The root directory response (HTTP $($dir.StatusCode), x-ms-version $(Get-ResponseHeader $dir 'x-ms-version')) had no x-ms-file-permission-key header. Headers returned: $names"
+    # A share root that never had an ACL set has no stored security descriptor, so the
+    # service returns no permission key: the root still has the default ACL (every
+    # authenticated user can modify). $null tells the caller exactly that.
+    $script:rootHeaders = @($dir.Headers.Keys | Sort-Object) -join ', '
+    return $null
   }
   $h = Get-FileRequestHeader
   $h['x-ms-file-permission-key'] = $key
@@ -91,8 +93,9 @@ try {
     $script:step = 'set root directory permission'
     Invoke-WebRequest -UseBasicParsing -Method Put -Uri ($base + '?restype=directory&comp=properties') -Headers $h | Out-Null
     $after = Get-RootSddl
+    if (-not $after) { throw "The root ACL was set, but the service still returns no permission key. Headers returned: $script:rootHeaders" }
   }
-  Write-Result @{ status = 'ok'; before = $before; after = $after; resolvedIp = $resolvedIp }
+  Write-Result @{ status = 'ok'; before = $before; after = $after; defaultAcl = (-not $before); resolvedIp = $resolvedIp }
 }
 catch {
   $code = $null; $errorCode = $null; $detail = $null
