@@ -37,8 +37,8 @@ A budget's start date must be the first of a month and can't be changed once the
 ### Hub-peered mode needs an egress path
 Subnets have no default outbound access. In `HubPeered` mode, set `hubFirewallPrivateIp` (or make sure hub routing, e.g. Virtual WAN routing intent, supplies 0.0.0.0/0). Otherwise hosts can't reach Entra ID, Intune or the agent downloads, and registration fails.
 
-### Keep the break-glass password stable
-It is set on the VMs at creation and stored in Key Vault. Supply the same `AVD_LOCAL_ADMIN_PASSWORD` on every deployment. To rotate it, use VM → Reset password, then update the Key Vault secret.
+### The break-glass password is random and set at host creation
+`deploy.sh` generates a random break-glass password unless `AVD_LOCAL_ADMIN_PASSWORD` is set. Azure applies it only when a session host is created, and existing hosts keep theirs, so a redeploy never changes a running host's password. The Key Vault secret `sessionhost-localadmin-password` holds the password of the hosts created by the latest deployment. For any host, **VM → Reset password** sets a new one without knowing the old.
 
 ### Default outbound access can't be changed later
 `defaultOutboundAccess: false` is set at subnet creation. It's immutable, so if you import an existing subnet, it keeps whatever it had.

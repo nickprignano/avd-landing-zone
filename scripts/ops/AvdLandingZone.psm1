@@ -1261,7 +1261,7 @@ function Test-AvdPreDeployment {
   if ($elsewhere.Count) {
     Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' region" 'Fail' -Detail "Already deployed in $(($elsewhere.Location | Select-Object -Unique) -join ', '): $($elsewhere.ResourceGroupName -join ', ')" -Remediation 'Resource groups cannot change region. Deploy to that region, use another namePrefix or environment, or remove the existing landing zone first.'
   }
-  elseif ($present.Count) { Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Use the same break-glass password as before.' }
+  elseif ($present.Count) { Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Existing session hosts keep their break-glass password.' }
   else { Add-AvdCheckResult 'Landing zone' "Name '$($lz.BaseName)' is free in this subscription" 'Pass' }
 
   # ---- Tenant readiness for after the deployment ----

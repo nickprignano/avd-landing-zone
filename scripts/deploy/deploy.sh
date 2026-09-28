@@ -10,7 +10,7 @@
 #
 # Environment variables (any flag above overrides):
 #   AVD_USERS_GROUP_ID, AVD_ADMINS_GROUP_ID   Entra group object IDs
-#   AVD_LOCAL_ADMIN_PASSWORD                  break-glass password (prompted if unset)
+#   AVD_LOCAL_ADMIN_PASSWORD                  break-glass password (random if unset)
 #   AVD_SERVICE_PRINCIPAL_ID                  looked up if unset (CI sets it to avoid Graph reads)
 #   AVD_ALERT_EMAIL, AVD_MONTHLY_BUDGET       optional
 set -euo pipefail
@@ -90,8 +90,12 @@ if [[ -z "$AVD_SERVICE_PRINCIPAL_ID" ]]; then
 fi
 
 if [[ -z "${AVD_LOCAL_ADMIN_PASSWORD:-}" ]]; then
-  echo "    The break-glass local admin password is stored in Key Vault. Use the SAME value on every deployment."
-  read -r -s -p "Break-glass local admin password: " AVD_LOCAL_ADMIN_PASSWORD; echo
+  # Random break-glass password. Azure applies it only when a host is created
+  # (existing hosts keep theirs), and it is stored in Key Vault. Recovery for any
+  # host: VM > Reset password, which needs no old password.
+  rand=$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)
+  AVD_LOCAL_ADMIN_PASSWORD="${rand}#Aa1"
+  echo "    Generated a random break-glass password for new session hosts (stored in Key Vault as sessionhost-localadmin-password)."
 fi
 
 AVD_LOCATION="$LOCATION"

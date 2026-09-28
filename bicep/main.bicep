@@ -122,7 +122,7 @@ param encryptionAtHost bool = true
 @description('Break-glass local administrator name. Day-to-day admin access is via Entra ID (VM Administrator Login).')
 param localAdminUsername string = 'avdbreakglass'
 
-@description('Break-glass local administrator password. Stored in Key Vault; supply from a pipeline secret, never commit it.')
+@description('Break-glass local administrator password, applied when a host is created and stored in Key Vault. deploy.sh generates a random one unless AVD_LOCAL_ADMIN_PASSWORD is set; never commit it.')
 @secure()
 @minLength(14)
 param localAdminPassword string
