@@ -114,15 +114,20 @@ az deployment sub create -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE" \
   --query properties.outputs -o jsonc
 
 STORAGE_NAME=$(az deployment sub show -n "$DEPLOY_NAME" --query properties.outputs.storageAccountName.value -o tsv)
+# rg-<prefix>-<env>-avd -> <prefix> and <env>, for the post-deployment command.
+BASE_NAME=$(az deployment sub show -n "$DEPLOY_NAME" --query properties.outputs.resourceGroups.value.controlPlane -o tsv)
+BASE_NAME=${BASE_NAME#rg-}; BASE_NAME=${BASE_NAME%-avd}
 
 cat <<EOF
 
 ==> Landing zone deployed.
 
-One-time tenant steps Bicep cannot do (see docs/deploy.md#5-post-deployment):
-  1. Grant admin consent to the storage account's Entra app so Entra Kerberos works:
-       Entra ID > App registrations > All applications > "[Storage Account] $STORAGE_NAME.file.core.windows.net"
-       > API permissions > Grant admin consent
-  2. Exclude that app from Conditional Access policies that require MFA.
-  3. Set NTFS permissions on the profile share (docs/deploy.md#ntfs-permissions).
+Next, three one-time tenant steps that Bicep can't do: admin consent for the
+storage account's Entra app, excluding it from MFA Conditional Access policies,
+and the profile share permissions. The post-deployment preflight checks and
+applies all three. From Azure Cloud Shell (PowerShell):
+
+  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ${BASE_NAME%-*} -Environment ${BASE_NAME##*-} -Fix -AllowHostStart
+
+To do them by hand instead (storage account $STORAGE_NAME), see docs/deploy.md#5-post-deployment.
 EOF
