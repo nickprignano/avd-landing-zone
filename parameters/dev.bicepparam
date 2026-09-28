@@ -6,7 +6,7 @@ using '../bicep/main.bicep'
 
 param namePrefix = 'avdlz'
 param environmentName = 'dev'
-param location = 'eastus2'
+param location = 'northcentralus'
 
 // ---- Identity (Entra ID) ----
 param avdUsersGroupObjectId = readEnvironmentVariable('AVD_USERS_GROUP_ID')
@@ -18,6 +18,8 @@ param localAdminPassword = readEnvironmentVariable('AVD_LOCAL_ADMIN_PASSWORD')
 param connectivityMode = 'Standalone'
 
 // ---- Session hosts ----
+// North Central US has no availability zones: deploy hosts regionally.
+param availabilityZones = []
 param sessionHostCount = 1
 param sessionHostVmSize = 'Standard_D4as_v5'
 
