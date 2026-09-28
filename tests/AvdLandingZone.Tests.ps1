@@ -148,19 +148,18 @@ Describe 'Test-AvdResourceProvider -Fix' {
   BeforeAll {
     # Stand-ins so Pester can mock them without the Az modules installed.
     function global:Get-AzResourceProvider { param($ProviderNamespace, $ErrorAction) }
-    function global:Register-AzResourceProvider { param($ProviderNamespace) }
     function global:Get-AzProviderFeature { param($ProviderNamespace, $FeatureName, $ErrorAction) }
     function global:Register-AzProviderFeature { param($ProviderNamespace, $FeatureName) }
   }
   AfterAll {
-    'Get-AzResourceProvider', 'Register-AzResourceProvider', 'Get-AzProviderFeature', 'Register-AzProviderFeature' |
+    'Get-AzResourceProvider', 'Get-AzProviderFeature', 'Register-AzProviderFeature' |
       ForEach-Object { Remove-Item "function:global:$_" -ErrorAction SilentlyContinue }
   }
   BeforeEach {
     Clear-AvdCheckResult
     $global:AvdTestPolls = 0
     Mock -ModuleName AvdLandingZone Start-Sleep { $global:AvdTestPolls++ }
-    Mock -ModuleName AvdLandingZone Register-AzResourceProvider { }
+    Mock -ModuleName AvdLandingZone Register-AvdResourceProvider { }
     Mock -ModuleName AvdLandingZone Register-AzProviderFeature { }
     # Everything turns Registered after the first poll.
     Mock -ModuleName AvdLandingZone Get-AzResourceProvider { [pscustomobject]@{ RegistrationState = $(if ($global:AvdTestPolls) { 'Registered' } else { 'NotRegistered' }) } }
@@ -173,7 +172,7 @@ Describe 'Test-AvdResourceProvider -Fix' {
     $r = Get-AvdCheckResult
     ($r | Where-Object Check -like 'Provider*').Status | Should -Be 'Fixed'
     ($r | Where-Object Check -like 'Feature*').Status | Should -Be 'Fixed'
-    Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -ParameterFilter { $ProviderNamespace -eq 'Microsoft.Compute' } -Times 1 -Exactly
+    Should -Invoke -ModuleName AvdLandingZone Register-AvdResourceProvider -ParameterFilter { $Namespace -eq 'Microsoft.Compute' } -Times 1 -Exactly
   }
 
   It 'warns and does not re-register Compute when the feature is still registering at the timeout' {
@@ -181,14 +180,14 @@ Describe 'Test-AvdResourceProvider -Fix' {
     Test-AvdResourceProvider -Namespace @() -Fix -WaitMinutes 0 6>$null
     $r = Get-AvdCheckResult
     ($r | Where-Object Check -like 'Feature*').Status | Should -Be 'Warn'
-    Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -Times 0 -Exactly
+    Should -Invoke -ModuleName AvdLandingZone Register-AvdResourceProvider -Times 0 -Exactly
   }
 
   It 'only reports in check mode' {
     Test-AvdResourceProvider -Namespace 'Microsoft.KeyVault' 6>$null
     $r = Get-AvdCheckResult
     @($r | Where-Object Status -eq 'Fail').Count | Should -Be 2
-    Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -Times 0 -Exactly
+    Should -Invoke -ModuleName AvdLandingZone Register-AvdResourceProvider -Times 0 -Exactly
     Should -Invoke -ModuleName AvdLandingZone Start-Sleep -Times 0 -Exactly
   }
 }

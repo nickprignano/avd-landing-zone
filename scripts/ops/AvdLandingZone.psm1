@@ -374,6 +374,12 @@ function Test-AvdCallerPermission {
   }
 }
 
+function Register-AvdResourceProvider {
+  <# Starts a provider registration and returns at once (Register-AzResourceProvider can block for minutes). #>
+  param([Parameter(Mandatory)][string] $Namespace)
+  Invoke-AvdArm -Method POST -Path "/subscriptions/$((Get-AzContext).Subscription.Id)/providers/$Namespace/register?api-version=2021-04-01" | Out-Null
+}
+
 function Wait-AvdRegistration {
   <# Polls until the providers (and optionally the EncryptionAtHost feature) are Registered. Returns what is still pending. #>
   param([string[]] $Namespace = @(), [switch] $EncryptionAtHost, [int] $TimeoutMinutes = 15)
@@ -413,7 +419,7 @@ function Test-AvdResourceProvider {
   $started = @(); $featureStarted = $false
   if ($Fix) {
     foreach ($ns in @($state.Keys | Where-Object { $state[$_] -notin 'Registered', 'Registering' })) {
-      if ($PSCmdlet.ShouldProcess($ns, 'Register resource provider')) { Register-AzResourceProvider -ProviderNamespace $ns | Out-Null; $started += $ns }
+      if ($PSCmdlet.ShouldProcess($ns, 'Register resource provider')) { Register-AvdResourceProvider -Namespace $ns; $started += $ns }
     }
     if ($featureState -notin 'Registered', 'Registering', 'Skipped' -and $PSCmdlet.ShouldProcess('Microsoft.Compute/EncryptionAtHost', 'Register feature')) {
       Register-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost | Out-Null
@@ -442,8 +448,10 @@ function Test-AvdResourceProvider {
   $featureDone = $featureState -eq 'Registered' -or ($waitFeature -and -not $WhatIfPreference -and 'Microsoft.Compute/EncryptionAtHost' -notin $stillPending)
   $computeNote = ''
   if ($Fix -and $featureDone -and $PSCmdlet.ShouldProcess('Microsoft.Compute', 'Re-register so the EncryptionAtHost feature takes effect')) {
-    Register-AzResourceProvider -ProviderNamespace Microsoft.Compute | Out-Null
-    $computeNote = 'Microsoft.Compute re-registered so the feature takes effect.'
+    Write-Host '  Re-registering Microsoft.Compute so EncryptionAtHost takes effect' -ForegroundColor DarkGray
+    Register-AvdResourceProvider -Namespace Microsoft.Compute
+    $computePending = Wait-AvdRegistration -Namespace Microsoft.Compute -TimeoutMinutes $WaitMinutes
+    $computeNote = if ($computePending.Count) { "Microsoft.Compute re-registration still running after $WaitMinutes min; it completes in the background." } else { 'Microsoft.Compute re-registered so the feature takes effect.' }
   }
   if ($featureState -eq 'Registered') { Add-AvdCheckResult $area $featureName 'Pass' -Detail $computeNote }
   elseif ($featureDone) { Add-AvdCheckResult $area $featureName 'Fixed' -Detail $computeNote }
@@ -1058,6 +1066,15 @@ function Resolve-AvdGroup {
   return $null
 }
 
+function Test-AvdSignInMatch {
+  <# The Graph device code is completed in a browser, which may be signed in as someone else. #>
+  $az = (Get-AzContext).Account.Id
+  $mg = (Get-MgContext).Account
+  if (-not $az -or -not $mg) { return }
+  if ($az -eq $mg) { Add-AvdCheckResult 'Entra ID' "Microsoft Graph and Azure signed in as $az" 'Pass'; return }
+  Add-AvdCheckResult 'Entra ID' 'Microsoft Graph and Azure signed in as the same account' 'Warn' -Detail "Azure: $az; Microsoft Graph: $mg. Tenant changes (and -AddMeToGroups) use the Graph account." -Remediation "If that is not intended: Disconnect-MgGraph, then complete the device code as $az (a private browser window avoids the signed-in account)."
+}
+
 function Add-AvdCallerToGroup {
   <# Adds the signed-in user to each group they are not already a direct member of. #>
   [CmdletBinding(SupportsShouldProcess)]
@@ -1112,6 +1129,7 @@ function Test-AvdPreDeployment {
   else {
     Write-AvdSection 'Entra ID tenant'
     Connect-AvdGraph -Purpose ($(if ($Fix -or $AddMeToGroups) { 'PreDeployFix' } else { 'Read' }))
+    Test-AvdSignInMatch
     $users = Resolve-AvdGroup -Label 'AVD Users' -NameOrId $UsersGroup -Fix:$Fix
     $admins = Resolve-AvdGroup -Label 'AVD Admins' -NameOrId $AdminsGroup -Fix:$Fix
     if ($AddMeToGroups) { Add-AvdCallerToGroup -Group @(@('AVD Users', $users), @('AVD Admins', $admins)) }
