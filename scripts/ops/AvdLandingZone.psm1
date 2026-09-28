@@ -214,6 +214,15 @@ function Get-AvdPrivateEndpointDnsZoneId {
   }
 }
 
+function Find-AvdLandingZone {
+  <# Landing zones in the current subscription, from their rg-<prefix>-<env>-network resource groups. #>
+  @(Get-AzResourceGroup -ErrorAction SilentlyContinue | ForEach-Object {
+      if ($_.ResourceGroupName -match '^rg-(?<prefix>[a-z0-9]+)-(?<env>dev|test|prod)-network$') {
+        [pscustomobject]@{ NamePrefix = $Matches.prefix; Environment = $Matches.env; Location = $_.Location }
+      }
+    })
+}
+
 function Get-AvdLandingZone {
   <#
     Finds every landing-zone resource the scripts need from the naming
@@ -337,7 +346,8 @@ function Test-AvdCallerPermission {
   $scope = "/subscriptions/$SubscriptionId"
   try {
     $me = Get-AzADUser -SignedIn -ErrorAction Stop
-    $roles = @(Get-AzRoleAssignment -ObjectId $me.Id -Scope $scope -ExpandPrincipalGroups -ErrorAction Stop |
+    # -ExpandPrincipalGroups (group-inherited roles) can't be combined with -Scope; filter by scope below.
+    $roles = @(Get-AzRoleAssignment -ObjectId $me.Id -ExpandPrincipalGroups -ErrorAction Stop |
         Where-Object { $scope.StartsWith($_.Scope, [StringComparison]::OrdinalIgnoreCase) -or $_.Scope -eq '/' -or $_.Scope -like '/providers/Microsoft.Management/managementGroups/*' } |
         Select-Object -ExpandProperty RoleDefinitionName -Unique)
     $canWrite = $roles -contains 'Owner' -or $roles -contains 'Contributor'
@@ -796,6 +806,20 @@ function Invoke-AvdReadinessCheck {
   if ($Lz.Location) { Test-AvdVmCapacity -Location $Lz.Location -VmSize $VmSize -Count $VmCount }
 
   Write-AvdSection 'Landing zone'
+  $present = @($Lz.RgExists.Keys | Where-Object { $_ -ne 'Demo' -and $Lz.RgExists[$_] })
+  if (-not $present.Count) {
+    # Nothing deployed under this name: one clear finding instead of a failure per resource.
+    $sub = (Get-AzContext).Subscription.Name
+    $found = @(Find-AvdLandingZone)
+    $detail = if ($found.Count) {
+      'Landing zones in this subscription: ' + (($found | ForEach-Object { "-NamePrefix $($_.NamePrefix) -Environment $($_.Environment)" }) -join '; ')
+    }
+    else { 'No landing zone resource groups (rg-<prefix>-<env>-network) in this subscription.' }
+    Add-AvdCheckResult 'Landing zone' "Landing zone '$($Lz.BaseName)' deployed in subscription '$sub'" 'Fail' -Detail $detail `
+      -Remediation "Check the subscription (Get-AzContext / Set-AzContext) and -NamePrefix/-Environment, or deploy it: bash ./scripts/deploy/deploy.sh -p parameters/$($Lz.Environment).bicepparam -l <region> --users-group '<AVD Users>' --admins-group '<AVD Admins>'"
+    Add-AvdCheckResult 'Landing zone' 'Landing zone resource, RBAC, tenant and NTFS checks' 'Skip' -Detail 'Nothing to check until the landing zone exists.'
+    return
+  }
   Test-AvdLandingZoneResource -Lz $Lz
   Write-AvdSection 'RBAC'
   Test-AvdLandingZoneRbac -Lz $Lz
