@@ -66,8 +66,10 @@ if [[ "$feature_state" != "Registered" ]]; then
   until [[ "$(az feature show --namespace Microsoft.Compute --name EncryptionAtHost --query properties.state -o tsv)" == "Registered" ]]; do
     echo "    waiting for EncryptionAtHost ..."; sleep 20
   done
-  az provider register -n Microsoft.Compute >/dev/null
 fi
+# Re-register Compute every time: the feature only takes effect after a
+# provider re-registration, even when it was registered in an earlier run.
+az provider register -n Microsoft.Compute >/dev/null
 
 # --- Entra ID lookups ---
 resolve_group() {

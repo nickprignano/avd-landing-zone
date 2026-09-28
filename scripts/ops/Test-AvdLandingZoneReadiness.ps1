@@ -29,8 +29,11 @@
     Tenant         Intune licensing when enrollInIntune = true, your Entra
                    roles for the post-deployment steps, which Conditional
                    Access policies will need the storage app excluded
-    -Fix           registers providers/feature, creates missing groups (by
-                   name) and the AVD service principal
+    -Fix           registers providers and the EncryptionAtHost feature and
+                   waits for them (then re-registers Microsoft.Compute),
+                   creates missing groups (by name) and the AVD service
+                   principal
+    -AddMeToGroups adds you to both groups
 
   POST-DEPLOYMENT (-NamePrefix -Environment)
     Tooling, subscription, landing zone resources, private DNS, RBAC, and:
@@ -61,6 +64,8 @@ param(
   [Parameter(Mandatory, ParameterSetName = 'PreDeployment')][string] $AdminsGroup,
   # Region to check and deploy to, instead of the parameter file's default (e.g. from the region latency page).
   [Parameter(ParameterSetName = 'PreDeployment')][ValidatePattern('^[a-z0-9]+$')][string] $Location,
+  # Add the signed-in user to both groups (the desktop, plus admin sign-in to the hosts).
+  [Parameter(ParameterSetName = 'PreDeployment')][switch] $AddMeToGroups,
 
   # ---- Post-deployment ----
   [Parameter(Mandatory, ParameterSetName = 'PostDeployment')][ValidateLength(2, 8)][string] $NamePrefix,
@@ -93,7 +98,7 @@ Clear-AvdCheckResult
 if ($PreDeployment) {
   if (-not (Test-Path $ParameterFile)) { throw "Parameter file not found: $ParameterFile" }
   Write-Host "AVD landing zone PRE-DEPLOYMENT preflight - $ParameterFile in '$($ctx.Subscription.Name)'$(if ($Fix) { ' (FIX mode)' })" -ForegroundColor White
-  $pre = @{ ParameterFile = $ParameterFile; UsersGroup = $UsersGroup; AdminsGroup = $AdminsGroup; Location = $Location; Fix = $Fix; SkipTenant = $SkipTenant; WhatIf = $WhatIfPreference }
+  $pre = @{ ParameterFile = $ParameterFile; UsersGroup = $UsersGroup; AdminsGroup = $AdminsGroup; Location = $Location; Fix = $Fix; AddMeToGroups = $AddMeToGroups; SkipTenant = $SkipTenant; WhatIf = $WhatIfPreference }
   if ($Force) { $pre.Confirm = $false }
   $outcome = Test-AvdPreDeployment @pre
 }

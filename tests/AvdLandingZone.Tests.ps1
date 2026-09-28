@@ -114,30 +114,102 @@ Describe 'Invoke-AvdGraph' {
 }
 
 Describe 'Test-AvdHostPoolRegion' {
-  BeforeAll {
-    # Stand-in so Pester can mock it without the Az modules installed.
-    function global:Get-AzResourceProvider { param($ProviderNamespace, $ErrorAction) }
-  }
-  AfterAll { Remove-Item function:global:Get-AzResourceProvider -ErrorAction SilentlyContinue }
   BeforeEach {
     Clear-AvdCheckResult
-    Mock -ModuleName AvdLandingZone Get-AzResourceProvider {
-      [pscustomobject]@{ ResourceTypes = @(
-          [pscustomobject]@{ ResourceTypeName = 'workspaces'; Locations = @('Brazil South') }
-          [pscustomobject]@{ ResourceTypeName = 'hostpools'; Locations = @('North Central US', 'West US 2') }
+    # Shape of GET /subscriptions/{id}/providers/Microsoft.DesktopVirtualization
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm {
+      [pscustomobject]@{ resourceTypes = @(
+          [pscustomobject]@{ resourceType = 'workspaces'; locations = @('Brazil South') }
+          [pscustomobject]@{ resourceType = 'hostpools'; locations = @('North Central US', 'West US 2') }
         ) }
     }
   }
 
   It 'passes for a host pool region given by its ARM name' {
-    Test-AvdHostPoolRegion -Location 'westus2'
+    Test-AvdHostPoolRegion -Location 'westus2' -SubscriptionId 'sub'
     (Get-AvdCheckResult).Status | Should -Be 'Pass'
   }
 
+  It 'warns instead of failing when the provider cannot be read' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm { throw 'ARM GET failed (403)' }
+    Test-AvdHostPoolRegion -Location 'westus2' -SubscriptionId 'sub'
+    (Get-AvdCheckResult).Status | Should -Be 'Warn'
+  }
+
   It 'fails for a region without host pools and lists the ones that have them' {
-    Test-AvdHostPoolRegion -Location 'brazilsouth'
+    Test-AvdHostPoolRegion -Location 'brazilsouth' -SubscriptionId 'sub'
     $r = Get-AvdCheckResult
     $r.Status | Should -Be 'Fail'
     $r.Detail | Should -BeLike '*northcentralus, westus2*'
+  }
+}
+
+Describe 'Test-AvdResourceProvider -Fix' {
+  BeforeAll {
+    # Stand-ins so Pester can mock them without the Az modules installed.
+    function global:Get-AzResourceProvider { param($ProviderNamespace, $ErrorAction) }
+    function global:Register-AzResourceProvider { param($ProviderNamespace) }
+    function global:Get-AzProviderFeature { param($ProviderNamespace, $FeatureName, $ErrorAction) }
+    function global:Register-AzProviderFeature { param($ProviderNamespace, $FeatureName) }
+  }
+  AfterAll {
+    'Get-AzResourceProvider', 'Register-AzResourceProvider', 'Get-AzProviderFeature', 'Register-AzProviderFeature' |
+      ForEach-Object { Remove-Item "function:global:$_" -ErrorAction SilentlyContinue }
+  }
+  BeforeEach {
+    Clear-AvdCheckResult
+    $global:AvdTestPolls = 0
+    Mock -ModuleName AvdLandingZone Start-Sleep { $global:AvdTestPolls++ }
+    Mock -ModuleName AvdLandingZone Register-AzResourceProvider { }
+    Mock -ModuleName AvdLandingZone Register-AzProviderFeature { }
+    # Everything turns Registered after the first poll.
+    Mock -ModuleName AvdLandingZone Get-AzResourceProvider { [pscustomobject]@{ RegistrationState = $(if ($global:AvdTestPolls) { 'Registered' } else { 'NotRegistered' }) } }
+    Mock -ModuleName AvdLandingZone Get-AzProviderFeature { [pscustomobject]@{ RegistrationState = $(if ($global:AvdTestPolls) { 'Registered' } else { 'NotRegistered' }) } }
+  }
+  AfterEach { Remove-Variable AvdTestPolls -Scope Global -ErrorAction SilentlyContinue }
+
+  It 'waits for the registrations, reports Fixed and re-registers Microsoft.Compute' {
+    Test-AvdResourceProvider -Namespace 'Microsoft.KeyVault' -Fix 6>$null
+    $r = Get-AvdCheckResult
+    ($r | Where-Object Check -like 'Provider*').Status | Should -Be 'Fixed'
+    ($r | Where-Object Check -like 'Feature*').Status | Should -Be 'Fixed'
+    Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -ParameterFilter { $ProviderNamespace -eq 'Microsoft.Compute' } -Times 1 -Exactly
+  }
+
+  It 'warns and does not re-register Compute when the feature is still registering at the timeout' {
+    Mock -ModuleName AvdLandingZone Get-AzProviderFeature { [pscustomobject]@{ RegistrationState = 'Registering' } }
+    Test-AvdResourceProvider -Namespace @() -Fix -WaitMinutes 0 6>$null
+    $r = Get-AvdCheckResult
+    ($r | Where-Object Check -like 'Feature*').Status | Should -Be 'Warn'
+    Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -Times 0 -Exactly
+  }
+
+  It 'only reports in check mode' {
+    Test-AvdResourceProvider -Namespace 'Microsoft.KeyVault' 6>$null
+    $r = Get-AvdCheckResult
+    @($r | Where-Object Status -eq 'Fail').Count | Should -Be 2
+    Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -Times 0 -Exactly
+    Should -Invoke -ModuleName AvdLandingZone Start-Sleep -Times 0 -Exactly
+  }
+}
+
+Describe 'Add-AvdCallerToGroup' {
+  BeforeAll { function global:Invoke-MgGraphRequest { param($Method, $Uri, $Body, $ContentType, $OutputType) } }
+  AfterAll { Remove-Item function:global:Invoke-MgGraphRequest -ErrorAction SilentlyContinue }
+
+  It 'adds the signed-in user only to groups they are not already in' {
+    Clear-AvdCheckResult
+    Mock -ModuleName AvdLandingZone Invoke-MgGraphRequest {
+      if ($Method -eq 'POST') { return }
+      if ($Uri.StartsWith('v1.0/me?')) { return [pscustomobject]@{ id = 'me1'; userPrincipalName = 'alex@contoso.com' } }
+      [pscustomobject]@{ value = @([pscustomobject]@{ id = 'g-admins' }) }
+    }
+    Add-AvdCallerToGroup -Group @(
+      @('AVD Users', [pscustomobject]@{ id = 'g-users'; displayName = 'AVD Users' }),
+      @('AVD Admins', [pscustomobject]@{ id = 'g-admins'; displayName = 'AVD Admins' })
+    )
+    Should -Invoke -ModuleName AvdLandingZone Invoke-MgGraphRequest -ParameterFilter { $Method -eq 'POST' } -Times 1 -Exactly
+    Should -Invoke -ModuleName AvdLandingZone Invoke-MgGraphRequest -ParameterFilter { $Method -eq 'POST' -and $Uri -eq 'v1.0/groups/g-users/members/$ref' } -Times 1 -Exactly
+    (Get-AvdCheckResult).Status -join ',' | Should -Be 'Fixed,Pass'
   }
 }

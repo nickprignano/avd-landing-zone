@@ -374,34 +374,82 @@ function Test-AvdCallerPermission {
   }
 }
 
+function Wait-AvdRegistration {
+  <# Polls until the providers (and optionally the EncryptionAtHost feature) are Registered. Returns what is still pending. #>
+  param([string[]] $Namespace = @(), [switch] $EncryptionAtHost, [int] $TimeoutMinutes = 15)
+  $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+  while ($true) {
+    $pending = @($Namespace | Where-Object { (Get-AzResourceProvider -ProviderNamespace $_ -ErrorAction SilentlyContinue | Select-Object -First 1).RegistrationState -ne 'Registered' })
+    if ($EncryptionAtHost -and (Get-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost -ErrorAction SilentlyContinue).RegistrationState -ne 'Registered') {
+      $pending += 'Microsoft.Compute/EncryptionAtHost'
+    }
+    if (-not $pending.Count -or (Get-Date) -ge $deadline) { return , $pending }
+    Write-Host "  Waiting for registration: $($pending -join ', ') (up to $TimeoutMinutes min; EncryptionAtHost takes ~15)" -ForegroundColor DarkGray
+    Start-Sleep -Seconds 30
+  }
+}
+
 function Test-AvdResourceProvider {
+  <#
+    Check: reports each provider and the EncryptionAtHost feature.
+    -Fix: registers what is missing, waits until registration completes (up to
+    -WaitMinutes), then re-registers Microsoft.Compute so the feature takes effect.
+  #>
   [CmdletBinding(SupportsShouldProcess)]
   param(
     [switch] $Fix,
     [switch] $SkipEncryptionAtHost,
     [string[]] $Namespace = @('Microsoft.DesktopVirtualization', 'Microsoft.Compute', 'Microsoft.Storage', 'Microsoft.Network',
-      'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.GuestConfiguration')
+      'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.GuestConfiguration'),
+    [int] $WaitMinutes = 15
   )
   $area = 'Subscription'
-  foreach ($ns in $Namespace) {
-    $state = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1).RegistrationState
-    if ($state -eq 'Registered') { Add-AvdCheckResult $area "Provider $ns registered" 'Pass'; continue }
-    if ($state -eq 'Registering') { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Detail 'Registration in progress.' -Remediation 'Wait a few minutes and rerun.'; continue }
-    if ($Fix -and $PSCmdlet.ShouldProcess($ns, 'Register resource provider')) {
-      Register-AzResourceProvider -ProviderNamespace $ns | Out-Null
-      Add-AvdCheckResult $area "Provider $ns registered" 'Fixed' -Detail 'Registration started; it completes in the background.'
+  $featureName = 'Feature Microsoft.Compute/EncryptionAtHost registered'
+  $state = [ordered]@{}
+  foreach ($ns in $Namespace) { $state[$ns] = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1).RegistrationState }
+  $featureState = if ($SkipEncryptionAtHost) { 'Skipped' } else { (Get-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost -ErrorAction SilentlyContinue).RegistrationState }
+
+  # ---- Fix: start every registration, then wait for all of them together ----
+  $started = @(); $featureStarted = $false
+  if ($Fix) {
+    foreach ($ns in @($state.Keys | Where-Object { $state[$_] -notin 'Registered', 'Registering' })) {
+      if ($PSCmdlet.ShouldProcess($ns, 'Register resource provider')) { Register-AzResourceProvider -ProviderNamespace $ns | Out-Null; $started += $ns }
     }
-    else { Add-AvdCheckResult $area "Provider $ns registered" 'Fail' -Detail "State: $state" -Remediation "Register-AzResourceProvider -ProviderNamespace $ns (or rerun with -Fix)" }
+    if ($featureState -notin 'Registered', 'Registering', 'Skipped' -and $PSCmdlet.ShouldProcess('Microsoft.Compute/EncryptionAtHost', 'Register feature')) {
+      Register-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost | Out-Null
+      $featureStarted = $true
+    }
+  }
+  $waitFor = @($state.Keys | Where-Object { $_ -in $started -or $state[$_] -eq 'Registering' })
+  $waitFeature = $featureStarted -or $featureState -eq 'Registering'
+  $stillPending = @()
+  if ($Fix -and -not $WhatIfPreference -and ($waitFor.Count -or $waitFeature)) {
+    $stillPending = Wait-AvdRegistration -Namespace $waitFor -EncryptionAtHost:$waitFeature -TimeoutMinutes $WaitMinutes
+  }
+
+  foreach ($ns in $state.Keys) {
+    $s = $state[$ns]
+    if ($s -eq 'Registered') { Add-AvdCheckResult $area "Provider $ns registered" 'Pass' }
+    elseif ($Fix -and $ns -in $waitFor -and -not $WhatIfPreference) {
+      if ($ns -in $stillPending) { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Detail "Still registering after $WaitMinutes min." -Remediation 'Rerun in a few minutes.' }
+      else { Add-AvdCheckResult $area "Provider $ns registered" 'Fixed' }
+    }
+    elseif ($s -eq 'Registering') { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Detail 'Registration in progress.' -Remediation 'Wait a few minutes and rerun (or rerun with -Fix to wait for it).' }
+    else { Add-AvdCheckResult $area "Provider $ns registered" 'Fail' -Detail "State: $s" -Remediation "Register-AzResourceProvider -ProviderNamespace $ns (or rerun with -Fix)" }
   }
   if ($SkipEncryptionAtHost) { return }
-  $feature = Get-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost -ErrorAction SilentlyContinue
-  if ($feature.RegistrationState -eq 'Registered') { Add-AvdCheckResult $area 'Feature Microsoft.Compute/EncryptionAtHost registered' 'Pass' }
-  elseif ($feature.RegistrationState -eq 'Registering') { Add-AvdCheckResult $area 'Feature Microsoft.Compute/EncryptionAtHost registered' 'Warn' -Detail 'Registration in progress (can take ~15 minutes).' -Remediation 'Wait, then run Register-AzResourceProvider -ProviderNamespace Microsoft.Compute.' }
-  elseif ($Fix -and $PSCmdlet.ShouldProcess('Microsoft.Compute/EncryptionAtHost', 'Register feature')) {
-    Register-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost | Out-Null
-    Add-AvdCheckResult $area 'Feature Microsoft.Compute/EncryptionAtHost registered' 'Fixed' -Detail 'Registration can take ~15 minutes; re-register Microsoft.Compute afterwards.'
+
+  $featureDone = $featureState -eq 'Registered' -or ($waitFeature -and -not $WhatIfPreference -and 'Microsoft.Compute/EncryptionAtHost' -notin $stillPending)
+  $computeNote = ''
+  if ($Fix -and $featureDone -and $PSCmdlet.ShouldProcess('Microsoft.Compute', 'Re-register so the EncryptionAtHost feature takes effect')) {
+    Register-AzResourceProvider -ProviderNamespace Microsoft.Compute | Out-Null
+    $computeNote = 'Microsoft.Compute re-registered so the feature takes effect.'
   }
-  else { Add-AvdCheckResult $area 'Feature Microsoft.Compute/EncryptionAtHost registered' 'Fail' -Detail "State: $($feature.RegistrationState)" -Remediation 'Rerun with -Fix, or set encryptionAtHost = false.' }
+  if ($featureState -eq 'Registered') { Add-AvdCheckResult $area $featureName 'Pass' -Detail $computeNote }
+  elseif ($featureDone) { Add-AvdCheckResult $area $featureName 'Fixed' -Detail $computeNote }
+  elseif ($Fix -and $waitFeature -and -not $WhatIfPreference) { Add-AvdCheckResult $area $featureName 'Warn' -Detail "Still registering after $WaitMinutes min." -Remediation 'Rerun with -Fix in a few minutes; it re-registers Microsoft.Compute once the feature is on.' }
+  elseif ($featureState -eq 'Registering') { Add-AvdCheckResult $area $featureName 'Warn' -Detail 'Registration in progress (can take ~15 minutes).' -Remediation 'Rerun with -Fix to wait for it and re-register Microsoft.Compute.' }
+  else { Add-AvdCheckResult $area $featureName 'Fail' -Detail "State: $featureState" -Remediation 'Rerun with -Fix, or set encryptionAtHost = false.' }
 }
 
 function Test-AvdVmCapacity {
@@ -442,12 +490,18 @@ function Test-AvdVmCapacity {
 
 function Test-AvdHostPoolRegion {
   <# The template puts the host pool (AVD metadata) in the same region as everything else. #>
-  param([Parameter(Mandatory)][string] $Location)
+  param([Parameter(Mandatory)][string] $Location, [string] $SubscriptionId = (Get-AzContext).Subscription.Id)
   $area = 'Subscription'
-  $type = (Get-AzResourceProvider -ProviderNamespace Microsoft.DesktopVirtualization -ErrorAction SilentlyContinue | Select-Object -First 1).ResourceTypes |
-    Where-Object ResourceTypeName -eq 'hostpools' | Select-Object -First 1
+  # The ARM provider API lists every region per resource type. (Get-AzResourceProvider
+  # returns one object per region, each with only that region's types.)
+  $type = $null
+  try {
+    $provider = Invoke-AvdArm -Path "/subscriptions/$SubscriptionId/providers/Microsoft.DesktopVirtualization?api-version=2021-04-01"
+    $type = @($provider.resourceTypes | Where-Object resourceType -eq 'hostpools') | Select-Object -First 1
+  }
+  catch { $type = $null }
   if (-not $type) { Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Warn' -Detail 'Could not read the Microsoft.DesktopVirtualization regions.'; return }
-  $regions = @($type.Locations | ForEach-Object { ($_ -replace '\s', '').ToLower() })
+  $regions = @($type.locations | ForEach-Object { ($_ -replace '\s', '').ToLower() })
   if ($regions -contains $Location.ToLower()) { Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Pass' }
   else {
     Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Fail' -Detail "Host pool regions: $(($regions | Sort-Object) -join ', ')" -Remediation 'The landing zone deploys the host pool in its own region: pick one of these (the region latency page ranks them for you).'
@@ -1004,6 +1058,30 @@ function Resolve-AvdGroup {
   return $null
 }
 
+function Add-AvdCallerToGroup {
+  <# Adds the signed-in user to each group they are not already a direct member of. #>
+  [CmdletBinding(SupportsShouldProcess)]
+  param([Parameter(Mandatory)][object[]] $Group)
+  try {
+    $me = Invoke-AvdGraph -Uri 'v1.0/me?$select=id,userPrincipalName'
+    $mine = @(Invoke-AvdGraph -Uri 'v1.0/me/memberOf/microsoft.graph.group?$select=id' | ForEach-Object id)
+  }
+  catch {
+    Add-AvdCheckResult 'Entra ID' 'Add you to the AVD groups' 'Fail' -Detail $_.Exception.Message -Remediation 'Sign in as a user (not a service principal), or add members in the Entra admin center.'
+    return
+  }
+  foreach ($pair in $Group) {
+    $label = $pair[0]; $g = $pair[1]
+    if (-not $g) { continue }
+    $name = "$($me.userPrincipalName) is a member of $label"
+    if ($mine -contains $g.id) { Add-AvdCheckResult 'Entra ID' $name 'Pass'; continue }
+    if ($PSCmdlet.ShouldProcess($g.displayName, "Add $($me.userPrincipalName) as a member")) {
+      Invoke-AvdGraph -Method POST -Uri "v1.0/groups/$($g.id)/members/`$ref" -Body @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($me.id)" } | Out-Null
+      Add-AvdCheckResult 'Entra ID' $name 'Fixed' -Detail 'Added. Group changes reach your sign-in token within about an hour.'
+    }
+  }
+}
+
 function Test-AvdPreDeployment {
   <# Everything the landing zone deployment needs, checked against the effective parameters. #>
   [CmdletBinding(SupportsShouldProcess)]
@@ -1013,6 +1091,8 @@ function Test-AvdPreDeployment {
     [Parameter(Mandatory)][string] $AdminsGroup,
     [string] $Location,
     [switch] $Fix,
+    # Add the signed-in user to both groups (gives you the desktop and admin rights on the hosts).
+    [switch] $AddMeToGroups,
     [switch] $SkipTenant
   )
   $avdAppId = '9cdead84-a844-4324-93f2-b2e6bb768d07'
@@ -1031,14 +1111,15 @@ function Test-AvdPreDeployment {
   }
   else {
     Write-AvdSection 'Entra ID tenant'
-    Connect-AvdGraph -Purpose ($(if ($Fix) { 'PreDeployFix' } else { 'Read' }))
+    Connect-AvdGraph -Purpose ($(if ($Fix -or $AddMeToGroups) { 'PreDeployFix' } else { 'Read' }))
     $users = Resolve-AvdGroup -Label 'AVD Users' -NameOrId $UsersGroup -Fix:$Fix
     $admins = Resolve-AvdGroup -Label 'AVD Admins' -NameOrId $AdminsGroup -Fix:$Fix
+    if ($AddMeToGroups) { Add-AvdCallerToGroup -Group @(@('AVD Users', $users), @('AVD Admins', $admins)) }
     foreach ($pair in @(@('AVD Users', $users), @('AVD Admins', $admins))) {
       if (-not $pair[1]) { continue }
       $m = @(Invoke-AvdGraph -Uri "v1.0/groups/$($pair[1].id)/members?`$select=id&`$top=1")
       if ($m.Count) { Add-AvdCheckResult 'Entra ID' "$($pair[0]) group has members" 'Pass' }
-      else { Add-AvdCheckResult 'Entra ID' "$($pair[0]) group has members" 'Warn' -Remediation 'Add members before anyone signs in (not needed to deploy).' }
+      else { Add-AvdCheckResult 'Entra ID' "$($pair[0]) group has members" 'Warn' -Remediation 'Add members before anyone signs in (not needed to deploy). -AddMeToGroups adds you.' }
     }
     $avdSp = Invoke-AvdGraph -Uri (Get-AvdGraphFilterUri -Collection servicePrincipals -Filter "appId eq '$avdAppId'" -Select 'id,appId,displayName') | Select-Object -First 1
     if ($avdSp) { Add-AvdCheckResult 'Entra ID' 'Azure Virtual Desktop service principal exists' 'Pass' -Detail $avdSp.id }
@@ -1073,7 +1154,7 @@ function Test-AvdPreDeployment {
   Test-AvdResourceProvider -Fix:$Fix -SkipEncryptionAtHost:(-not $plan.encryptionAtHost) -Namespace @('Microsoft.DesktopVirtualization', 'Microsoft.Compute', 'Microsoft.Storage', 'Microsoft.Network',
     'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.Security',
     'Microsoft.PolicyInsights', 'Microsoft.GuestConfiguration', 'Microsoft.Consumption')
-  Test-AvdHostPoolRegion -Location $plan.location
+  Test-AvdHostPoolRegion -Location $plan.location -SubscriptionId $lz.SubscriptionId
   if ($plan.sessionHostCount -gt 0) {
     Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones
   }

@@ -55,9 +55,9 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 | Area | Check | `-Fix` |
 |---|---|---|
 | Tooling | PowerShell 7, Bicep CLI, `az` and `bash` (used by `deploy.sh`), Microsoft.Graph.Authentication | — |
-| Entra ID | `-UsersGroup` / `-AdminsGroup` (name or object ID) resolve to exactly one security group each, with members; the Azure Virtual Desktop service principal exists | Creates missing groups (by name) and the service principal |
+| Entra ID | `-UsersGroup` / `-AdminsGroup` (name or object ID) resolve to exactly one security group each, with members; the Azure Virtual Desktop service principal exists | Creates missing groups (by name) and the service principal. `-AddMeToGroups` (separate switch) adds you to both groups |
 | Parameters | The file compiles, with `-Location` overriding its region; prints prefix, environment, region, host count and size, zones, connectivity mode, Intune enrollment | — |
-| Subscription | Owner, or Contributor + RBAC Administrator, plus policy rights when `enablePolicyGuardrails`; every resource provider `deploy.sh` needs; AVD host pools offered in the region; `EncryptionAtHost` (when used); VM size offered in **every requested zone**; family and regional vCPU quota for the host count; the profile storage SKU (Premium ZRS/LRS file shares) in the region; no soft-deleted, purge-protected Key Vault holding the vault name; budget parameters complete | Registers providers and the feature |
+| Subscription | Owner, or Contributor + RBAC Administrator, plus policy rights when `enablePolicyGuardrails`; every resource provider `deploy.sh` needs; AVD host pools offered in the region; `EncryptionAtHost` (when used); VM size offered in **every requested zone**; family and regional vCPU quota for the host count; the profile storage SKU (Premium ZRS/LRS file shares) in the region; no soft-deleted, purge-protected Key Vault holding the vault name; budget parameters complete | Registers providers and the feature and **waits** for them (up to 15 minutes; the feature takes about that long), then re-registers `Microsoft.Compute` so the feature takes effect |
 | Network | HubPeered only: hub VNet readable; firewall IP set for egress; central DNS zone IDs present | — |
 | Landing zone | Whether `rg-<prefix>-<env>-*` already exists (deploying then updates in place), and fails if it exists in another region (resource groups can't move) | — |
 | Tenant | Intune licensing when `enrollInIntune = true` (the join fails without it); whether you hold active roles for the post-deployment steps; which Conditional Access policies will need the storage app excluded | — |
@@ -67,7 +67,7 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 | Area | Check | `-Fix` |
 |---|---|---|
 | Tooling | PowerShell 7, Bicep CLI, Microsoft.Graph.Authentication | — |
-| Subscription | Your RBAC; resource providers; `EncryptionAtHost` feature; VM size offered in the region and zones; family and regional vCPU quota | Registers providers and the feature |
+| Subscription | Your RBAC; resource providers; `EncryptionAtHost` feature; VM size offered in the region and zones; family and regional vCPU quota | Registers providers and the feature, waits for them, then re-registers `Microsoft.Compute` |
 | Landing zone | The five resource groups; VNet, storage, Key Vault, Log Analytics, AVD Insights DCR, host pool; Entra Kerberos on the storage; storage and AVD private endpoints with DNS zone groups | — |
 | RBAC | AVD Users/Admins groups and AVD service principal assignments; SMB Share Contributor for AVD Users | — |
 | Entra ID | Both groups have members; the tenant has Intune licensing | — |
