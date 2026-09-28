@@ -142,6 +142,8 @@ The Key Vault stays soft-deleted under purge protection for 90 days.
 
 **Expected in dev.** `parameters/dev.bicepparam` keeps costs down on purpose: one host, locally redundant storage, no backup, Defender off, 30-day logs, no budget, and a region without zones by default. In dev and test those findings say *Expected in dev* and the scorecard counts them separately; in prod the same findings are plain warnings. `parameters/prod.bicepparam` fixes most of them; availability zones also need a region that has them.
 
+**PSRule on live resources** also evaluates the subscription itself, so it can report settings the landing zone doesn't manage: Defender for Cloud security contacts and provisioning, PIM for privileged roles, a Service Health alert (the landing zone deploys one only when `AVD_ALERT_EMAIL` is set). These are real findings for a review; fix them in the subscription. Rules that can't read this design are suppressed with the reason in `.ps-rule/Suppressions.Rule.yaml` (NAT Gateway public IPs, encryption at host instead of Azure Disk Encryption). Each finding shows the rule's reason.
+
 **Limits.** Advisor and Policy evaluate on their own schedule (about once a day), so a landing zone deployed today can look cleaner than it is; run the review again the next day. Microsoft's [Well-Architected assessment](https://learn.microsoft.com/assessments/) for Azure Virtual Desktop is a questionnaire about your requirements (recovery targets, operations, support) that no script can answer; this review gives you the evidence for most of its questions.
 
 ## Deployment portal

@@ -84,3 +84,32 @@ spec:
   if:
     field: type
     equals: Microsoft.RecoveryServices/vaults
+
+---
+# Synopsis: The NAT Gateway's public IP is attached through the gateway (properties.natGateway); the rule only recognises properties.ipConfiguration, so it reports every NAT Gateway IP as unattached. Found by the live -WellArchitected review.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: NatGatewayPublicIpIsAttached
+spec:
+  rule:
+    - Azure.PublicIP.IsAttached
+  if:
+    allOf:
+      - field: type
+        equals: Microsoft.Network/publicIPAddresses
+      - name: '.'
+        startsWith: 'pip-ng-'
+
+---
+# Synopsis: Session host disks are encrypted at host (end to end, including temp disk and caches), which Microsoft recommends over Azure Disk Encryption; the rule only recognises ADE settings on the disk. Found by the live -WellArchitected review.
+apiVersion: github.com/microsoft/PSRule/v1
+kind: SuppressionGroup
+metadata:
+  name: EncryptionAtHostInsteadOfAde
+spec:
+  rule:
+    - Azure.VM.ADE
+  if:
+    field: type
+    equals: Microsoft.Compute/disks

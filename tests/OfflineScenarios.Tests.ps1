@@ -128,6 +128,15 @@ Describe 'Well-Architected review of the deployed landing zone' {
     $out | Should -Not -Match 'Right-size underused VM|Other workload'
     $out | Should -Match 'assessmentPages=2'
   }
+  It 'reads a region without zones as having none (ARM omits the property; lesson 0021)' {
+    $out | Should -Match 'eastus2 has no availability zones'
+    $out | Should -Not -Match 'Zones: \r?\n'
+  }
+  It 'summarises PSRule export warnings and shows why a rule failed' {
+    $out | Should -Not -Match 'WARNING: Failed to get'
+    $out | Should -Match 'PSRule could not read 1 optional setting'
+    $out | Should -Match "Azure.VM.UseHybridUseBenefit on avdlzdsh-001 \(The field 'properties.licenseType' does not exist.\)"
+  }
   It 'runs PSRule on the landing zone resource groups with the repo suppressions, unless skipped' {
     $out | Should -Match 'RESULT dev-calls psruleExport=1 suppressions=1'
     $out | Should -Match 'RESULT skip-psrule-calls psrule=0'

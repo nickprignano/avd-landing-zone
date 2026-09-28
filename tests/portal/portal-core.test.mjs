@@ -263,3 +263,13 @@ test('state: Well-Architected review with nothing to review', () => {
   assert.equal(r.actions[0].title, 'Well-Architected: every check passes');
   assert.equal(r.warnings.length, 0);
 });
+
+test('real: first live Well-Architected review (dev, northcentralus) -> sign-in, 4 open findings, 6 expected', () => {
+  const r = analyze('real-postdeploy-waf.txt');
+  assert.equal(r.source, 'state');
+  assert.equal(r.status, 'ready');
+  assert.equal(r.step, 'signin');
+  assert.equal(r.actions[0].title, 'Review the Well-Architected findings');
+  assert.equal(r.actions[0].why.split('.')[0], 'To review: 1 Reliability, 1 Security, 2 Operational Excellence');
+  assert.match(r.actions[0].why, /6 are trade-offs the dev parameter file makes on purpose/);
+});

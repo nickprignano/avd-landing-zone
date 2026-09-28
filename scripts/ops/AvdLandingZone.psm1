@@ -1068,7 +1068,14 @@ function Get-AvdPSRuleFinding {
   try {
     Write-Host "          Exporting $($ResourceGroupName.Count) resource groups for PSRule ..." -ForegroundColor DarkGray
     New-Item -ItemType Directory -Force -Path $out | Out-Null
-    Export-AzRuleData -ResourceGroupName $ResourceGroupName -OutputPath $out -ErrorAction Stop | Out-Null
+    # Some optional lookups fail in most subscriptions (classic administrators, preview APIs);
+    # PSRule carries on without them. Count them instead of printing each one.
+    $exportWarnings = @()
+    Export-AzRuleData -ResourceGroupName $ResourceGroupName -OutputPath $out -ErrorAction Stop -WarningAction SilentlyContinue -WarningVariable exportWarnings | Out-Null
+    if ($exportWarnings.Count) {
+      Write-Host "          PSRule could not read $($exportWarnings.Count) optional setting(s); rules that need them may report a finding. Details with -Verbose." -ForegroundColor DarkGray
+      $exportWarnings | ForEach-Object { Write-Verbose "Export-AzRuleData: $_" }
+    }
     # Run from the export folder: the repo's ps-rule.yaml limits input to the parameter files.
     Push-Location $out
     try {
@@ -1087,6 +1094,14 @@ function Get-AvdPSRulePillar {
   param([Parameter(Mandatory)] $Record)
   $tag = $Record.Tag
   if ($tag -and $tag['Azure.WAF/pillar']) { [string]$tag['Azure.WAF/pillar'] } else { '' }
+}
+
+function Format-AvdPSRuleFinding {
+  <# "<rule> on <target> (<first reason>)": the reason says what the rule looked for (lesson 0012). #>
+  param([Parameter(Mandatory)] $Record)
+  $reason = @($Record.Reason | Where-Object { $_ })[0]
+  if ($reason -and $reason.Length -gt 120) { $reason = $reason.Substring(0, 117) + '...' }
+  "$($Record.RuleName) on $($Record.TargetName)$(if ($reason) { " ($reason)" })"
 }
 
 function Test-AvdWellArchitected {
@@ -1115,16 +1130,17 @@ function Test-AvdWellArchitected {
   $vms = @(& $read 'Reliability' 'session hosts' { Get-AvdArmList -Path "$($Lz.ResourceGroupIds.Hosts)/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01" })
   $regionZones = [bool](& $read 'Reliability' 'region availability zones' {
       $loc = (Invoke-AvdArm -Path "$sub/locations?api-version=2022-12-01").value | Where-Object name -eq $Lz.Location
-      [bool]($loc -and @($loc.availabilityZoneMappings).Count)
+      # ARM leaves out empty properties, and @($null).Count is 1: count real entries (lesson 0021).
+      [bool]($loc -and @($loc.availabilityZoneMappings | Where-Object { $_ }).Count)
     })
 
   & $waf 'Reliability' 'host-count' 'At least two session hosts' ($vms.Count -ge 2) "$($vms.Count) session host(s)" 'Set sessionHostCount to 2 or more in the parameter file and deploy again: one host is a single point of failure.' -tradeOff
-  $zoned = $vms.Count -and -not ($vms | Where-Object { -not @($_.zones).Count })
+  $zoned = $vms.Count -and -not ($vms | Where-Object { -not @($_.zones | Where-Object { $_ }).Count })
   if (-not $regionZones) {
     & $waf 'Reliability' 'zones' 'Session hosts spread across availability zones' $false "$($Lz.Location) has no availability zones, so hosts and profile storage are regional." 'For production, choose a region with availability zones (the deployment portal lists them by latency) and set availabilityZones = [1, 2, 3].' -tradeOff
   }
   else {
-    & $waf 'Reliability' 'zones' 'Session hosts spread across availability zones' $zoned $(if ($zoned) { 'Zones: ' + ((@($vms | ForEach-Object { $_.zones }) | Sort-Object -Unique) -join ', ') } else { "$($Lz.Location) offers zones; the hosts are regional." }) 'Set availabilityZones = [1, 2, 3] in the parameter file.' -tradeOff
+    & $waf 'Reliability' 'zones' 'Session hosts spread across availability zones' $zoned $(if ($zoned) { 'Zones: ' + ((@($vms | ForEach-Object { $_.zones } | Where-Object { $_ }) | Sort-Object -Unique) -join ', ') } else { "$($Lz.Location) offers zones; the hosts are regional." }) 'Set availabilityZones = [1, 2, 3] in the parameter file.' -tradeOff
   }
 
   if ($Lz.StorageAccount) {
@@ -1248,11 +1264,11 @@ function Test-AvdWellArchitected {
       foreach ($pillar in $script:WafPillars) {
         $mine = @($failed | Where-Object { (Get-AvdPSRulePillar $_) -eq $pillar })
         $slug = ($pillar -replace ' ', '-').ToLower()
-        & $waf $pillar "psrule-$slug" "PSRule for Azure: $($pillar.ToLower()) rules pass" (-not $mine.Count) $(if ($mine.Count) { "$($mine.Count): $(& $top @($mine | ForEach-Object { "$($_.RuleName) on $($_.TargetName)" }))" } else { '' }) 'Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.'
+        & $waf $pillar "psrule-$slug" "PSRule for Azure: $($pillar.ToLower()) rules pass" (-not $mine.Count) $(if ($mine.Count) { "$($mine.Count): $(& $top @($mine | ForEach-Object { Format-AvdPSRuleFinding $_ }))" } else { '' }) 'Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep or the subscription settings, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.'
       }
       $other = @($failed | Where-Object { (Get-AvdPSRulePillar $_) -notin $script:WafPillars })
       if ($other.Count) {
-        Add-AvdCheckResult 'WAF: PSRule' 'PSRule for Azure: rules without a pillar' 'Warn' -Detail "$($other.Count): $(& $top @($other | ForEach-Object { "$($_.RuleName) on $($_.TargetName)" }))" -Id 'waf-psrule-other' -Data @{ pillar = ''; accepted = $false }
+        Add-AvdCheckResult 'WAF: PSRule' 'PSRule for Azure: rules without a pillar' 'Warn' -Detail "$($other.Count): $(& $top @($other | ForEach-Object { Format-AvdPSRuleFinding $_ }))" -Id 'waf-psrule-other' -Data @{ pillar = ''; accepted = $false }
       }
     }
     catch {
