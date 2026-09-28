@@ -196,10 +196,11 @@
 
   // Which of our commands the pasted output was running, read from the prompt line, e.g.
   // "PS /home/builder> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ... -Fix".
+  // A redacted report (docs/portal/report.js) has "PS /home/<user-1>>".
   function commandInText(text) {
     var lines = text.split('\n'), i, m;
     for (i = lines.length - 1; i >= 0; i--) {
-      m = /^PS [^>]*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo)\b.*)$/.exec(lines[i]);
+      m = /^PS (?:<[a-z]+-\d+>|[^>])*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo)\b.*)$/.exec(lines[i]);
       if (!m) continue;
       var c = m[1], fix = /\s-Fix\b/.test(c);
       if (/Test-AvdLandingZoneReadiness/.test(c)) return { step: /-PreDeployment\b/.test(c) ? 'predeploy' : 'postdeploy', fix: fix };

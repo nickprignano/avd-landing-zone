@@ -1,0 +1,28 @@
+PS /home/jdoe/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'Fabrikam AVD Users' -AdminsGroup 'Fabrikam AVD Admins' -Fix
+AVD landing zone PRE-DEPLOYMENT preflight - parameters/dev.bicepparam in 'Fabrikam Production' (FIX mode)
+To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code QWERTY123 to authenticate.
+
+== Entra ID tenant
+  [PASS ] AVD Users group 'Fabrikam AVD Users' exists
+  [PASS ] Azure Virtual Desktop service principal exists
+          9cdead84-a844-4324-93f2-b2e6bb768d07
+  [WARN ] Microsoft Graph and Azure signed in as the same account
+          Azure: jane.doe@fabrikam.com; Microsoft Graph: jane_gmail.com#EXT#@fabrikamcorp.onmicrosoft.com. Tenant changes use the Graph account.
+
+== Subscription
+  [PASS ] Caller jane.doe@fabrikam.com can deploy and assign roles
+          Owner on /subscriptions/3f2a1b4c-1111-2222-3333-444455556666 (tenant 7d8e9f00-aaaa-bbbb-cccc-ddddeeeeffff)
+  [FAIL ] Landing zone 'fab-dev' deployed in subscription 'Fabrikam Production'
+          Profile share fabstdevq2w3e4r5.file.core.windows.net resolves to 10.100.2.9 (public 20.51.3.4); privatelink.file.core.windows.net
+          Key vault kvfabdevq2w3e4r5t6.vault.azure.net; soft-deleted: kvfabdevq2w3e4r5t6
+  Mail support@fabrikam.com or see https://intranet.fabrikam.com/avd
+  AVD_LOCAL_ADMIN_PASSWORD='Hunter2-Summer!' was set
+  Connection: DefaultEndpointsProtocol=https;AccountName=stfabdevq2w3e4r5;AccountKey=Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFy1A==;EndpointSuffix=core.windows.net
+  SAS https://stfabdevq2w3e4r5.blob.core.windows.net/c?sv=2022-11-02&sig=AbCdEf123%2B456%3D&se=2026-10-01
+  Registration token eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJSZWdpc3RyYXRpb25JZCI6ImFiYyJ9.c2lnbmF0dXJlLXZhbHVlLWhlcmU
+  Authorization: Bearer abcDEF123ghiJKL456mnoPQR789
+  Resolved from C:\Users\JDoe\Documents
+
+== Summary: 1 Fail, 3 Pass, 1 Warn
+<<<AVDLZ-STATE {"v":1,"stage":"predeploy","status":"notready","fix":true,"context":{"parameterFile":"parameters/dev.bicepparam","location":"eastus2","usersGroup":"Fabrikam AVD Users","adminsGroup":"Fabrikam AVD Admins","namePrefix":"fab","environment":"dev"},"counts":{"pass":3,"fail":1,"warn":1},"failures":[{"id":"lz-missing","area":"Landing zone","check":"Landing zone 'fab-dev' deployed in subscription 'Fabrikam Production'","detail":"","remediation":"","data":{"subscription":"Fabrikam Production","found":[]}}],"warnings":[]} AVDLZ-STATE>>>
+PS /home/jdoe/avd-landing-zone>

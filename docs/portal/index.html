@@ -87,6 +87,9 @@
   .bar { height: 8px; background: var(--bar); border-radius: 4px; min-width: 2px; opacity: .8; }
   .barcell { width: 25%; min-width: 60px; }
   .good { color: var(--good); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; } .poor { color: var(--poor); font-weight: 600; }
+  .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; }
+  .check input { margin-top: 4px; }
+  #report-body { min-height: 220px; }
   progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
 </style>
 </head>
@@ -106,7 +109,8 @@
     <p id="next-headline" class="status hidden"></p>
     <div id="findings" class="hidden"></div>
     <div id="actions"></div>
-    <p class="status" style="margin-top:12px">Copy a block, paste it into <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Cloud Shell</a>, then paste the output below. Keep the Cloud Shell tab in front while it runs.</p>
+    <p class="status" style="margin-top:12px">Copy a block, paste it into <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Cloud Shell</a>, then paste the output below. Keep the Cloud Shell tab in front while it runs.
+      Wrong advice, or stuck? <button type="button" class="linkbtn" id="report-open">Report a problem</button></p>
   </section>
 
   <section>
@@ -118,6 +122,21 @@
       <span class="status" id="paste-status" role="status"></span>
     </div>
   </section>
+
+  <details class="panel" id="report-panel">
+    <summary>Report a problem</summary>
+    <p class="status">Opens an issue on <a href="https://github.com/nickprignano/avd-landing-zone/issues" id="issues-link">GitHub</a> with the output you pasted and what the portal made of it. The report is redacted <strong>here, in your browser</strong>: email addresses and UPNs, IDs, subscription, tenant, storage and key vault names, public IP addresses, your name prefix and group names, and anything that looks like a password, key or token. Nothing is sent until you submit the issue on GitHub (you need a GitHub account), and <strong>issues are public</strong>, so read the report first.</p>
+    <label class="field"><span>What were you doing, and what went wrong?</span><textarea id="report-desc" rows="3" style="min-height:0"></textarea></label>
+    <label class="field" style="margin-top:10px"><span>Also remove (comma-separated: company name, server names, anything else private)</span><input type="text" id="report-terms" autocomplete="off"></label>
+    <label class="field" style="margin-top:10px"><span>The report, as it will be sent (you can edit it)</span><textarea id="report-body" spellcheck="false"></textarea></label>
+    <p class="status" id="report-summary" role="status" style="margin-top:6px"></p>
+    <label class="check"><input type="checkbox" id="report-ok"><span>I have read the report and it contains nothing private.</span></label>
+    <div class="row" style="margin-top:12px">
+      <button id="report-submit" disabled>Open GitHub issue</button>
+      <button class="secondary" id="report-copy">Copy report</button>
+      <span class="status" id="report-status" role="status"></span>
+    </div>
+  </details>
 
   <details class="panel" id="region-panel">
     <summary>Region: <span id="region-summary"></span></summary>
@@ -170,6 +189,7 @@
 </main>
 
 <script src="portal-core.js"></script>
+<script src="report.js"></script>
 <script>
 (function () {
   'use strict';
@@ -186,6 +206,7 @@
   var host = location.hostname, seg = location.pathname.split('/').filter(Boolean)[0];
   if (/\.github\.io$/.test(host) && seg) repoUrl = 'https://github.com/' + host.split('.')[0] + '/' + seg;
   $('repo-link').href = repoUrl;
+  $('issues-link').href = repoUrl + '/issues';
 
   var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl });
   var step = load('step', null);
@@ -296,16 +317,50 @@
     if (r.step) { step = r.step; save('step', step); }
     lastAnalysis = r;
     $('paste-status').textContent = r.recognised ? 'Analysed: ' + r.headline : 'Nothing recognisable in the pasted text.';
-    render();
+    render(); refreshReport(true);
     $('next').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   $('analyze').addEventListener('click', analyzePaste);
   $('paste').addEventListener('paste', function () { setTimeout(analyzePaste, 0); });
-  $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); });
+  $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); refreshReport(true); });
   $('reset').addEventListener('click', function () {
     try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
     cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl }); step = null; ranked = null; lastAnalysis = null; latency = [];
     $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render();
+  });
+
+  // ---------------------------------------------------------------- issue report (redacted in this browser)
+  var R = window.PortalReport, reportEdited = false;
+  function terms() { return $('report-terms').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean); }
+  function buildReport() {
+    var text = $('paste').value, a = text.trim() ? P.analyze(text, config(), { rankedRegions: ranked, currentStep: step || 'predeploy' }) : null;
+    return R.buildReport({ output: text, description: $('report-desc').value, analysis: a, step: step, config: config(), extraTerms: terms() });
+  }
+  function refreshReport(force) {
+    if (!$('report-panel').open) return;
+    if (reportEdited && !force) return;
+    var rep = buildReport();
+    $('report-body').value = rep.body; reportEdited = false;
+    $('report-summary').textContent = R.describe(rep.redaction.counts) + ' Check what is left, especially names in free text.';
+    $('report-ok').checked = false; $('report-submit').disabled = true; $('report-status').textContent = '';
+  }
+  // The final text: whatever is in the box (edits included), redacted once more.
+  function finalReport() {
+    var rep = buildReport();
+    var body = R.redact($('report-body').value, { known: [{ kind: 'name', value: cfg.namePrefix }, { kind: 'name', value: cfg.usersGroup }, { kind: 'name', value: cfg.adminsGroup }], extraTerms: terms() }).text;
+    return { title: rep.title, body: body };
+  }
+  $('report-panel').addEventListener('toggle', function () { refreshReport(true); });
+  $('report-open').addEventListener('click', function () { $('report-panel').open = true; refreshReport(true); $('report-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }); $('report-desc').focus({ preventScroll: true }); });
+  ['report-desc', 'report-terms'].forEach(function (id) { $(id).addEventListener('input', function () { refreshReport(false); }); });
+  $('report-body').addEventListener('input', function () { reportEdited = true; $('report-ok').checked = false; $('report-submit').disabled = true; $('report-summary').textContent = 'Edited by you. Changing the description or the terms above no longer rebuilds it (added terms are still removed when you send it); close and reopen this panel to start again.'; });
+  $('report-ok').addEventListener('change', function () { $('report-submit').disabled = !$('report-ok').checked; });
+  $('report-copy').addEventListener('click', function () { var f = finalReport(); copy('# ' + f.title + '\n\n' + f.body, $('report-copy')); });
+  $('report-submit').addEventListener('click', function () {
+    var f = finalReport(), link = R.issueUrl(repoUrl, f.title, f.body);
+    if (link.trimmed) { copy(f.body, $('report-copy')); $('report-status').textContent = link.trimmed + ' lines were cut to fit the link. The full report is on your clipboard: paste it over the issue body if they matter.'; }
+    else $('report-status').textContent = 'Opened GitHub in a new tab. Review it there and select Create.';
+    window.open(link.url, '_blank', 'noopener');
   });
 
   // ---------------------------------------------------------------- region latency
