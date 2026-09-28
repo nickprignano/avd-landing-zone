@@ -903,7 +903,9 @@ function Test-AvdProfileShareAcl {
       Add-AvdCheckResult $area 'Profile share root ACL' 'Fail' -Detail (Format-AvdShareAclError $result) -Remediation (Get-AvdShareAclRemediation $result)
       return
     }
-    $issues = Test-AvdShareSddl -Sddl $result.before -UsersSid $users.Sid -AdminsSid $admins.Sid
+    # No SDDL = the share root has never had an ACL set and still uses the service default.
+    $issues = if ([string]::IsNullOrEmpty($result.before)) { @('The share root still has the default ACL (no permissions set yet), which lets every authenticated user modify it.') }
+    else { Test-AvdShareSddl -Sddl $result.before -UsersSid $users.Sid -AdminsSid $admins.Sid }
     if (-not $issues.Count) { Add-AvdCheckResult $area 'Profile share root ACL follows FSLogix guidance' 'Pass'; return }
 
     if ($Fix -and $PSCmdlet.ShouldProcess("\\$($Lz.StorageFqdn)\$($Lz.ProfileShareName)", 'Replace the root ACL')) {
@@ -915,12 +917,14 @@ function Test-AvdProfileShareAcl {
         if ($applied.status -ne 'Forbidden') { break }
         Start-Sleep -Seconds 30
       }
-      $after = if ($applied.status -eq 'ok') { Test-AvdShareSddl -Sddl $applied.after -UsersSid $users.Sid -AdminsSid $admins.Sid } else { @('not applied') }
+      $after = if ($applied.status -ne 'ok') { @(Format-AvdShareAclError $applied) }
+      elseif ([string]::IsNullOrEmpty($applied.after)) { @('The ACL was applied but could not be read back.') }
+      else { Test-AvdShareSddl -Sddl $applied.after -UsersSid $users.Sid -AdminsSid $admins.Sid }
       if ($applied.status -eq 'ok' -and -not $after.Count) {
         Add-AvdCheckResult $area 'Profile share root ACL follows FSLogix guidance' 'Fixed' -Detail "Users: $($users.DisplayName); Admins: $($admins.DisplayName)"
       }
       else {
-        Add-AvdCheckResult $area 'Profile share root ACL follows FSLogix guidance' 'Fail' -Detail "$($applied.status) $($applied.error) $($after -join ' ')"
+        Add-AvdCheckResult $area 'Profile share root ACL follows FSLogix guidance' 'Fail' -Detail ($after -join ' ') -Remediation $(if ($applied.status -ne 'ok') { Get-AvdShareAclRemediation $applied } else { 'Rerun with -Fix.' })
       }
     }
     else {
