@@ -33,7 +33,11 @@ bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l eastus2 --users-
 ./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix avdlz -Environment dev
 ```
 
-Microsoft Graph sign-in uses a device code in Cloud Shell. Required roles:
+Microsoft Graph sign-in uses a device code in Cloud Shell: the script prints a code and waits until you enter it at https://microsoft.com/devicelogin. To sign in up front instead (the scripts reuse an existing sign-in that has the scopes they need):
+
+```powershell
+Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -Scopes 'Application.Read.All','Policy.Read.All','Group.Read.All','Directory.Read.All','Group.ReadWrite.All','Application.ReadWrite.All','DelegatedPermissionGrant.ReadWrite.All','Policy.ReadWrite.ConditionalAccess'
+``` Required roles:
 
 | For | Azure | Entra ID |
 |---|---|---|
