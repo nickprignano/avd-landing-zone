@@ -10,7 +10,8 @@ Run the same checks CI runs ([`docs/ci.md`](docs/ci.md#running-the-checks-locall
 az bicep lint --file bicep/main.bicep
 AVD_USERS_GROUP_ID=x AVD_ADMINS_GROUP_ID=x AVD_SERVICE_PRINCIPAL_ID=x AVD_LOCAL_ADMIN_PASSWORD=Placeholder-1234 \
   az bicep build-params --file parameters/prod.bicepparam --stdout > /dev/null
-pwsh -c "Invoke-ScriptAnalyzer -Path scripts/sessionhost -Recurse -Severity Warning,Error"
+pwsh -c "Invoke-ScriptAnalyzer -Path scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1"
+pwsh -c "Invoke-Pester ./tests"
 shellcheck scripts/deploy/deploy.sh
 ```
 
@@ -21,7 +22,8 @@ If your change touches resources, include `deploy.sh --what-if` output from a te
 - **Pin AVM versions** (`br/public:avm/res/...:<version>`) and note version bumps in the PR. Use native resources only where AVM has no module or adds nothing.
 - **One concern per module.** `main.bicep` stays readable; push complexity down.
 - **Everything declarative.** Session host configuration belongs in `scripts/sessionhost/`, runs through Run Commands, and must be **idempotent** (it re-runs on every deployment). No post-deployment scripts, and no runtime downloads beyond Microsoft's agent links.
-- **Windows PowerShell 5.1**: Run Commands use it, so avoid PowerShell 7-only syntax in `scripts/sessionhost/`.
+- **Windows PowerShell 5.1**: Run Commands use it, so avoid PowerShell 7-only syntax in `scripts/sessionhost/` and `scripts/ops/host/`. The ops scripts themselves target PowerShell 7 (Cloud Shell).
+- **Ops scripts** (`scripts/ops/`) must stay check-by-default: anything that changes state goes behind `-Fix` or a confirmation, and supports `-WhatIf`.
 - **Secure by default.** New resources get private endpoints where supported, diagnostics to Log Analytics, and least-privilege RBAC on Entra groups.
 - **No tenant data in the repo.** Identity values and secrets come from environment variables.
 - Every parameter gets an `@description`. Update `docs/` when behaviour changes.

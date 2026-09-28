@@ -48,6 +48,8 @@ az account set --subscription "<subscription-id>"
 
 These are tenant-level steps that ARM can't perform. Each is done once per storage account.
 
+**Automated:** from Azure Cloud Shell, `./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix <prefix> -Environment <env> -Fix` checks and applies all three. It confirms each Conditional Access change, and sets the NTFS ACL from a session host. See [operations.md](operations.md). The manual steps are below.
+
 ### Grant admin consent for Entra Kerberos
 Entra ID → **App registrations** → **All applications** → `[Storage Account] <storage>.file.core.windows.net` → **API permissions** → **Grant admin consent**.
 ([Microsoft docs](https://learn.microsoft.com/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable#grant-admin-consent-to-the-new-service-principal))
@@ -70,6 +72,8 @@ icacls P: /remove "Authenticated Users" "Users"
 Configuring ACLs for Entra identities depends on your identity type (hybrid vs cloud-only). Follow [Configure directory and file-level permissions](https://learn.microsoft.com/azure/storage/files/storage-files-identity-configure-file-level-permissions).
 
 ## 5. Verify
+
+`./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix <prefix> -Environment <env> -TestUserUpn <user>` deploys a demo host pool and validates everything below automatically ([operations.md](operations.md)). To check by hand:
 
 - **Host pool** → Session hosts: every host **Available**.
 - A member of AVD Users signs in to the [Windows App](https://windows.cloud.microsoft) and opens the desktop.
