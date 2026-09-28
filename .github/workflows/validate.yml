@@ -82,8 +82,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Point PSRule at the binary explicitly; resolving bicep from PATH was
+      # intermittent and silently skipped a whole parameter file.
       - name: Install Bicep
-        run: az bicep install && echo "$HOME/.azure/bin" >> "$GITHUB_PATH"
+        run: |
+          az bicep install
+          echo "PSRULE_AZURE_BICEP_PATH=$HOME/.azure/bin/bicep" >> "$GITHUB_ENV"
+          "$HOME/.azure/bin/bicep" --version
 
       - name: Analyze
         uses: microsoft/ps-rule@v2.9.0

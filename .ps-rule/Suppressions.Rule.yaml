@@ -66,8 +66,11 @@ spec:
   rule:
     - Azure.Defender.Storage.MalwareScan
   if:
-    field: type
-    equals: Microsoft.Security/pricings
+    allOf:
+      - field: type
+        equals: Microsoft.Security/pricings
+      - name: '.'
+        equals: StorageAccounts
 
 ---
 # Synopsis: Replication alerts apply to Azure Site Recovery, which this landing zone does not use; backup job alerts go through Azure Monitor.
