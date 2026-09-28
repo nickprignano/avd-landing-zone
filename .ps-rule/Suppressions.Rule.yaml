@@ -12,7 +12,7 @@ spec:
   rule:
     - Azure.Storage.FileShareSoftDelete
   if:
-    type: '.'
+    field: type
     in:
       - Microsoft.Storage/storageAccounts
       - Microsoft.Storage/storageAccounts/fileServices
@@ -27,7 +27,7 @@ spec:
   rule:
     - Azure.VM.MaintenanceConfig
   if:
-    type: '.'
+    field: type
     equals: Microsoft.Compute/virtualMachines
 
 ---
@@ -40,7 +40,7 @@ spec:
   rule:
     - Azure.Log.Replication
   if:
-    type: '.'
+    field: type
     equals: Microsoft.OperationalInsights/workspaces
 
 ---
@@ -66,7 +66,7 @@ spec:
   rule:
     - Azure.Defender.Storage.MalwareScan
   if:
-    type: '.'
+    field: type
     equals: Microsoft.Security/pricings
 
 ---
@@ -79,5 +79,5 @@ spec:
   rule:
     - Azure.RSV.ReplicationAlert
   if:
-    type: '.'
+    field: type
     equals: Microsoft.RecoveryServices/vaults
