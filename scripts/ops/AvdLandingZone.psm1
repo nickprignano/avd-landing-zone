@@ -403,12 +403,28 @@ function Register-AvdResourceProvider {
   Invoke-AvdArm -Method POST -Path "/subscriptions/$((Get-AzContext).Subscription.Id)/providers/$Namespace/register?api-version=2021-04-01" | Out-Null
 }
 
+function Get-AvdProviderState {
+  <# Registration state per namespace from one ARM call; falls back to one lookup per namespace. #>
+  param([Parameter(Mandatory)][AllowEmptyCollection()][string[]] $Namespace)
+  $state = [ordered]@{}
+  if (-not $Namespace.Count) { return $state }
+  $all = $null
+  try { $all = @((Invoke-AvdArm -Path "/subscriptions/$((Get-AzContext).Subscription.Id)/providers?api-version=2021-04-01").value) }
+  catch { $all = $null }
+  foreach ($ns in $Namespace) {
+    $p = if ($all) { $all | Where-Object namespace -eq $ns | Select-Object -First 1 }
+    $state[$ns] = if ($p) { $p.registrationState } else { (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1).RegistrationState }
+  }
+  return $state
+}
+
 function Wait-AvdRegistration {
   <# Polls until the providers (and optionally the EncryptionAtHost feature) are Registered. Returns what is still pending. #>
   param([string[]] $Namespace = @(), [switch] $EncryptionAtHost, [int] $TimeoutMinutes = 15)
   $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
   while ($true) {
-    $pending = @($Namespace | Where-Object { (Get-AzResourceProvider -ProviderNamespace $_ -ErrorAction SilentlyContinue | Select-Object -First 1).RegistrationState -ne 'Registered' })
+    $states = Get-AvdProviderState -Namespace $Namespace
+    $pending = @($Namespace | Where-Object { $states[$_] -ne 'Registered' })
     if ($EncryptionAtHost -and (Get-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost -ErrorAction SilentlyContinue).RegistrationState -ne 'Registered') {
       $pending += 'Microsoft.Compute/EncryptionAtHost'
     }
@@ -434,8 +450,8 @@ function Test-AvdResourceProvider {
   )
   $area = 'Subscription'
   $featureName = 'Feature Microsoft.Compute/EncryptionAtHost registered'
-  $state = [ordered]@{}
-  foreach ($ns in $Namespace) { $state[$ns] = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1).RegistrationState }
+  Write-Host "  Checking $($Namespace.Count) resource providers$(if (-not $SkipEncryptionAtHost) { ' and the EncryptionAtHost feature' })..." -ForegroundColor DarkGray
+  $state = Get-AvdProviderState -Namespace $Namespace
   $featureState = if ($SkipEncryptionAtHost) { 'Skipped' } else { (Get-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost -ErrorAction SilentlyContinue).RegistrationState }
 
   # ---- Fix: start every registration, then wait for all of them together ----
