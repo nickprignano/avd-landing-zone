@@ -76,6 +76,7 @@
   li { margin-bottom: 6px; }
   a { color: var(--accent); }
   .hidden { display: none; }
+  .linkbtn { background: none; border: 0; padding: 8px 0 0; color: var(--accent); font-weight: 600; text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -111,6 +112,7 @@
         <tbody id="rows"></tbody>
       </table>
     </div>
+    <button type="button" class="linkbtn hidden" id="more" aria-controls="rows" aria-expanded="false"></button>
   </section>
 
   <section id="commands" class="hidden">
@@ -179,7 +181,8 @@
   var GRAPH_FIX = ['Group.ReadWrite.All', 'Application.ReadWrite.All', 'Policy.Read.All', 'Directory.Read.All'];
 
   var $ = function (id) { return document.getElementById(id); };
-  var results = [], selected = null, measuredAt = null;
+  var TOP = 5;
+  var results = [], selected = null, measuredAt = null, expanded = false;
 
   // Clone URL: this repo, or the fork serving the page from <owner>.github.io/<repo>.
   var repoUrl = 'https://github.com/nickprignano/avd-landing-zone';
@@ -242,6 +245,7 @@
       measuredAt = new Date();
       var ok = results.filter(function (r) { return r.median !== null; });
       selected = ok.length ? ok[0].name : null;
+      expanded = false;
       $('status').textContent = ok.length
         ? 'Closest: ' + ok[0].display + ' (' + Math.round(ok[0].median) + ' ms).' + (ok.length < results.length ? ' ' + (results.length - ok.length) + ' region(s) did not answer.' : '')
         : 'No region answered. A firewall or content blocker may be stopping the requests.';
@@ -288,6 +292,8 @@
     var max = Math.max.apply(null, results.map(function (r) { return r.median || 0; })) || 1;
     var tbody = $('rows'); tbody.textContent = '';
     results.forEach(function (r, i) {
+      // Collapsed: the top 5, plus the picked region if it ranks lower.
+      if (!expanded && i >= TOP && r.name !== selected) return;
       var tr = document.createElement('tr');
       if (r.name === selected) tr.className = 'sel';
       var rt = rating(r.median);
@@ -310,6 +316,10 @@
       if (r.median !== null) tr.addEventListener('click', function () { selected = r.name; render(); });
       tbody.appendChild(tr);
     });
+    var more = $('more');
+    more.classList.toggle('hidden', results.length <= TOP);
+    more.textContent = expanded ? 'Show top ' + TOP + ' only' : 'Show all ' + results.length + ' regions';
+    more.setAttribute('aria-expanded', String(expanded));
     if (!selected) { $('commands').classList.add('hidden'); return; }
     $('commands').classList.remove('hidden');
     var c = commands();
@@ -347,6 +357,7 @@
   });
   $('copyAll').addEventListener('click', function () { copy(summary()); });
   $('run').addEventListener('click', run);
+  $('more').addEventListener('click', function () { expanded = !expanded; render(); });
 })();
 </script>
 </body>

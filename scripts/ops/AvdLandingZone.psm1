@@ -442,12 +442,18 @@ function Test-AvdVmCapacity {
 
 function Test-AvdHostPoolRegion {
   <# The template puts the host pool (AVD metadata) in the same region as everything else. #>
-  param([Parameter(Mandatory)][string] $Location)
+  param([Parameter(Mandatory)][string] $Location, [string] $SubscriptionId = (Get-AzContext).Subscription.Id)
   $area = 'Subscription'
-  $type = (Get-AzResourceProvider -ProviderNamespace Microsoft.DesktopVirtualization -ErrorAction SilentlyContinue | Select-Object -First 1).ResourceTypes |
-    Where-Object ResourceTypeName -eq 'hostpools' | Select-Object -First 1
+  # The ARM provider API lists every region per resource type. (Get-AzResourceProvider
+  # returns one object per region, each with only that region's types.)
+  $type = $null
+  try {
+    $provider = Invoke-AvdArm -Path "/subscriptions/$SubscriptionId/providers/Microsoft.DesktopVirtualization?api-version=2021-04-01"
+    $type = @($provider.resourceTypes | Where-Object resourceType -eq 'hostpools') | Select-Object -First 1
+  }
+  catch { $type = $null }
   if (-not $type) { Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Warn' -Detail 'Could not read the Microsoft.DesktopVirtualization regions.'; return }
-  $regions = @($type.Locations | ForEach-Object { ($_ -replace '\s', '').ToLower() })
+  $regions = @($type.locations | ForEach-Object { ($_ -replace '\s', '').ToLower() })
   if ($regions -contains $Location.ToLower()) { Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Pass' }
   else {
     Add-AvdCheckResult $area "AVD host pools offered in $Location" 'Fail' -Detail "Host pool regions: $(($regions | Sort-Object) -join ', ')" -Remediation 'The landing zone deploys the host pool in its own region: pick one of these (the region latency page ranks them for you).'
@@ -1073,7 +1079,7 @@ function Test-AvdPreDeployment {
   Test-AvdResourceProvider -Fix:$Fix -SkipEncryptionAtHost:(-not $plan.encryptionAtHost) -Namespace @('Microsoft.DesktopVirtualization', 'Microsoft.Compute', 'Microsoft.Storage', 'Microsoft.Network',
     'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.Security',
     'Microsoft.PolicyInsights', 'Microsoft.GuestConfiguration', 'Microsoft.Consumption')
-  Test-AvdHostPoolRegion -Location $plan.location
+  Test-AvdHostPoolRegion -Location $plan.location -SubscriptionId $lz.SubscriptionId
   if ($plan.sessionHostCount -gt 0) {
     Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones
   }

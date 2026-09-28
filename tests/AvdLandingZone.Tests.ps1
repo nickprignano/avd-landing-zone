@@ -114,28 +114,30 @@ Describe 'Invoke-AvdGraph' {
 }
 
 Describe 'Test-AvdHostPoolRegion' {
-  BeforeAll {
-    # Stand-in so Pester can mock it without the Az modules installed.
-    function global:Get-AzResourceProvider { param($ProviderNamespace, $ErrorAction) }
-  }
-  AfterAll { Remove-Item function:global:Get-AzResourceProvider -ErrorAction SilentlyContinue }
   BeforeEach {
     Clear-AvdCheckResult
-    Mock -ModuleName AvdLandingZone Get-AzResourceProvider {
-      [pscustomobject]@{ ResourceTypes = @(
-          [pscustomobject]@{ ResourceTypeName = 'workspaces'; Locations = @('Brazil South') }
-          [pscustomobject]@{ ResourceTypeName = 'hostpools'; Locations = @('North Central US', 'West US 2') }
+    # Shape of GET /subscriptions/{id}/providers/Microsoft.DesktopVirtualization
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm {
+      [pscustomobject]@{ resourceTypes = @(
+          [pscustomobject]@{ resourceType = 'workspaces'; locations = @('Brazil South') }
+          [pscustomobject]@{ resourceType = 'hostpools'; locations = @('North Central US', 'West US 2') }
         ) }
     }
   }
 
   It 'passes for a host pool region given by its ARM name' {
-    Test-AvdHostPoolRegion -Location 'westus2'
+    Test-AvdHostPoolRegion -Location 'westus2' -SubscriptionId 'sub'
     (Get-AvdCheckResult).Status | Should -Be 'Pass'
   }
 
+  It 'warns instead of failing when the provider cannot be read' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm { throw 'ARM GET failed (403)' }
+    Test-AvdHostPoolRegion -Location 'westus2' -SubscriptionId 'sub'
+    (Get-AvdCheckResult).Status | Should -Be 'Warn'
+  }
+
   It 'fails for a region without host pools and lists the ones that have them' {
-    Test-AvdHostPoolRegion -Location 'brazilsouth'
+    Test-AvdHostPoolRegion -Location 'brazilsouth' -SubscriptionId 'sub'
     $r = Get-AvdCheckResult
     $r.Status | Should -Be 'Fail'
     $r.Detail | Should -BeLike '*northcentralus, westus2*'
