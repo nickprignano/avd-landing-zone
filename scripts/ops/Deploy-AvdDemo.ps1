@@ -231,8 +231,10 @@ if ($TestUserUpn) {
 }
 
 $summary = Write-AvdSummary
+$portalState = Get-AvdPortalState -Stage demo -Context @{ namePrefix = $NamePrefix; environment = $Environment; testUserUpn = $TestUserUpn; workspace = "vdws-$($lz.BaseName)-demo" }
 if ($summary.Failed) {
   Write-Host "Demo deployed, but $($summary.Failed) readiness check(s) failed; fix them before testing sign-in." -ForegroundColor Red
+  Write-AvdPortalState $portalState
   exit 1
 }
 Write-Host ''
@@ -240,4 +242,5 @@ Write-Host 'Ready to sign in:' -ForegroundColor Green
 Write-Host "  1. As a member of the AVD Users group, open https://windows.cloud.microsoft (or the Windows App)."
 Write-Host "  2. Open 'Desktop' in the 'vdws-$($lz.BaseName)-demo' workspace."
 Write-Host "  3. Remove the demo afterwards: ./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix $NamePrefix -Environment $Environment"
+Write-AvdPortalState $portalState
 exit 0

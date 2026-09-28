@@ -62,7 +62,7 @@ param(
   # Entra security group name or object ID. With -Fix, a missing group (by name) is created.
   [Parameter(Mandatory, ParameterSetName = 'PreDeployment')][string] $UsersGroup,
   [Parameter(Mandatory, ParameterSetName = 'PreDeployment')][string] $AdminsGroup,
-  # Region to check and deploy to, instead of the parameter file's default (e.g. from the region latency page).
+  # Region to check and deploy to, instead of the parameter file's default (e.g. from the deployment portal).
   [Parameter(ParameterSetName = 'PreDeployment')][ValidatePattern('^[a-z0-9]+$')][string] $Location,
   # Add the signed-in user to both groups (the desktop, plus admin sign-in to the hosts).
   [Parameter(ParameterSetName = 'PreDeployment')][switch] $AddMeToGroups,
@@ -122,8 +122,26 @@ else {
 
 $summary = Write-AvdSummary
 if ($PassThru) { return $summary }
+
+# Machine-readable result for the deployment portal (docs/portal).
+if ($PreDeployment) {
+  $plan = if ($outcome) { $outcome.Plan } else { $null }
+  $portalContext = @{
+    parameterFile = $ParameterFile
+    usersGroup    = $(if ($outcome -and $outcome.UsersGroup) { $outcome.UsersGroup.displayName } else { $UsersGroup })
+    adminsGroup   = $(if ($outcome -and $outcome.AdminsGroup) { $outcome.AdminsGroup.displayName } else { $AdminsGroup })
+    location      = $(if ($plan) { $plan.location } else { $Location })
+    namePrefix    = $(if ($plan) { $plan.namePrefix } else { $null })
+    environment   = $(if ($plan) { $plan.environmentName } else { $null })
+  }
+  $portalState = Get-AvdPortalState -Stage predeploy -Fix:$Fix -Context $portalContext
+}
+else {
+  $portalState = Get-AvdPortalState -Stage postdeploy -Fix:$Fix -Context @{ namePrefix = $NamePrefix; environment = $Environment }
+}
 if ($summary.Failed) {
   Write-Host "Not ready: $($summary.Failed) failure(s).$(if (-not $Fix) { ' Rerun with -Fix to remediate what can be fixed automatically.' })" -ForegroundColor Red
+  Write-AvdPortalState $portalState
   exit 1
 }
 Write-Host 'Ready.' -ForegroundColor Green
@@ -136,4 +154,5 @@ if ($PreDeployment -and $outcome -and $outcome.Plan) {
   Write-Host 'Then run the post-deployment preflight:' -ForegroundColor White
   Write-Host "  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix $($outcome.Plan.namePrefix) -Environment $($outcome.Plan.environmentName) -Fix"
 }
+Write-AvdPortalState $portalState
 exit 0

@@ -117,6 +117,7 @@ if (-not $KeepDevices) { Remove-AvdDevice -ComputerName $demoHosts }
 
 if (-not $IncludeLandingZone) {
   Write-AvdSummary | Out-Null
+  if (-not $WhatIfPreference) { Write-AvdPortalState (Get-AvdPortalState -Stage cleanup -Context @{ namePrefix = $NamePrefix; environment = $Environment; includeLandingZone = [bool]$IncludeLandingZone }) }
   return
 }
 
@@ -205,3 +206,4 @@ if ($lz.KeyVault) {
   Add-AvdCheckResult 'Subscription' "Key Vault $($lz.KeyVault.Name) is soft-deleted with purge protection" 'Warn' -Detail 'The name is reserved for 90 days.' -Remediation 'Change namePrefix to redeploy sooner, or recover it with Undo-AzKeyVaultRemoval.'
 }
 Write-AvdSummary | Out-Null
+if (-not $WhatIfPreference) { Write-AvdPortalState (Get-AvdPortalState -Stage cleanup -Context @{ namePrefix = $NamePrefix; environment = $Environment; includeLandingZone = [bool]$IncludeLandingZone }) }

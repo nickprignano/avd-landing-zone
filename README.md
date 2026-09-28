@@ -21,7 +21,7 @@ Everything is built from pinned [Azure Verified Modules](https://aka.ms/avm).
 
 ## Quick start
 
-**Pick a region first:** the [region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/) ranks Azure regions by round-trip time from your browser and gives you the preflight and deploy commands for the one you pick, ready to paste into Cloud Shell. Run it from where your users work.
+**Easiest path: the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/).** It picks the closest region by measuring latency from your browser, gives you each command to paste into Cloud Shell, and reads the output you paste back to tell you what to run next, all the way to signing in. Pasted output never leaves your browser.
 
 Prerequisites (details in [`docs/deploy.md`](docs/deploy.md)):
 - A **dedicated subscription** where you are Owner, plus Azure CLI ≥ 2.65.
@@ -97,7 +97,7 @@ avd-landing-zone/
 - [`docs/architecture.md`](docs/architecture.md): resource layout, traffic flows, identity and RBAC model
 - [`docs/deploy.md`](docs/deploy.md): prerequisites, deployment, post-deployment steps, scaling out, teardown
 - [`docs/operations.md`](docs/operations.md): preflight with fix mode, demo host pool with sign-in validation, cleanup
-- [Region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/) ([source](docs/region-latency/index.html)): pick the closest region and get the commands
+- [Deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/) ([how it works](docs/portal/README.md)): region by latency, then the next command from each pasted Cloud Shell output
 - [`docs/ci.md`](docs/ci.md): validation and deployment pipelines, OIDC setup
 - [`docs/gotchas.md`](docs/gotchas.md): the things that bite
 - [`docs/lessons`](docs/lessons/README.md): what real deployments taught, each with the guard that now catches it

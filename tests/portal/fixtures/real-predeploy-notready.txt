@@ -1,0 +1,44 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins'
+AVD landing zone PRE-DEPLOYMENT preflight - parameters/dev.bicepparam in 'Azure subscription 1'
+
+== Tooling
+  [PASS ] PowerShell 7.6.6
+  [PASS ] Running in Azure Cloud Shell
+
+== Entra ID tenant
+  [FAIL ] AVD Users group 'AVD Users' exists
+          -> Create it (or rerun with -Fix to create it), or pass an existing group.
+  [FAIL ] AVD Admins group 'AVD Admins' exists
+          -> Create it (or rerun with -Fix to create it), or pass an existing group.
+  [PASS ] Azure Virtual Desktop service principal exists
+          33333333-3333-3333-3333-333333333333
+
+== Parameter file
+  [PASS ] Compile parameters/dev.bicepparam
+          prefix avdlz, env dev, northcentralus, 1 x Standard_D4as_v5, zones [], Standalone, Intune True
+
+== Subscription
+  [PASS ] Caller admin@contoso.com can deploy and assign roles
+          Owner
+  [FAIL ] Provider Microsoft.Insights registered
+          State: NotRegistered
+          -> Register-AzResourceProvider -ProviderNamespace Microsoft.Insights (or rerun with -Fix)
+  [FAIL ] Provider Microsoft.KeyVault registered
+          State: NotRegistered
+          -> Register-AzResourceProvider -ProviderNamespace Microsoft.KeyVault (or rerun with -Fix)
+  [FAIL ] Feature Microsoft.Compute/EncryptionAtHost registered
+          State: NotRegistered
+          -> Rerun with -Fix, or set encryptionAtHost = false.
+  [WARN ] AVD host pools offered in northcentralus
+          Could not read the Microsoft.DesktopVirtualization regions.
+  [PASS ] VM size Standard_D4as_v5 available in northcentralus
+  [FAIL ] standardDASv5Family vCPU quota
+          0 free, 4 needed
+          -> Request a quota increase (Portal > Quotas) or reduce host count/size.
+  [PASS ] Regional vCPU quota
+          10 free, 4 needed
+
+== Summary: 6 Fail, 27 Pass, 1 Warn
+
+Not ready: 6 failure(s). Rerun with -Fix to remediate what can be fixed automatically.
+PS /home/admin/avd-landing-zone>

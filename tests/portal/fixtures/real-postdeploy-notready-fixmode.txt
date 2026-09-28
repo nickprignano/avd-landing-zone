@@ -1,0 +1,18 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix -AllowHostStart
+AVD landing zone preflight - avdlz/dev in 'Azure subscription 1' (FIX mode)
+
+== Landing zone
+  [PASS ] Storage private endpoint with DNS zone group
+          privatelink.file.core.windows.net
+
+== Profile share NTFS permissions
+          granting avdlzdsh-001 temporary 'Storage File Data Privileged Contributor' on the storage account
+  [FAIL ] Profile share root ACL
+          Error during 'get share permission' HTTP 400 MissingRequiredHeader: The remote server returned an error: (400) Bad Request. | storage resolves to 10.100.2.9
+          -> The Azure Files API rejected the request; the error code above says why.
+          removed temporary 'Storage File Data Privileged Contributor' from avdlzdsh-001
+
+== Summary: 1 Fail, 44 Pass
+
+Not ready: 1 failure(s).
+PS /home/admin/avd-landing-zone>

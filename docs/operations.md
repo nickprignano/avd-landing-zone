@@ -50,7 +50,7 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 
 ## Pre-deployment preflight
 
-`-PreDeployment` works before the landing zone exists. To choose the region, use the [region latency page](https://nickprignano.github.io/avd-landing-zone/region-latency/): it builds this command with `-Location` set to the region you pick. It compiles your `.bicepparam` file with the real group and service principal IDs and checks the subscription and tenant against the **effective** values (file values, else template defaults). Once it comes back clean, it prints the `deploy.sh` command to run as a separate step.
+`-PreDeployment` works before the landing zone exists. To choose the region, use the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/): it builds this command with `-Location` set to the region you pick, and reads the output to tell you the next step. It compiles your `.bicepparam` file with the real group and service principal IDs and checks the subscription and tenant against the **effective** values (file values, else template defaults). Once it comes back clean, it prints the `deploy.sh` command to run as a separate step.
 
 | Area | Check | `-Fix` |
 |---|---|---|
@@ -124,6 +124,10 @@ With `-IncludeLandingZone`, you must type the landing zone name to confirm (`-Fo
 5. **Defender plans**, set back to Free, only with `-ResetDefender`.
 
 The Key Vault stays soft-deleted under purge protection for 90 days.
+
+## Deployment portal
+
+Every script ends with a machine-readable line (`<<<AVDLZ-STATE {...} AVDLZ-STATE>>>`): the stage, whether it passed, the context for the next command, and each failure with a stable id. Paste the output into the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/) and it tells you what to run next. The format is described in [`docs/portal/README.md`](portal/README.md).
 
 ## Exit codes
 

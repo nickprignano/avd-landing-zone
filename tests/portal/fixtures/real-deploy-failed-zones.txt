@@ -1,0 +1,9 @@
+PS /home/admin/avd-landing-zone> bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins'
+==> Checking az and Bicep
+    Subscription: Azure subscription 1
+==> Registering resource providers
+==> Ensuring the EncryptionAtHost feature is registered
+==> Looking up the Azure Virtual Desktop service principal
+==> Deploying (avdlz-dev-20260928-212056). A first deployment takes 30-45 minutes.
+{"status":"Failed","error":{"code":"DeploymentFailed","target":"/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Resources/deployments/avdlz-dev-20260928-212056","message":"At least one resource deployment operation failed. Please list deployment operations for details. Please see https://aka.ms/arm-deployment-operations for usage details.","details":[{"code":"ResourceDeploymentFailure","target":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-avdlz-dev-network/providers/Microsoft.Resources/deployments/avdlz-network","message":"The resource write operation failed to complete successfully, because it reached terminal provisioning state 'Failed'.","details":[{"code":"DeploymentFailed","details":[{"code":"ResourceDeploymentFailure","details":[{"code":"DeploymentFailed","details":[{"code":"LocationNotSupportAvailabilityZones","message":"The resource 'Microsoft.Network/publicIPAddresses/pip-ng-vnet-avdlz-dev' does not support availability zones at location 'northcentralus'."}]}]}]}]}]}}
+PS /home/admin/avd-landing-zone>

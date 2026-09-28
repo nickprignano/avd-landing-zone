@@ -1,0 +1,21 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Fix
+AVD landing zone PRE-DEPLOYMENT preflight - parameters/dev.bicepparam in 'Azure subscription 1' (FIX mode)
+
+== Parameter file
+  [PASS ] Compile parameters/dev.bicepparam
+          prefix avdlz, env dev, northcentralus, 1 x Standard_D4as_v5, zones [], Standalone, Intune True
+
+== Subscription
+  Re-registering Microsoft.Compute so EncryptionAtHost takes effect
+  [PASS ] Feature Microsoft.Compute/EncryptionAtHost registered
+  [PASS ] standardDASv5Family vCPU quota
+          8 free, 4 needed
+
+== Summary: 39 Pass
+Ready.
+
+Next, deploy the landing zone as a separate run:
+  bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins'
+Then run the post-deployment preflight:
+  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix
+PS /home/admin/avd-landing-zone>

@@ -10,3 +10,4 @@ Short records of choices that shape this repo, so they are not reopened without 
 | 0004 | [Random break-glass password, applied at host creation](0004-random-break-glass.md) | Accepted |
 | 0005 | [Set the profile share root ACL through the Azure Files REST API from a session host](0005-ntfs-via-rest.md) | Accepted |
 | 0006 | [Every real-run finding becomes a lesson and a guard](0006-lessons-and-guards.md) | Accepted |
+| 0007 | [The deployment portal reads a state line from the scripts, in the browser only](0007-portal-state-line.md) | Accepted |

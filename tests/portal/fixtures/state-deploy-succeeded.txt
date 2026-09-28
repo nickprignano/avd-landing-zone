@@ -1,0 +1,26 @@
+==> Checking az and Bicep
+    Subscription: Sub 1
+==> Registering resource providers
+==> Ensuring the EncryptionAtHost feature is registered
+==> Looking up the Azure Virtual Desktop service principal
+    Generated a random break-glass password for new session hosts (stored in Key Vault as sessionhost-localadmin-password).
+==> Deploying (avdlz-dev-20260928-225903). A first deployment takes 30-45 minutes.
+    If Cloud Shell disconnects, the deployment keeps running in Azure.
+
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"started","context":{"parameterFile":"parameters/dev.bicepparam","location":"northcentralus","usersGroup":"AVD Users","adminsGroup":"AVD Admins","deploymentName":"avdlz-dev-20260928-225903"}} AVDLZ-STATE>>>
+{}
+
+==> Landing zone deployed.
+
+Next, three one-time tenant steps that Bicep can't do: admin consent for the
+storage account's Entra app, excluding it from MFA Conditional Access policies,
+and the profile share permissions. The post-deployment preflight checks and
+applies all three. From Azure Cloud Shell (PowerShell):
+
+  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix -AllowHostStart
+
+To do them by hand instead (storage account stavdlzdevabc), see docs/deploy.md#5-post-deployment.
+
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"succeeded","context":{"parameterFile":"parameters/dev.bicepparam","location":"northcentralus","usersGroup":"AVD Users","adminsGroup":"AVD Admins","deploymentName":"avdlz-dev-20260928-225903","namePrefix":"avdlz","environment":"dev","storageAccount":"stavdlzdevabc"}} AVDLZ-STATE>>>

@@ -25,6 +25,7 @@ Add a lesson whenever a real run fails for a reason the tests didn't catch. The 
 | 0017 | [Don't reset the shared branch over an unmerged PR](0017-shared-branch-reset.md) | Git | #12 #13 | CLAUDE.md rule |
 | 0018 | [PSRule for Azure specifics](0018-psrule.md) | CI | #3 | CI PSRule gate |
 | 0019 | [Bicep authoring traps](0019-bicep-authoring.md) | Bicep | #2 | CI Bicep lint |
+| 0020 | [The offline harness must not depend on the machine's tools](0020-hermetic-harness.md) | Tests | portal PR | Hermetic scenarios in CI |
 
 ## Template
 
