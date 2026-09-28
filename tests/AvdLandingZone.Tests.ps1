@@ -179,13 +179,15 @@ Describe 'Test-AvdResourceProvider -Fix' {
   It 'warns and does not re-register Compute when the feature is still registering at the timeout' {
     Mock -ModuleName AvdLandingZone Get-AzProviderFeature { [pscustomobject]@{ RegistrationState = 'Registering' } }
     Test-AvdResourceProvider -Namespace @() -Fix -WaitMinutes 0 6>$null
-    (Get-AvdCheckResult | Where-Object Check -like 'Feature*').Status | Should -Be 'Warn'
+    $r = Get-AvdCheckResult
+    ($r | Where-Object Check -like 'Feature*').Status | Should -Be 'Warn'
     Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -Times 0 -Exactly
   }
 
   It 'only reports in check mode' {
     Test-AvdResourceProvider -Namespace 'Microsoft.KeyVault' 6>$null
-    @(Get-AvdCheckResult | Where-Object Status -eq 'Fail').Count | Should -Be 2
+    $r = Get-AvdCheckResult
+    @($r | Where-Object Status -eq 'Fail').Count | Should -Be 2
     Should -Invoke -ModuleName AvdLandingZone Register-AzResourceProvider -Times 0 -Exactly
     Should -Invoke -ModuleName AvdLandingZone Start-Sleep -Times 0 -Exactly
   }
