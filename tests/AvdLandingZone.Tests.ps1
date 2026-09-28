@@ -268,3 +268,34 @@ Describe 'Add-AvdCallerToGroup' {
     (Get-AvdCheckResult).Status -join ',' | Should -Be 'Fixed,Pass'
   }
 }
+
+Describe 'Get-AvdPrivateEndpointDnsZoneId' {
+  It 'searches the whole subscription and returns the zone of the endpoint that fronts the target' {
+    Mock -ModuleName AvdLandingZone Invoke-AvdArm {
+      if ($Path -like '*/privateDnsZoneGroups*') {
+        return [pscustomobject]@{ value = @([pscustomobject]@{ properties = [pscustomobject]@{ privateDnsZoneConfigs = @(
+                  [pscustomobject]@{ properties = [pscustomobject]@{ privateDnsZoneId = '/zones/privatelink.file.core.windows.net' } }) } }) }
+      }
+      [pscustomobject]@{ value = @([pscustomobject]@{
+            id         = '/subscriptions/sub/resourceGroups/rg-avdlz-dev-storage/providers/Microsoft.Network/privateEndpoints/pe-st'
+            properties = [pscustomobject]@{ privateLinkServiceConnections = @([pscustomobject]@{ properties = [pscustomobject]@{ privateLinkServiceId = '/subscriptions/sub/resourceGroups/rg-avdlz-dev-storage/providers/Microsoft.Storage/storageAccounts/st1' } }) }
+          }) }
+    }
+    $r = Get-AvdPrivateEndpointDnsZoneId -SubscriptionId 'sub' -TargetResourceId '/subscriptions/sub/resourceGroups/rg-avdlz-dev-storage/providers/Microsoft.Storage/storageAccounts/st1'
+    $r.DnsZoneId | Should -Be '/zones/privatelink.file.core.windows.net'
+    Should -Invoke -ModuleName AvdLandingZone Invoke-AvdArm -ParameterFilter { $Path -like '/subscriptions/sub/providers/Microsoft.Network/privateEndpoints?*' } -Times 1 -Exactly
+  }
+}
+
+Describe 'Profile share ACL error reporting' {
+  It 'names the step, HTTP status, storage error code, message and resolved IP' {
+    $r = [pscustomobject]@{ status = 'Error'; step = 'get share permission'; httpStatus = 400; errorCode = 'InvalidHeaderValue'; detail = 'Bad header.'; error = '(400) Bad Request.'; resolvedIp = '10.20.1.4' }
+    $text = Format-AvdShareAclError $r
+    $text | Should -BeLike "*get share permission*HTTP 400*InvalidHeaderValue*Bad header.*10.20.1.4*"
+    Get-AvdShareAclRemediation $r | Should -BeLike '*Azure Files API rejected*'
+  }
+
+  It 'points at DNS when the storage account resolves to a public IP' {
+    Get-AvdShareAclRemediation ([pscustomobject]@{ status = 'Error'; httpStatus = 403; error = 'x'; resolvedIp = '20.60.1.5' }) | Should -BeLike '*private IP*'
+  }
+}

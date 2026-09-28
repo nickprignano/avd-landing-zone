@@ -233,9 +233,13 @@ function Get-AvdRoleAssigneeId {
 }
 
 function Get-AvdPrivateEndpointDnsZoneId {
-  <# Private DNS zone behind the private endpoint that fronts $TargetResourceId, or $null. #>
-  param([Parameter(Mandatory)][string] $ResourceGroupId, [Parameter(Mandatory)][string] $TargetResourceId)
-  $pes = Invoke-AvdArm -Path "$ResourceGroupId/providers/Microsoft.Network/privateEndpoints?api-version=2024-05-01"
+  <#
+    Private DNS zone behind the private endpoint that fronts $TargetResourceId, or $null.
+    Searches the whole subscription: the template puts each private endpoint in its
+    target's resource group (storage, avd, demo), not the network one.
+  #>
+  param([Parameter(Mandatory)][string] $SubscriptionId, [Parameter(Mandatory)][string] $TargetResourceId)
+  $pes = Invoke-AvdArm -Path "/subscriptions/$SubscriptionId/providers/Microsoft.Network/privateEndpoints?api-version=2024-05-01"
   foreach ($pe in @($pes.value)) {
     $targets = @($pe.properties.privateLinkServiceConnections) + @($pe.properties.manualPrivateLinkServiceConnections) |
       Where-Object { $_ } | ForEach-Object { $_.properties.privateLinkServiceId }
@@ -327,10 +331,8 @@ function Get-AvdLandingZone {
     if ($lz.StorageAccount) {
       $lz.StorageFqdn = "$($lz.StorageAccount.StorageAccountName).file.$($ctx.Environment.StorageEndpointSuffix)"
       $lz.ProfileShareUnc = "\\$($lz.StorageFqdn)\$ProfileShareName"
-      if ($rgExists.Network) {
-        $pe = Get-AvdPrivateEndpointDnsZoneId -ResourceGroupId $lz.ResourceGroupIds.Network -TargetResourceId $lz.StorageAccount.Id
-        if ($pe) { $lz.StorageDnsZoneId = $pe.DnsZoneId }
-      }
+      $pe = Get-AvdPrivateEndpointDnsZoneId -SubscriptionId $lz.SubscriptionId -TargetResourceId $lz.StorageAccount.Id
+      if ($pe) { $lz.StorageDnsZoneId = $pe.DnsZoneId }
     }
     $lz.RecoveryVault = Get-AzResource -ResourceGroupName $rg.Storage -ResourceType Microsoft.RecoveryServices/vaults -ErrorAction SilentlyContinue | Select-Object -First 1
   }
@@ -347,8 +349,8 @@ function Get-AvdLandingZone {
     $lz.AppGroup = Get-AzResource -ResourceGroupName $rg.ControlPlane -ResourceType Microsoft.DesktopVirtualization/applicationGroups -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($lz.AppGroup) { $lz.UsersGroupId = Get-AvdRoleAssigneeId -Scope $lz.AppGroup.ResourceId -RoleName 'Desktop Virtualization User' -ObjectType Group }
     $lz.AvdServicePrincipalId = Get-AvdRoleAssigneeId -Scope $lz.ResourceGroupIds.ControlPlane -RoleName 'Desktop Virtualization Power On Off Contributor'
-    if ($lz.HostPool -and $rgExists.Network) {
-      $pe = Get-AvdPrivateEndpointDnsZoneId -ResourceGroupId $lz.ResourceGroupIds.Network -TargetResourceId $lz.HostPool.ResourceId
+    if ($lz.HostPool) {
+      $pe = Get-AvdPrivateEndpointDnsZoneId -SubscriptionId $lz.SubscriptionId -TargetResourceId $lz.HostPool.ResourceId
       if ($pe) { $lz.AvdDnsZoneId = $pe.DnsZoneId }
     }
   }
@@ -827,6 +829,30 @@ function Test-AvdShareSddl {
   return , $issues.ToArray()
 }
 
+function Format-AvdShareAclError {
+  <# One line from the host script's error result: step, HTTP status, storage error code, message, resolved IP. #>
+  param([Parameter(Mandatory)] $Result)
+  $parts = @($Result.status)
+  if ($Result.PSObject.Properties['step'] -and $Result.step) { $parts += "during '$($Result.step)'" }
+  if ($Result.PSObject.Properties['httpStatus'] -and $Result.httpStatus) { $parts += "HTTP $($Result.httpStatus)" }
+  if ($Result.PSObject.Properties['errorCode'] -and $Result.errorCode) { $parts += $Result.errorCode }
+  $text = ($parts -join ' ') + ": $($Result.error)"
+  if ($Result.PSObject.Properties['detail'] -and $Result.detail) { $text += " | $($Result.detail)" }
+  if ($Result.PSObject.Properties['resolvedIp'] -and $Result.resolvedIp) { $text += " | storage resolves to $($Result.resolvedIp)" }
+  $text
+}
+
+function Get-AvdShareAclRemediation {
+  <# Points at DNS/network when the storage name didn't resolve privately, else at the API error. #>
+  param([Parameter(Mandatory)] $Result)
+  $ip = if ($Result.PSObject.Properties['resolvedIp']) { "$($Result.resolvedIp)" } else { '' }
+  if ($ip -and $ip -notmatch '^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)') {
+    return 'The host did not resolve the storage account to a private IP: check the storage private endpoint and its DNS zone link to the spoke.'
+  }
+  if ($Result.status -eq 'Forbidden') { return 'The temporary role had not reached the storage data plane yet; rerun in a few minutes.' }
+  'The Azure Files API rejected the request; the error code above says why.'
+}
+
 function Test-AvdProfileShareAcl {
   <#
     Post-deployment step 3: NTFS permissions on the profile share root.
@@ -874,7 +900,7 @@ function Test-AvdProfileShareAcl {
       Start-Sleep -Seconds 30
     }
     if ($result.status -ne 'ok') {
-      Add-AvdCheckResult $area 'Profile share root ACL' 'Fail' -Detail "$($result.status): $($result.error)" -Remediation 'Check the host can resolve and reach the storage private endpoint on 443.'
+      Add-AvdCheckResult $area 'Profile share root ACL' 'Fail' -Detail (Format-AvdShareAclError $result) -Remediation (Get-AvdShareAclRemediation $result)
       return
     }
     $issues = Test-AvdShareSddl -Sddl $result.before -UsersSid $users.Sid -AdminsSid $admins.Sid
