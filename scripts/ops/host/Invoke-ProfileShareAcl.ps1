@@ -34,6 +34,11 @@ catch {
   return
 }
 
+# Where the storage name resolves (a private IP means the private endpoint DNS works).
+$resolvedIp = $null
+try { $resolvedIp = ([System.Net.Dns]::GetHostAddresses($StorageFqdn) | Select-Object -First 1).IPAddressToString } catch { $resolvedIp = "unresolved: $($_.Exception.Message)" }
+$script:step = 'start'
+
 $headers = @{
   Authorization              = "Bearer $token"
   'x-ms-version'             = '2023-11-03'
@@ -42,9 +47,11 @@ $headers = @{
 $base = "https://$StorageFqdn/$ShareName"
 
 function Get-RootSddl {
+  $script:step = 'get root directory properties'
   $dir = Invoke-WebRequest -UseBasicParsing -Method Get -Uri ($base + '?restype=directory') -Headers $headers
   $h = $headers.Clone()
   $h['x-ms-file-permission-key'] = [string]$dir.Headers['x-ms-file-permission-key']
+  $script:step = 'get share permission'
   (Invoke-RestMethod -UseBasicParsing -Method Get -Uri ($base + '?restype=share&comp=filepermission') -Headers $h).permission
 }
 
@@ -54,6 +61,7 @@ try {
   if ($Apply -eq 'true') {
     $sddl = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($DesiredSddlBase64))
     $body = @{ permission = $sddl } | ConvertTo-Json -Compress
+    $script:step = 'create share permission'
     $created = Invoke-WebRequest -UseBasicParsing -Method Put -Uri ($base + '?restype=share&comp=filepermission') `
       -Headers $headers -Body $body -ContentType 'application/json'
     $h = $headers.Clone()
@@ -61,15 +69,28 @@ try {
     $h['x-ms-file-attributes'] = 'preserve'
     $h['x-ms-file-creation-time'] = 'preserve'
     $h['x-ms-file-last-write-time'] = 'preserve'
+    $script:step = 'set root directory permission'
     Invoke-WebRequest -UseBasicParsing -Method Put -Uri ($base + '?restype=directory&comp=properties') -Headers $h | Out-Null
     $after = Get-RootSddl
   }
-  Write-Result @{ status = 'ok'; before = $before; after = $after }
+  Write-Result @{ status = 'ok'; before = $before; after = $after; resolvedIp = $resolvedIp }
 }
 catch {
-  $code = $null
-  if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+  $code = $null; $errorCode = $null; $detail = $null
+  $response = $_.Exception.Response
+  if ($response) {
+    $code = [int]$response.StatusCode
+    # Azure Storage names the reason in x-ms-error-code and an XML body (<Code>, <Message>).
+    try { $errorCode = $response.Headers['x-ms-error-code'] } catch { $errorCode = $null }
+    try {
+      $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+      $raw = $reader.ReadToEnd()
+      if ($raw -match '<Message>([\s\S]*?)</Message>') { $detail = ($Matches[1] -replace '\s+', ' ').Trim() }
+      elseif ($raw) { $detail = $raw.Substring(0, [Math]::Min(300, $raw.Length)) }
+    }
+    catch { $detail = $null }
+  }
   $status = 'Error'
   if ($code -eq 403) { $status = 'Forbidden' }
-  Write-Result @{ status = $status; httpStatus = $code; error = $_.Exception.Message }
+  Write-Result @{ status = $status; step = $script:step; httpStatus = $code; errorCode = $errorCode; detail = $detail; error = $_.Exception.Message; resolvedIp = $resolvedIp }
 }
