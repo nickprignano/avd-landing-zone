@@ -100,12 +100,14 @@ function Invoke-AvdArm {
 $script:GraphReadScopes = @('Application.Read.All', 'Policy.Read.All', 'Group.Read.All', 'Directory.Read.All')
 $script:GraphFixScopes = @('Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'Policy.Read.All', 'Policy.ReadWrite.ConditionalAccess', 'Group.Read.All', 'Directory.Read.All')
 $script:GraphCleanupScopes = @('Device.ReadWrite.All', 'DeviceManagementManagedDevices.ReadWrite.All')
+$script:GraphPreDeployFixScopes = @('Group.ReadWrite.All', 'Application.ReadWrite.All', 'Policy.Read.All', 'Directory.Read.All')
 
 function Connect-AvdGraph {
-  param([ValidateSet('Read', 'Fix', 'Cleanup')][string] $Purpose = 'Read')
+  param([ValidateSet('Read', 'Fix', 'PreDeployFix', 'Cleanup')][string] $Purpose = 'Read')
   $scopes = switch ($Purpose) {
     'Read' { $script:GraphReadScopes }
     'Fix' { $script:GraphFixScopes }
+    'PreDeployFix' { $script:GraphPreDeployFixScopes }
     'Cleanup' { $script:GraphCleanupScopes }
   }
   if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
@@ -144,7 +146,8 @@ function Invoke-AvdGraph {
     }
     else { return $r }
   }
-  return , $items.ToArray()
+  # Emit the items (not one array object) so callers can wrap the call in @() safely.
+  return $items.ToArray()
 }
 
 function Get-AvdGraphFilterUri {
@@ -341,7 +344,7 @@ function Test-AvdTooling {
 }
 
 function Test-AvdCallerPermission {
-  param([Parameter(Mandatory)][string] $SubscriptionId)
+  param([Parameter(Mandatory)][string] $SubscriptionId, [switch] $NeedsPolicy)
   $area = 'Subscription'
   $scope = "/subscriptions/$SubscriptionId"
   try {
@@ -354,6 +357,10 @@ function Test-AvdCallerPermission {
     $canAssign = $roles -contains 'Owner' -or $roles -contains 'User Access Administrator' -or $roles -contains 'Role Based Access Control Administrator'
     if ($canWrite -and $canAssign) { Add-AvdCheckResult $area "Caller $($me.UserPrincipalName) can deploy and assign roles" 'Pass' -Detail ($roles -join ', ') }
     else { Add-AvdCheckResult $area "Caller $($me.UserPrincipalName) lacks deploy/role-assignment rights" 'Fail' -Detail "Roles: $($roles -join ', ')" -Remediation 'Needs Owner, or Contributor + Role Based Access Control Administrator, on the subscription.' }
+    if ($NeedsPolicy) {
+      if ($roles -contains 'Owner' -or $roles -contains 'Resource Policy Contributor') { Add-AvdCheckResult $area 'Caller can create the policy guardrail assignments' 'Pass' }
+      else { Add-AvdCheckResult $area 'Caller can create the policy guardrail assignments' 'Fail' -Remediation 'Needs Owner or Resource Policy Contributor, or set enablePolicyGuardrails = false.' }
+    }
   }
   catch {
     Add-AvdCheckResult $area 'Caller permissions' 'Warn' -Detail "Could not evaluate: $($_.Exception.Message)"
@@ -362,11 +369,14 @@ function Test-AvdCallerPermission {
 
 function Test-AvdResourceProvider {
   [CmdletBinding(SupportsShouldProcess)]
-  param([switch] $Fix)
+  param(
+    [switch] $Fix,
+    [switch] $SkipEncryptionAtHost,
+    [string[]] $Namespace = @('Microsoft.DesktopVirtualization', 'Microsoft.Compute', 'Microsoft.Storage', 'Microsoft.Network',
+      'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.GuestConfiguration')
+  )
   $area = 'Subscription'
-  $namespaces = 'Microsoft.DesktopVirtualization', 'Microsoft.Compute', 'Microsoft.Storage', 'Microsoft.Network',
-  'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.GuestConfiguration'
-  foreach ($ns in $namespaces) {
+  foreach ($ns in $Namespace) {
     $state = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1).RegistrationState
     if ($state -eq 'Registered') { Add-AvdCheckResult $area "Provider $ns registered" 'Pass'; continue }
     if ($state -eq 'Registering') { Add-AvdCheckResult $area "Provider $ns registered" 'Warn' -Detail 'Registration in progress.' -Remediation 'Wait a few minutes and rerun.'; continue }
@@ -376,6 +386,7 @@ function Test-AvdResourceProvider {
     }
     else { Add-AvdCheckResult $area "Provider $ns registered" 'Fail' -Detail "State: $state" -Remediation "Register-AzResourceProvider -ProviderNamespace $ns (or rerun with -Fix)" }
   }
+  if ($SkipEncryptionAtHost) { return }
   $feature = Get-AzProviderFeature -ProviderNamespace Microsoft.Compute -FeatureName EncryptionAtHost -ErrorAction SilentlyContinue
   if ($feature.RegistrationState -eq 'Registered') { Add-AvdCheckResult $area 'Feature Microsoft.Compute/EncryptionAtHost registered' 'Pass' }
   elseif ($feature.RegistrationState -eq 'Registering') { Add-AvdCheckResult $area 'Feature Microsoft.Compute/EncryptionAtHost registered' 'Warn' -Detail 'Registration in progress (can take ~15 minutes).' -Remediation 'Wait, then run Register-AzResourceProvider -ProviderNamespace Microsoft.Compute.' }
@@ -387,7 +398,7 @@ function Test-AvdResourceProvider {
 }
 
 function Test-AvdVmCapacity {
-  param([Parameter(Mandatory)][string] $Location, [Parameter(Mandatory)][string] $VmSize, [int] $Count = 1)
+  param([Parameter(Mandatory)][string] $Location, [Parameter(Mandatory)][string] $VmSize, [int] $Count = 1, [int[]] $Zones = @())
   $area = 'Subscription'
   $sku = Get-AzComputeResourceSku -Location $Location -ErrorAction SilentlyContinue |
     Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -eq $VmSize } | Select-Object -First 1
@@ -398,7 +409,15 @@ function Test-AvdVmCapacity {
     return
   }
   $zoneBlocked = @($blocked | Where-Object Type -eq 'Zone' | ForEach-Object { $_.RestrictionInfo.Zones })
-  if ($zoneBlocked.Count) { Add-AvdCheckResult $area "VM size $VmSize zones" 'Warn' -Detail "Not available in zone(s): $($zoneBlocked -join ', ')" -Remediation 'Narrow availabilityZones.' }
+  $offered = @($sku.LocationInfo | ForEach-Object { $_.Zones } | Where-Object { $_ -and $_ -notin $zoneBlocked })
+  if ($Zones.Count) {
+    $missing = @($Zones | Where-Object { "$_" -notin $offered })
+    if ($missing.Count) {
+      Add-AvdCheckResult $area "VM size $VmSize in zones $($Zones -join ', ')" 'Fail' -Detail "Not available in zone(s) $($missing -join ', '); available: $(if ($offered) { $offered -join ', ' } else { 'none (regional only)' })" -Remediation 'Set availabilityZones to the available zones (or [] for regional), or pick another size.'
+    }
+    else { Add-AvdCheckResult $area "VM size $VmSize available in $Location zones $($Zones -join ', ')" 'Pass' }
+  }
+  elseif ($zoneBlocked.Count) { Add-AvdCheckResult $area "VM size $VmSize zones" 'Warn' -Detail "Not available in zone(s): $($zoneBlocked -join ', ')" -Remediation 'Narrow availabilityZones.' }
   else { Add-AvdCheckResult $area "VM size $VmSize available in $Location" 'Pass' }
 
   $vcpu = [int](($sku.Capabilities | Where-Object Name -eq 'vCPUs').Value)
@@ -816,7 +835,7 @@ function Invoke-AvdReadinessCheck {
     }
     else { 'No landing zone resource groups (rg-<prefix>-<env>-network) in this subscription.' }
     Add-AvdCheckResult 'Landing zone' "Landing zone '$($Lz.BaseName)' deployed in subscription '$sub'" 'Fail' -Detail $detail `
-      -Remediation "Check the subscription (Get-AzContext / Set-AzContext) and -NamePrefix/-Environment, or deploy it: bash ./scripts/deploy/deploy.sh -p parameters/$($Lz.Environment).bicepparam -l <region> --users-group '<AVD Users>' --admins-group '<AVD Admins>'"
+      -Remediation "Check the subscription (Get-AzContext / Set-AzContext) and -NamePrefix/-Environment. Not deployed yet? Run the pre-deployment preflight: ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/$($Lz.Environment).bicepparam -UsersGroup '<AVD Users>' -AdminsGroup '<AVD Admins>'"
     Add-AvdCheckResult 'Landing zone' 'Landing zone resource, RBAC, tenant and NTFS checks' 'Skip' -Detail 'Nothing to check until the landing zone exists.'
     return
   }
@@ -874,6 +893,234 @@ function Invoke-AvdReadinessCheck {
   finally {
     if ($started) { Stop-AzVM -ResourceGroupName $hostRg -Name $target.Name -Force | Out-Null }
   }
+}
+
+# =====================================================================
+# Pre-deployment preflight (before the landing zone exists)
+# =====================================================================
+function Get-AvdDeploymentPlan {
+  <#
+    Compiles the .bicepparam file with the real (or placeholder) identity values
+    and returns the effective parameters: values from the file, else the
+    template's literal defaults.
+  #>
+  param(
+    [Parameter(Mandatory)][string] $ParameterFile,
+    [string] $UsersGroupId,
+    [string] $AdminsGroupId,
+    [string] $AvdServicePrincipalId
+  )
+  $bicep = Get-Command bicep -ErrorAction SilentlyContinue
+  if (-not $bicep) { throw 'The Bicep CLI is required to read the parameter file.' }
+  $placeholder = '00000000-0000-0000-0000-000000000000'
+  $vars = [ordered]@{
+    AVD_USERS_GROUP_ID       = $(if ($UsersGroupId) { $UsersGroupId } else { $placeholder })
+    AVD_ADMINS_GROUP_ID      = $(if ($AdminsGroupId) { $AdminsGroupId } else { $placeholder })
+    AVD_SERVICE_PRINCIPAL_ID = $(if ($AvdServicePrincipalId) { $AvdServicePrincipalId } else { $placeholder })
+    # Only used to compile the file; the preflight never deploys.
+    AVD_LOCAL_ADMIN_PASSWORD = 'Preflight-placeholder-only-1!'
+  }
+  $saved = @{}
+  foreach ($k in $vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $vars[$k]) }
+  try {
+    $raw = & $bicep.Source build-params $ParameterFile --stdout 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "bicep build-params failed: $($raw -join ' ')" }
+  }
+  finally {
+    foreach ($k in $vars.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+  }
+  $built = ($raw -join "`n") | ConvertFrom-Json -Depth 50
+  $values = ($built.parametersJson | ConvertFrom-Json -Depth 50 -AsHashtable).parameters
+  $template = $built.templateJson | ConvertFrom-Json -Depth 50 -AsHashtable
+  $plan = @{}
+  foreach ($name in $template.parameters.Keys) {
+    $def = $template.parameters[$name]
+    if ($values.ContainsKey($name)) { $plan[$name] = $values[$name].value }
+    elseif ($def.ContainsKey('defaultValue') -and -not ($def.defaultValue -is [string] -and $def.defaultValue.StartsWith('['))) { $plan[$name] = $def.defaultValue }
+  }
+  return $plan
+}
+
+function Resolve-AvdGroup {
+  <# Finds an Entra security group by object ID or display name; with -Fix creates a missing one. #>
+  [CmdletBinding(SupportsShouldProcess)]
+  param([Parameter(Mandatory)][string] $Label, [Parameter(Mandatory)][string] $NameOrId, [switch] $Fix)
+  $area = 'Entra ID'
+  $g = $null
+  $guid = [guid]::Empty
+  if ([guid]::TryParse($NameOrId, [ref]$guid)) {
+    try { $g = Invoke-AvdGraph -Uri "v1.0/groups/$NameOrId`?`$select=id,displayName,securityEnabled" } catch { $g = $null }
+  }
+  else {
+    $found = @(Invoke-AvdGraph -Uri (Get-AvdGraphFilterUri -Collection groups -Filter "displayName eq '$($NameOrId.Replace("'", "''"))'" -Select 'id,displayName,securityEnabled'))
+    if ($found.Count -gt 1) {
+      Add-AvdCheckResult $area "$Label group '$NameOrId'" 'Fail' -Detail "$($found.Count) groups have this name." -Remediation 'Pass the group object ID instead.'
+      return $null
+    }
+    $g = $found | Select-Object -First 1
+  }
+  if ($g) {
+    if (-not $g.securityEnabled) {
+      Add-AvdCheckResult $area "$Label group '$($g.displayName)'" 'Fail' -Detail 'Not a security group; Azure RBAC needs a security group.' -Remediation 'Use a security-enabled group.'
+      return $null
+    }
+    Add-AvdCheckResult $area "$Label group '$($g.displayName)' exists" 'Pass' -Detail $g.id
+    return $g
+  }
+  if ($Fix -and -not [guid]::TryParse($NameOrId, [ref]$guid) -and $PSCmdlet.ShouldProcess($NameOrId, 'Create Entra security group')) {
+    $nick = (($NameOrId.ToLower() -replace '[^a-z0-9]', '-') -replace '-+', '-').Trim('-')
+    $g = Invoke-AvdGraph -Method POST -Uri 'v1.0/groups' -Body @{
+      displayName = $NameOrId; mailNickname = $nick; mailEnabled = $false; securityEnabled = $true
+      description = "Azure Virtual Desktop landing zone: $Label"
+    }
+    Add-AvdCheckResult $area "$Label group '$NameOrId' exists" 'Fixed' -Detail "Created $($g.id). Add members before users sign in."
+    return $g
+  }
+  Add-AvdCheckResult $area "$Label group '$NameOrId' exists" 'Fail' -Remediation 'Create it (or rerun with -Fix to create it), or pass an existing group.'
+  return $null
+}
+
+function Test-AvdPreDeployment {
+  <# Everything the landing zone deployment needs, checked against the effective parameters. #>
+  [CmdletBinding(SupportsShouldProcess)]
+  param(
+    [Parameter(Mandatory)][string] $ParameterFile,
+    [Parameter(Mandatory)][string] $UsersGroup,
+    [Parameter(Mandatory)][string] $AdminsGroup,
+    [switch] $Fix,
+    [switch] $SkipTenant
+  )
+  $avdAppId = '9cdead84-a844-4324-93f2-b2e6bb768d07'
+
+  Write-AvdSection 'Tooling'
+  Test-AvdTooling
+  foreach ($tool in 'az', 'bash') {
+    if (Get-Command $tool -ErrorAction SilentlyContinue) { Add-AvdCheckResult 'Tooling' "$tool available (used by deploy.sh)" 'Pass' }
+    else { Add-AvdCheckResult 'Tooling' "$tool available (used by deploy.sh)" 'Fail' -Remediation 'Use Azure Cloud Shell, or install it.' }
+  }
+
+  # ---- Entra ID first: the parameter file needs the group and service principal IDs ----
+  $users = $null; $admins = $null; $avdSp = $null
+  if ($SkipTenant) {
+    Add-AvdCheckResult 'Entra ID' 'Tenant checks' 'Skip' -Detail '-SkipTenant: group and service principal checks not run; the parameter file is compiled with placeholders.'
+  }
+  else {
+    Write-AvdSection 'Entra ID tenant'
+    Connect-AvdGraph -Purpose ($(if ($Fix) { 'PreDeployFix' } else { 'Read' }))
+    $users = Resolve-AvdGroup -Label 'AVD Users' -NameOrId $UsersGroup -Fix:$Fix
+    $admins = Resolve-AvdGroup -Label 'AVD Admins' -NameOrId $AdminsGroup -Fix:$Fix
+    foreach ($pair in @(@('AVD Users', $users), @('AVD Admins', $admins))) {
+      if (-not $pair[1]) { continue }
+      $m = @(Invoke-AvdGraph -Uri "v1.0/groups/$($pair[1].id)/members?`$select=id&`$top=1")
+      if ($m.Count) { Add-AvdCheckResult 'Entra ID' "$($pair[0]) group has members" 'Pass' }
+      else { Add-AvdCheckResult 'Entra ID' "$($pair[0]) group has members" 'Warn' -Remediation 'Add members before anyone signs in (not needed to deploy).' }
+    }
+    $avdSp = Invoke-AvdGraph -Uri (Get-AvdGraphFilterUri -Collection servicePrincipals -Filter "appId eq '$avdAppId'" -Select 'id,appId,displayName') | Select-Object -First 1
+    if ($avdSp) { Add-AvdCheckResult 'Entra ID' 'Azure Virtual Desktop service principal exists' 'Pass' -Detail $avdSp.id }
+    elseif ($Fix -and $PSCmdlet.ShouldProcess('Azure Virtual Desktop', 'Create service principal for the first-party app')) {
+      $avdSp = Invoke-AvdGraph -Method POST -Uri 'v1.0/servicePrincipals' -Body @{ appId = $avdAppId }
+      Add-AvdCheckResult 'Entra ID' 'Azure Virtual Desktop service principal exists' 'Fixed' -Detail $avdSp.id
+    }
+    else { Add-AvdCheckResult 'Entra ID' 'Azure Virtual Desktop service principal exists' 'Fail' -Detail "App $avdAppId has no service principal in this tenant." -Remediation 'Rerun with -Fix, or register Microsoft.DesktopVirtualization.' }
+  }
+
+  # ---- Parameter file ----
+  Write-AvdSection 'Parameter file'
+  try {
+    $plan = Get-AvdDeploymentPlan -ParameterFile $ParameterFile -UsersGroupId $users.id -AdminsGroupId $admins.id -AvdServicePrincipalId $avdSp.id
+  }
+  catch {
+    Add-AvdCheckResult 'Parameters' "Compile $ParameterFile" 'Fail' -Detail $_.Exception.Message -Remediation 'Fix the parameter file (az bicep build-params).'
+    return
+  }
+  $zones = @($plan.availabilityZones | ForEach-Object { [int]$_ })
+  Add-AvdCheckResult 'Parameters' "Compile $ParameterFile" 'Pass' -Detail ("prefix {0}, env {1}, {2}, {3} x {4}, zones [{5}], {6}, Intune {7}" -f $plan.namePrefix, $plan.environmentName, $plan.location, $plan.sessionHostCount, $plan.sessionHostVmSize, ($zones -join ','), $plan.connectivityMode, $plan.enrollInIntune)
+  if (-not $plan.location) { Add-AvdCheckResult 'Parameters' 'location set' 'Fail' -Remediation 'Set param location in the parameter file.'; return }
+  $lz = Get-AvdLandingZone -NamePrefix $plan.namePrefix -Environment $plan.environmentName
+
+  # ---- Subscription ----
+  Write-AvdSection 'Subscription'
+  Test-AvdCallerPermission -SubscriptionId $lz.SubscriptionId -NeedsPolicy:$plan.enablePolicyGuardrails
+  Test-AvdResourceProvider -Fix:$Fix -SkipEncryptionAtHost:(-not $plan.encryptionAtHost) -Namespace @('Microsoft.DesktopVirtualization', 'Microsoft.Compute', 'Microsoft.Storage', 'Microsoft.Network',
+    'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.Security',
+    'Microsoft.PolicyInsights', 'Microsoft.GuestConfiguration', 'Microsoft.Consumption')
+  if ($plan.sessionHostCount -gt 0) {
+    Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones
+  }
+  if (-not $plan.encryptionAtHost) { Add-AvdCheckResult 'Subscription' 'EncryptionAtHost not required (encryptionAtHost = false)' 'Pass' }
+
+  # Premium file share SKU in the region
+  $skus = Invoke-AvdArm -Path "/subscriptions/$($lz.SubscriptionId)/providers/Microsoft.Storage/skus?api-version=2023-05-01"
+  $fileSku = @($skus.value | Where-Object { $_.name -eq $plan.profileStorageSku -and $_.kind -eq 'FileStorage' -and ($_.locations -contains $plan.location) }) | Select-Object -First 1
+  $skuBlocked = $fileSku -and @($fileSku.restrictions | Where-Object { $_.type -eq 'Location' }).Count
+  if ($fileSku -and -not $skuBlocked) { Add-AvdCheckResult 'Subscription' "$($plan.profileStorageSku) file shares available in $($plan.location)" 'Pass' }
+  else { Add-AvdCheckResult 'Subscription' "$($plan.profileStorageSku) file shares available in $($plan.location)" 'Fail' -Remediation "Set profileStorageSku = 'Premium_LRS', or choose a region with Premium ZRS file shares." }
+
+  # Soft-deleted Key Vault that would block the deterministic vault name
+  $kvPrefix = "kv$($lz.NamePrefix)$($lz.Environment)"
+  $deleted = @(Get-AzKeyVault -InRemovedState -ErrorAction SilentlyContinue | Where-Object { $_.VaultName -like "$kvPrefix*" -and $_.Location -eq $plan.location })
+  if ($deleted.Count) {
+    Add-AvdCheckResult 'Subscription' 'No soft-deleted Key Vault blocking the vault name' 'Fail' -Detail "Deleted, purge-protected: $($deleted.VaultName -join ', ')" -Remediation 'Recover it (Undo-AzKeyVaultRemoval) and redeploy into it, or change namePrefix.'
+  }
+  else { Add-AvdCheckResult 'Subscription' 'No soft-deleted Key Vault blocking the vault name' 'Pass' }
+
+  # Budget parameters are skipped silently by the template if incomplete; say so here.
+  if ($plan.monthlyBudgetAmount -gt 0 -and (-not $plan.budgetStartDate -or -not @($plan.alertEmailAddresses).Count)) {
+    Add-AvdCheckResult 'Parameters' 'Budget will be created' 'Warn' -Detail 'monthlyBudgetAmount is set but budgetStartDate or alertEmailAddresses (AVD_ALERT_EMAIL) is empty, so no budget is created.'
+  }
+
+  # ---- Connectivity ----
+  if ($plan.connectivityMode -eq 'HubPeered') {
+    Write-AvdSection 'Hub connectivity'
+    $hub = if ($plan.hubVnetResourceId) { Get-AzResource -ResourceId $plan.hubVnetResourceId -ErrorAction SilentlyContinue }
+    if ($hub) { Add-AvdCheckResult 'Network' 'Hub VNet reachable' 'Pass' -Detail $hub.Name }
+    else { Add-AvdCheckResult 'Network' 'Hub VNet reachable' 'Fail' -Detail "hubVnetResourceId: '$($plan.hubVnetResourceId)'" -Remediation 'Set a valid hub VNet ID you can read (and write, for hub-side peering).' }
+    if ($plan.hubFirewallPrivateIp) { Add-AvdCheckResult 'Network' 'Hub firewall IP set for egress' 'Pass' -Detail $plan.hubFirewallPrivateIp }
+    else { Add-AvdCheckResult 'Network' 'Hub firewall IP set for egress' 'Warn' -Detail 'Subnets have no default outbound access; without a route hosts cannot reach Entra ID or the AVD service.' -Remediation 'Set hubFirewallPrivateIp unless hub routing already supplies 0.0.0.0/0.' }
+    foreach ($k in 'file', 'keyVault') {
+      if ($plan.centralPrivateDnsZoneResourceIds.Count -and -not $plan.centralPrivateDnsZoneResourceIds[$k]) {
+        Add-AvdCheckResult 'Network' "Central private DNS zone '$k'" 'Fail' -Remediation "centralPrivateDnsZoneResourceIds needs a '$k' zone ID."
+      }
+    }
+  }
+
+  # ---- Existing deployment ----
+  Write-AvdSection 'Landing zone'
+  $present = @($lz.RgExists.Keys | Where-Object { $_ -ne 'Demo' -and $lz.RgExists[$_] })
+  if ($present.Count) { Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Use the same break-glass password as before.' }
+  else { Add-AvdCheckResult 'Landing zone' "Name '$($lz.BaseName)' is free in this subscription" 'Pass' }
+
+  # ---- Tenant readiness for after the deployment ----
+  if (-not $SkipTenant) {
+    Write-AvdSection 'Tenant (after deployment)'
+    if ($plan.enrollInIntune) {
+      $skusT = @(Invoke-AvdGraph -Uri 'v1.0/subscribedSkus')
+      $intune = @($skusT | ForEach-Object { $_.servicePlans } | Where-Object { $_.servicePlanName -like 'INTUNE_A*' -and $_.provisioningStatus -eq 'Success' })
+      if ($intune.Count) { Add-AvdCheckResult 'Entra ID' 'Intune licensing for host enrollment' 'Pass' }
+      else { Add-AvdCheckResult 'Entra ID' 'Intune licensing for host enrollment' 'Fail' -Detail 'enrollInIntune = true, but the tenant has no Intune plan; the session host join would fail.' -Remediation "Add 'param enrollInIntune = false' to $ParameterFile, or license Intune." }
+    }
+    $roles = @(Invoke-AvdGraph -Uri 'v1.0/me/memberOf/microsoft.graph.directoryRole?$select=displayName' | ForEach-Object displayName)
+    $consent = @('Global Administrator', 'Cloud Application Administrator', 'Application Administrator') | Where-Object { $roles -contains $_ }
+    $ca = @('Global Administrator', 'Conditional Access Administrator', 'Security Administrator') | Where-Object { $roles -contains $_ }
+    if ($consent) { Add-AvdCheckResult 'Entra ID' 'You can grant the storage app admin consent (step 1)' 'Pass' -Detail ($consent -join ', ') }
+    else { Add-AvdCheckResult 'Entra ID' 'You can grant the storage app admin consent (step 1)' 'Warn' -Detail 'No active Global / Cloud Application / Application Administrator role (PIM-eligible roles must be activated).' -Remediation 'Activate a role, or have an administrator run the post-deployment -Fix.' }
+    if ($ca) { Add-AvdCheckResult 'Entra ID' 'You can update Conditional Access (step 2)' 'Pass' -Detail ($ca -join ', ') }
+    else { Add-AvdCheckResult 'Entra ID' 'You can update Conditional Access (step 2)' 'Warn' -Detail 'No active Global / Conditional Access / Security Administrator role.' -Remediation 'Activate a role, or have an administrator run the post-deployment -Fix.' }
+    try {
+      $policies = @(Invoke-AvdGraph -Uri 'v1.0/identity/conditionalAccess/policies')
+      $groupIds = @($users.id, $admins.id) | Where-Object { $_ }
+      $needs = @($policies | Where-Object {
+          $_.state -ne 'disabled' -and (@($_.conditions.applications.includeApplications) -contains 'All') -and $_.grantControls -and
+          ((@($_.grantControls.builtInControls) -contains 'mfa') -or $_.grantControls.authenticationStrength) -and
+          ((@($_.conditions.users.includeUsers) -contains 'All') -or (@($_.conditions.users.includeGroups) | Where-Object { $groupIds -contains $_ }))
+        })
+      $detail = if ($needs.Count) { "After deployment the storage app must be excluded from: $(($needs.displayName) -join '; '). The post-deployment -Fix does this." } else { 'No MFA-for-all-apps policy covers AVD users.' }
+      Add-AvdCheckResult 'Entra ID' 'Conditional Access reviewed' 'Pass' -Detail $detail
+    }
+    catch { Add-AvdCheckResult 'Entra ID' 'Conditional Access reviewed' 'Warn' -Detail "Could not read policies: $($_.Exception.Message)" }
+  }
+
+  return [pscustomobject]@{ Plan = $plan; UsersGroup = $users; AdminsGroup = $admins }
 }
 
 Export-ModuleMember -Function *-Avd*
