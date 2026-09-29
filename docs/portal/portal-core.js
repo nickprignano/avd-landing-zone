@@ -17,6 +17,7 @@
 
   var STEPS = [
     { id: 'region', title: 'Choose a region' },
+    { id: 'size', title: 'Size and cost' },
     { id: 'predeploy', title: 'Pre-deployment preflight' },
     { id: 'deploy', title: 'Deploy the landing zone' },
     { id: 'postdeploy', title: 'Post-deployment setup' },
@@ -45,6 +46,64 @@
   function envFromFile(file) { var m = /parameters\/([a-z]+)\.bicepparam/.exec(file || ''); return m ? m[1] : null; }
   function repoDir(cfg) { return (cfg.repoUrl || DEFAULTS.repoUrl).replace(/\/+$/, '').split('/').pop(); }
 
+  // ---------------------------------------------------------------- sizing (decision 0010)
+  // Users per vCPU for Windows multi-session hosts, from Microsoft's session host sizing guidance.
+  // Suggested sizes are memory-optimised E-series: with many users on one host, memory runs out
+  // before CPU (8 GiB per vCPU, against 4 on D-series). Hosts use Premium SSD OS disks.
+  var WORKLOADS = {
+    light: { label: 'Light: a few line-of-business apps, data entry', usersPerVcpu: 6, suggestedSize: 'Standard_E4as_v5' },
+    medium: { label: 'Medium: Office, web, email', usersPerVcpu: 4, suggestedSize: 'Standard_E8as_v5' },
+    heavy: { label: 'Heavy: many apps at once, large files', usersPerVcpu: 2, suggestedSize: 'Standard_E8as_v5' },
+    power: { label: 'Power: developers, analysts, light graphics', usersPerVcpu: 1, suggestedSize: 'Standard_E16as_v5' }
+  };
+  // Sizes suited to multi-session hosts (vCPUs, memory in GiB), memory-optimised first.
+  var VM_SIZES = {
+    Standard_E4as_v5: { vcpu: 4, ramGiB: 32, recommended: true }, Standard_E8as_v5: { vcpu: 8, ramGiB: 64, recommended: true }, Standard_E16as_v5: { vcpu: 16, ramGiB: 128, recommended: true },
+    Standard_E4s_v5: { vcpu: 4, ramGiB: 32, recommended: true }, Standard_E8s_v5: { vcpu: 8, ramGiB: 64, recommended: true }, Standard_E16s_v5: { vcpu: 16, ramGiB: 128, recommended: true },
+    Standard_D4as_v5: { vcpu: 4, ramGiB: 16 }, Standard_D8as_v5: { vcpu: 8, ramGiB: 32 }, Standard_D16as_v5: { vcpu: 16, ramGiB: 64 },
+    Standard_D4s_v5: { vcpu: 4, ramGiB: 16 }, Standard_D8s_v5: { vcpu: 8, ramGiB: 32 }, Standard_D16s_v5: { vcpu: 16, ramGiB: 64 }
+  };
+  var OS_DISK = 'Premium SSD (P10, 128 GiB)';
+  // spareHost: true / false, or null for automatic (a spare in prod).
+  // One entry per host pool. The landing zone deploys one pooled host pool today; the list shape
+  // leaves room for more (each would get its own sizing and, later, its own deployment).
+  var HOST_POOL_DEFAULTS = { name: 'Pooled desktops', type: 'pooled', users: 50, concurrencyPercent: 80, workload: 'medium', vmSize: '', spareHost: null, profileGiBPerUser: 10, activeHoursPerWeek: 50 };
+  var MAX_HOST_POOLS = 1;
+
+  function num(v, d) { var n = Number(v); return isFinite(n) && n > 0 ? n : d; }
+
+  // Sizing for one host pool: hosts, sessions per host, vCPUs to request quota for, profile share size.
+  function computePool(spec, environment) {
+    var p = merge(HOST_POOL_DEFAULTS, spec || {}), notes = [];
+    var w = WORKLOADS[p.workload] || WORKLOADS.medium;
+    var vmSize = p.vmSize || w.suggestedSize, vm = VM_SIZES[vmSize];
+    if (!vm) { vmSize = w.suggestedSize; vm = VM_SIZES[vmSize]; notes.push('Unknown size; using ' + vmSize + '.'); }
+    var users = Math.round(num(p.users, 1));
+    var concurrent = Math.max(1, Math.ceil(users * Math.min(num(p.concurrencyPercent, 100), 100) / 100));
+    var sessionsPerHost = Math.max(1, vm.vcpu * w.usersPerVcpu);
+    var hosts = Math.ceil(concurrent / sessionsPerHost);
+    var spare = p.spareHost === true || p.spareHost === 'true' || (environment === 'prod' && p.spareHost !== false && p.spareHost !== 'false');
+    if (spare) { hosts += 1; notes.push('One spare host, so a host can be drained or fail without turning users away.'); }
+    if (environment === 'prod' && hosts < 2) { hosts = 2; notes.push('At least two hosts in prod (the Well-Architected review flags one).'); }
+    // Premium file shares are provisioned (minimum 100 GiB); 20% headroom over the expected profile sizes.
+    var profileQuotaGiB = Math.max(100, Math.ceil(users * num(p.profileGiBPerUser, 10) * 1.2 / 100) * 100);
+    // Too little memory per session: below 1 GiB on any size, below 1.5 GiB on a D-series (the
+    // preflight applies the same rule).
+    var ramPerSession = vm.ramGiB / sessionsPerHost, isE = /^Standard_E/.test(vmSize);
+    if (ramPerSession < 1 || (ramPerSession < 1.5 && !isE))
+      notes.push('Only ' + ramPerSession.toFixed(1) + ' GiB of memory per session. ' + (isE ? 'Use a larger E-series size.' : 'The memory-optimised ' + vmSize.replace(/^Standard_D/, 'Standard_E') + ' has twice the memory for the same vCPUs.'));
+    return {
+      name: p.name, workload: p.workload, users: users, concurrentUsers: concurrent, vmSize: vmSize, vcpuPerHost: vm.vcpu, ramGiBPerHost: vm.ramGiB,
+      memoryPerSessionGiB: Math.round(ramPerSession * 10) / 10, osDisk: OS_DISK,
+      sessionsPerHost: sessionsPerHost, hosts: hosts, vcpus: hosts * vm.vcpu, capacity: hosts * sessionsPerHost,
+      profileQuotaGiB: profileQuotaGiB, activeHoursPerWeek: Math.min(168, Math.round(num(p.activeHoursPerWeek, 50))), notes: notes
+    };
+  }
+
+  // What the commands pass: the sizing the portal computed, or the one a pasted preflight validated.
+  function toSizing(r) { return { hosts: r.hosts, vmSize: r.vmSize, maxSessions: r.sessionsPerHost, profileQuotaGiB: r.profileQuotaGiB, activeHoursPerWeek: r.activeHoursPerWeek }; }
+  function sized(cfg) { var s = cfg.sizing; return s && s.hosts && s.vmSize ? s : null; }
+
   // ---------------------------------------------------------------- commands
   // Every command is a self-contained Cloud Shell (PowerShell) block: sessions are ephemeral,
   // so each starts by cloning or updating the repo and moving into it (docs/lessons/0015).
@@ -57,14 +116,22 @@
   }
   function block(cfg, lines) { return preamble(cfg) + '\n' + lines.join('\n'); }
 
+  // Sizing flags, only once a sizing is set: the preflight validates and prices it, deploy.sh deploys it,
+  // and the post-deployment preflight checks quota for it.
+  var sizeArgs = {
+    predeploy: function (cfg) { var s = sized(cfg); return s ? ' -SessionHostCount ' + s.hosts + ' -SessionHostVmSize ' + s.vmSize + ' -MaxSessionLimit ' + s.maxSessions + ' -ProfileShareQuotaGiB ' + s.profileQuotaGiB + (s.activeHoursPerWeek ? ' -ActiveHoursPerWeek ' + s.activeHoursPerWeek : '') : ''; },
+    deploy: function (cfg) { var s = sized(cfg); return s ? ' --hosts ' + s.hosts + ' --vm-size ' + s.vmSize + ' --max-sessions ' + s.maxSessions + ' --profile-quota ' + s.profileQuotaGiB : ''; },
+    postdeploy: function (cfg) { var s = sized(cfg); return s ? ' -SessionHostVmSize ' + s.vmSize + ' -SessionHostCount ' + s.hosts : ''; }
+  };
+
   var cmd = {
     predeploy: function (cfg, fix) {
       return block(cfg, ['./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile ' + cfg.parameterFile +
-        ' -Location ' + cfg.location + ' -UsersGroup ' + psQuote(cfg.usersGroup) + ' -AdminsGroup ' + psQuote(cfg.adminsGroup) + (fix ? ' -Fix' : '')]);
+        ' -Location ' + cfg.location + ' -UsersGroup ' + psQuote(cfg.usersGroup) + ' -AdminsGroup ' + psQuote(cfg.adminsGroup) + sizeArgs.predeploy(cfg) + (fix ? ' -Fix' : '')]);
     },
     deploy: function (cfg) {
       return block(cfg, ['bash ./scripts/deploy/deploy.sh -p ' + cfg.parameterFile + ' -l ' + cfg.location +
-        ' --users-group ' + psQuote(cfg.usersGroup) + ' --admins-group ' + psQuote(cfg.adminsGroup)]);
+        ' --users-group ' + psQuote(cfg.usersGroup) + ' --admins-group ' + psQuote(cfg.adminsGroup) + sizeArgs.deploy(cfg)]);
     },
     deployStatus: function (cfg, name) {
       var n = name ? psQuote(name) : "(az deployment sub list --query \"sort_by([?starts_with(name,'avdlz-')], &properties.timestamp)[-1].name\" -o tsv)";
@@ -76,7 +143,7 @@
     },
     postdeploy: function (cfg, fix) {
       return block(cfg, ['./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
-        (fix ? ' -Fix -AllowHostStart' : '')]);
+        sizeArgs.postdeploy(cfg) + (fix ? ' -Fix -AllowHostStart' : '')]);
     },
     wellArchitected: function (cfg) {
       return block(cfg, ['./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
@@ -359,7 +426,8 @@
     if (state && state.context) cfg = merge(cfg, state.context);
     if (state && state.context && state.context.parameterFile && !state.context.environment) cfg.environment = envFromFile(state.context.parameterFile) || cfg.environment;
 
-    var result = { recognised: !!state || problems.length > 0, source: source, problems: problems, config: cfg, failures: [], warnings: [], actions: [], stage: null, status: null, headline: '', step: options.currentStep || null };
+    var result = { recognised: !!state || problems.length > 0, source: source, problems: problems, config: cfg, failures: [], warnings: [], actions: [], stage: null, status: null, headline: '', step: options.currentStep || null,
+      estimate: (state && state.context && state.context.estimate) || null, sizing: (state && state.context && state.context.sizing) || null };
     if (state) {
       var d = decide(state, cfg, { text: text, rankedRegions: options.rankedRegions });
       result.stage = state.stage; result.status = state.stage === 'cleanup' && state.status === 'ready' ? 'done' : state.status;
@@ -407,6 +475,8 @@
     var cfg = merge(DEFAULTS, config);
     switch (step) {
       case 'region': return [{ title: 'Measure latency from where your users work', why: 'Run the test below from your users\' network (not over a VPN), then use the closest region. The preflight confirms the region offers AVD host pools.', command: '' }];
+      case 'size': return [{ title: 'Size the host pool', why: 'Enter how many people will use it and how they work, below. The commands then check quota and availability for that size, and the pre-deployment preflight prices it for ' + cfg.location + ' at Azure list prices.', command: '' },
+        firstStep(cfg)];
       case 'predeploy': return [firstStep(cfg)];
       case 'deploy': return [{ title: 'Deploy the landing zone', why: 'Run this once the pre-deployment preflight is Ready. It takes 30-45 minutes and keeps running in Azure if Cloud Shell disconnects.', command: cmd.deploy(cfg) },
         { title: 'Already started? Check on it', why: 'Shows the latest deployment and any failed resources.', command: cmd.deployStatus(cfg) }];
@@ -418,5 +488,5 @@
     }
   }
 
-  return { STEPS: STEPS, DEFAULTS: DEFAULTS, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
+  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, computePool: computePool, toSizing: toSizing, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
 });

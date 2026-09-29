@@ -29,17 +29,20 @@ param sessionHostSubnetPrefix = '10.100.0.0/23'
 param privateEndpointSubnetPrefix = '10.100.2.0/27'
 
 // ---- Session hosts ----
-param sessionHostCount = 4
-param sessionHostVmSize = 'Standard_D4as_v5'
+// Sizing: the deployment portal's sizing step, deploy.sh (--hosts, --vm-size, --max-sessions,
+// --profile-quota) and the pre-deployment preflight override these through AVD_SESSION_HOST_COUNT,
+// AVD_SESSION_HOST_VM_SIZE, AVD_MAX_SESSION_LIMIT and AVD_PROFILE_QUOTA_GIB (empty = the value here).
+param sessionHostCount = empty(readEnvironmentVariable('AVD_SESSION_HOST_COUNT', '')) ? 4 : int(readEnvironmentVariable('AVD_SESSION_HOST_COUNT', ''))
+param sessionHostVmSize = empty(readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')) ? 'Standard_E4as_v5' : readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')
 // Regional hosts work in every region (North Central US has no zones) and profiles
 // use locally redundant storage. For zone redundancy, use a zonal region (e.g.
 // centralus) with availabilityZones = [1, 2, 3] and profileStorageSku = 'Premium_ZRS'.
 param availabilityZones = []
-param maxSessionLimit = 8
+param maxSessionLimit = empty(readEnvironmentVariable('AVD_MAX_SESSION_LIMIT', '')) ? 8 : int(readEnvironmentVariable('AVD_MAX_SESSION_LIMIT', ''))
 
 // ---- Profiles ----
 param profileStorageSku = 'Premium_LRS'
-param profileShareQuotaGiB = 1024
+param profileShareQuotaGiB = empty(readEnvironmentVariable('AVD_PROFILE_QUOTA_GIB', '')) ? 1024 : int(readEnvironmentVariable('AVD_PROFILE_QUOTA_GIB', ''))
 param enableProfileBackup = true
 param profileBackupRetentionDays = 30
 

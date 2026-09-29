@@ -44,6 +44,8 @@ Without Pester, run an offline scenario directly: `pwsh -File tests/offline/Post
 
 - **Well-Architected findings (`-WellArchitected`) are warnings, never failures,** and each carries `waf-<check>` with `data.pillar`/`data.accepted`. A new check reads through REST, gets a mock response in `AzMock.psm1` and an assertion in the WellArchitected scenario. (decision 0009)
 
+- **Sizing flows through `AVD_SESSION_HOST_COUNT`, `AVD_SESSION_HOST_VM_SIZE`, `AVD_MAX_SESSION_LIMIT`, `AVD_PROFILE_QUOTA_GIB`** (parameter files with `empty()` guards, `deploy.sh` flags, preflight parameters, portal commands). A cost line must match exactly one retail price meter, or be reported with the meters it saw; never guess a price. Session hosts default to memory-optimised E-series (`Standard_E4as_v5`) on Premium SSD; a change of size on an existing landing zone must be warned about, not applied silently. (decision 0010)
+
 ## Git and PRs
 - Work on the designated branch; open PRs only when asked. The PR template asks for a Lessons section.
 - **Before resetting the branch to `origin/master`, check that no open PR still needs it:** `git merge-base --is-ancestor origin/<branch> origin/master` must succeed. Otherwise build on the branch. (0017)

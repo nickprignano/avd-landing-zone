@@ -17,7 +17,12 @@
     Entra ID       the AVD Users/Admins security groups and the Azure Virtual
                    Desktop service principal exist; groups have members
     Parameters     the .bicepparam compiles; effective values are shown.
-                   -Location overrides the region (AVD_LOCATION)
+                   -Location overrides the region (AVD_LOCATION); -SessionHostCount,
+                   -SessionHostVmSize, -MaxSessionLimit and -ProfileShareQuotaGiB
+                   override the sizing (the deployment portal's sizing step)
+    Sizing, cost   capacity (hosts x sessions, vCPUs), sessions per vCPU against
+                   Microsoft's multi-session guidance, and a monthly estimate at
+                   Azure list prices for the region (-ActiveHoursPerWeek)
     Subscription   your RBAC (incl. policy rights when guardrails are on),
                    resource providers, AVD host pools offered in the region,
                    EncryptionAtHost feature, VM size in
@@ -79,13 +84,22 @@ param(
   [Parameter(ParameterSetName = 'PreDeployment')][ValidatePattern('^[a-z0-9]+$')][string] $Location,
   # Add the signed-in user to both groups (the desktop, plus admin sign-in to the hosts).
   [Parameter(ParameterSetName = 'PreDeployment')][switch] $AddMeToGroups,
+  # Desired sizing (from the deployment portal's sizing step): overrides the parameter file for the
+  # checks and the cost estimate, the way deploy.sh --max-sessions / --profile-quota do for the deployment.
+  [Parameter(ParameterSetName = 'PreDeployment')][ValidateRange(1, 1000)][int] $MaxSessionLimit,
+  [Parameter(ParameterSetName = 'PreDeployment')][ValidateRange(100, 102400)][int] $ProfileShareQuotaGiB,
+  # Hours per week each host runs (the scaling plan stops hosts outside use), for the cost estimate.
+  [Parameter(ParameterSetName = 'PreDeployment')][ValidateRange(1, 168)][int] $ActiveHoursPerWeek = 50,
 
   # ---- Post-deployment ----
   [Parameter(Mandatory, ParameterSetName = 'PostDeployment')][ValidateLength(2, 8)][string] $NamePrefix,
   [Parameter(Mandatory, ParameterSetName = 'PostDeployment')][ValidateSet('dev', 'test', 'prod')][string] $Environment,
-  # Size and count to check quota for.
-  [Parameter(ParameterSetName = 'PostDeployment')][string] $SessionHostVmSize = 'Standard_D4as_v5',
-  [Parameter(ParameterSetName = 'PostDeployment')][int] $SessionHostCount = 1,
+  # Size and count to check quota for. Before deployment they override the parameter file (deploy.sh --vm-size / --hosts);
+  # after it, the size defaults to the deployed hosts' size.
+  [Parameter(ParameterSetName = 'PreDeployment')]
+  [Parameter(ParameterSetName = 'PostDeployment')][ValidatePattern('^Standard_[A-Za-z0-9_]+$')][string] $SessionHostVmSize,
+  [Parameter(ParameterSetName = 'PreDeployment')]
+  [Parameter(ParameterSetName = 'PostDeployment')][ValidateRange(0, 200)][int] $SessionHostCount = 1,
   # NTFS check: pick the host, or allow starting a stopped one (it is stopped again afterwards).
   [Parameter(ParameterSetName = 'PostDeployment')][string] $NtfsHostName,
   [Parameter(ParameterSetName = 'PostDeployment')][switch] $AllowHostStart,
@@ -115,7 +129,12 @@ Clear-AvdCheckResult
 if ($PreDeployment) {
   if (-not (Test-Path $ParameterFile)) { throw "Parameter file not found: $ParameterFile" }
   Write-Host "AVD landing zone PRE-DEPLOYMENT preflight - $ParameterFile in '$($ctx.Subscription.Name)'$(if ($Fix) { ' (FIX mode)' })" -ForegroundColor White
-  $pre = @{ ParameterFile = $ParameterFile; UsersGroup = $UsersGroup; AdminsGroup = $AdminsGroup; Location = $Location; Fix = $Fix; AddMeToGroups = $AddMeToGroups; SkipTenant = $SkipTenant; WhatIf = $WhatIfPreference }
+  # Only the sizing values given on the command line override the parameter file.
+  $sizing = @{}
+  foreach ($p in @(@('SessionHostCount', 'hosts'), @('SessionHostVmSize', 'vmSize'), @('MaxSessionLimit', 'maxSessions'), @('ProfileShareQuotaGiB', 'profileQuotaGiB'))) {
+    if ($PSBoundParameters.ContainsKey($p[0])) { $sizing[$p[1]] = $PSBoundParameters[$p[0]] }
+  }
+  $pre = @{ ParameterFile = $ParameterFile; UsersGroup = $UsersGroup; AdminsGroup = $AdminsGroup; Location = $Location; Fix = $Fix; AddMeToGroups = $AddMeToGroups; SkipTenant = $SkipTenant; WhatIf = $WhatIfPreference; Sizing = $sizing; ActiveHoursPerWeek = $ActiveHoursPerWeek }
   if ($Force) { $pre.Confirm = $false }
   $outcome = Test-AvdPreDeployment @pre
 }
@@ -155,6 +174,11 @@ if ($PreDeployment) {
     namePrefix    = $(if ($plan) { $plan.namePrefix } else { $null })
     environment   = $(if ($plan) { $plan.environmentName } else { $null })
   }
+  # The sizing that was validated (when the command set it), and the estimate, for the portal.
+  if ($plan -and $sizing.Count) {
+    $portalContext.sizing = [ordered]@{ hosts = [int]$plan.sessionHostCount; vmSize = $plan.sessionHostVmSize; maxSessions = [int]$plan.maxSessionLimit; profileQuotaGiB = [int]$plan.profileShareQuotaGiB; activeHoursPerWeek = $ActiveHoursPerWeek }
+  }
+  if ($outcome -and $outcome.Estimate) { $portalContext.estimate = $outcome.Estimate }
   $portalState = Get-AvdPortalState -Stage predeploy -Fix:$Fix -Context $portalContext
 }
 else {
@@ -171,7 +195,8 @@ if ($PreDeployment -and $outcome -and $outcome.Plan) {
   $a = if ($outcome.AdminsGroup) { $outcome.AdminsGroup.displayName } else { $AdminsGroup }
   Write-Host ''
   Write-Host 'Next, deploy the landing zone as a separate run:' -ForegroundColor White
-  Write-Host "  bash ./scripts/deploy/deploy.sh -p $ParameterFile -l $($outcome.Plan.location) --users-group '$u' --admins-group '$a'"
+  $sizeFlags = if ($sizing.Count) { " --hosts $($outcome.Plan.sessionHostCount) --vm-size $($outcome.Plan.sessionHostVmSize) --max-sessions $($outcome.Plan.maxSessionLimit) --profile-quota $($outcome.Plan.profileShareQuotaGiB)" } else { '' }
+  Write-Host "  bash ./scripts/deploy/deploy.sh -p $ParameterFile -l $($outcome.Plan.location) --users-group '$u' --admins-group '$a'$sizeFlags"
   Write-Host 'Then run the post-deployment preflight:' -ForegroundColor White
   Write-Host "  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix $($outcome.Plan.namePrefix) -Environment $($outcome.Plan.environmentName) -Fix"
 }

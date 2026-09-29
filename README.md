@@ -10,7 +10,7 @@ It is deliberately *not* a general-purpose accelerator. Microsoft's [AVD Landing
 |------|-----------------|----------------|
 | **Identity** | Session hosts Entra ID-joined and Intune-enrolled; Entra SSO; VM User/Admin Login RBAC; break-glass local admin stored in Key Vault | No AD DS or Entra Domain Services to run; devices managed like every other endpoint |
 | **Profiles** | Premium Azure Files (ZRS) with **Entra Kerberos**, shared-key access disabled, SMB 3.1.1 + AES-256, private endpoint, share RBAC, soft delete, **Azure Backup** | FSLogix without storage keys, domain joins or a management VM |
-| **Session hosts** | Trusted Launch (Secure Boot + vTPM), encryption at host, zone-spread, Windows 11 24H2 multi-session + M365, AMA + AVD Insights, Guest Configuration | Secure by default; registered and FSLogix-configured **declaratively** by managed Run Commands |
+| **Session hosts** | Memory-optimised E-series on Premium SSD (sized per workload in the portal), Trusted Launch (Secure Boot + vTPM), encryption at host, zone-spread, Windows 11 24H2 multi-session + M365, AMA + AVD Insights, Guest Configuration | Secure by default; registered and FSLogix-configured **declaratively** by managed Run Commands |
 | **Control plane** | Pooled host pool with **AVD Private Link** for session hosts, Start VM on Connect, scheduled agent updates, hardened RDP properties, weekday/weekend autoscale | Hosts reach AVD privately; idle cost is scaled away |
 | **Network** | Spoke with **no default outbound access**: NAT Gateway (standalone) or hub firewall (hub-peered, peering created both ways); NSG on the private endpoint subnet; private DNS | Egress is always explicit, which suits the retirement of Azure's default outbound access |
 | **Operations** | Log Analytics, AVD Insights DCR, diagnostics on every resource, alerts (unhealthy hosts, FSLogix errors, connection errors, Service Health), activity log export | Day-2 visibility from day 1 |
@@ -22,7 +22,7 @@ Everything is built from pinned [Azure Verified Modules](https://aka.ms/avm).
 
 ## Quick start
 
-**Easiest path: the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/).** It picks the closest region by measuring latency from your browser, gives you each command to paste into Cloud Shell, and reads the output you paste back to tell you what to run next, all the way to signing in. Pasted output never leaves your browser. If you get stuck, **Report a problem** turns the output into a GitHub issue, with private details removed in your browser first.
+**Easiest path: the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/).** It picks the closest region by measuring latency from your browser, sizes the host pool from how many people use it (and the preflight prices that at Azure list prices for the region), gives you each command to paste into Cloud Shell, and reads the output you paste back to tell you what to run next, all the way to signing in. Pasted output never leaves your browser. If you get stuck, **Report a problem** turns the output into a GitHub issue, with private details removed in your browser first.
 
 Prerequisites (details in [`docs/deploy.md`](docs/deploy.md)):
 - A **dedicated subscription** where you are Owner, plus Azure CLI ≥ 2.65.

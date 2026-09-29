@@ -45,3 +45,22 @@ Describe 'Region override' {
     (& $script:bicep build-params 'parameters/dev.bicepparam' --stdout | ConvertFrom-Json).parametersJson | Should -Match '"location":\s*\{\s*"value":\s*"northcentralus"'
   }
 }
+
+Describe 'Sizing overrides' {
+  # The deployment portal's sizing step passes these through deploy.sh and the preflight.
+  # Set-but-empty must fall back to the file's value (docs/lessons/0004).
+  It 'takes host count, size, sessions and profile quota from the environment, and defaults when empty' {
+    foreach ($file in 'parameters/dev.bicepparam', 'parameters/prod.bicepparam') {
+      $env:AVD_SESSION_HOST_COUNT = '3'; $env:AVD_SESSION_HOST_VM_SIZE = 'Standard_D8as_v5'; $env:AVD_MAX_SESSION_LIMIT = '16'; $env:AVD_PROFILE_QUOTA_GIB = '600'
+      try { $p = ((& $script:bicep build-params $file --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters }
+      finally { $env:AVD_SESSION_HOST_COUNT = ''; $env:AVD_SESSION_HOST_VM_SIZE = ''; $env:AVD_MAX_SESSION_LIMIT = ''; $env:AVD_PROFILE_QUOTA_GIB = '' }
+      $p.sessionHostCount.value | Should -Be 3
+      $p.sessionHostVmSize.value | Should -Be 'Standard_D8as_v5'
+      $p.maxSessionLimit.value | Should -Be 16
+      $p.profileShareQuotaGiB.value | Should -Be 600
+      $d = ((& $script:bicep build-params $file --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters
+      $d.sessionHostVmSize.value | Should -Be 'Standard_E4as_v5'   # memory-optimised default for multi-session
+      $d.maxSessionLimit.value | Should -Be 8
+    }
+  }
+}

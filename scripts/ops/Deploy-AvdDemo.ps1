@@ -39,7 +39,8 @@ param(
   [Parameter(Mandatory)][ValidateSet('dev', 'test', 'prod')][string] $Environment,
   [string] $SubscriptionId,
 
-  [string] $SessionHostVmSize = 'Standard_D4as_v5',
+  # Empty: the same size as the landing zone's session hosts (memory-optimised E-series by default).
+  [string] $SessionHostVmSize,
   [ValidateRange(1, 5)][int] $SessionHostCount = 1,
   [int[]] $AvailabilityZones = @(),
   [bool] $EnrollInIntune = $true,
@@ -88,6 +89,10 @@ if ($missing.Count) {
 # ---------------------------------------------------------------------
 # 2. Preflight
 # ---------------------------------------------------------------------
+if (-not $SessionHostVmSize) {
+  $SessionHostVmSize = Get-AvdHostVmSize -Lz $lz
+  if (-not $SessionHostVmSize) { $SessionHostVmSize = 'Standard_E4as_v5' }
+}
 if (-not $SkipPreflight) {
   Invoke-AvdReadinessCheck -Lz $lz -VmSize $SessionHostVmSize -VmCount $SessionHostCount -SkipNtfs
   $pre = Write-AvdSummary
