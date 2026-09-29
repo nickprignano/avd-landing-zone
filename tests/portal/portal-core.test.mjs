@@ -428,3 +428,11 @@ test('page: one slide per step, in order, and the latency check comes first', ()
   const region = html.slice(html.indexOf('data-step="region"'), html.indexOf('data-step="size"'));
   assert.match(region, /id="run"/, 'the latency test is in the first step');
 });
+
+test('page: Deployment settings opens from a link in the header, above the steps', () => {
+  const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
+  const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+  assert.match(header, /id="settings-link"[^>]*aria-controls="settings-panel"/);
+  assert.ok(html.indexOf('id="settings-panel"') < html.indexOf('id="steps"'), 'settings panel sits under the header');
+  assert.ok(html.indexOf('id="settings-panel"') < html.indexOf('id="report-panel"'));
+});
