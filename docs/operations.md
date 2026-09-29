@@ -168,6 +168,8 @@ With `-IncludeLandingZone`, you must type the landing zone name to confirm (`-Fo
 4. **The landing zone hosts' device objects.**
 5. **Defender plans**, set back to Free, only with `-ResetDefender`.
 
+**Another landing zone in the subscription** (for example `parameters/test.bicepparam` beside dev, [demo.md](demo.md)) keeps what it still uses. The cleanup skips the policy assignments, keeps an activity log export that sends to the other landing zone's workspace, and removes only this landing zone's deployment records.
+
 The Key Vault stays soft-deleted under purge protection for 90 days. To redeploy with the same prefix, run the pre-deployment preflight with `-Fix`, which recovers it.
 
 ## Auto shutdown

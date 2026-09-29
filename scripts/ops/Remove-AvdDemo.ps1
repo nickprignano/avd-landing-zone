@@ -20,6 +20,8 @@
     - resource groups hosts, avd, storage, management, network (in that order)
     - policy assignments avdlz-* and their role assignments, the budget,
       the activity-log diagnostic setting, avdlz-* deployment records
+      (with another landing zone in the subscription, only this one's budget,
+      deployment records and an activity-log export to its own workspace)
     - Entra ID / Intune device objects of the landing zone hosts
     - -ResetDefender also sets the Defender plans the landing zone enabled back to Free
 
@@ -165,8 +167,13 @@ foreach ($k in 'Hosts', 'ControlPlane', 'Storage', 'Management', 'Network') {
 }
 
 Write-AvdSection 'Subscription-level resources'
+# Another landing zone in the subscription (e.g. test beside dev, docs/demo.md) still relies on the
+# subscription-wide pieces, so only this landing zone's own are removed then.
+$others = @(Find-AvdLandingZone | Where-Object { "$($_.NamePrefix)-$($_.Environment)" -ne $lz.BaseName } | ForEach-Object { "$($_.NamePrefix)-$($_.Environment)" })
+$keptFor = "Kept: landing zone $($others -join ', ') still uses it."
 $assignments = Invoke-AvdArm -Path "$sub/providers/Microsoft.Authorization/policyAssignments?api-version=2024-04-01&`$filter=atScope()"
 foreach ($pa in @($assignments.value | Where-Object name -like 'avdlz-*')) {
+  if ($others.Count) { Add-AvdCheckResult 'Subscription' "Policy assignment $($pa.name)" 'Skip' -Detail $keptFor; continue }
   if (-not $PSCmdlet.ShouldProcess("policy assignment $($pa.name)", 'Delete (and its role assignments)')) { continue }
   if ($pa.identity -and $pa.identity.principalId) {
     Get-AzRoleAssignment -ObjectId $pa.identity.principalId -Scope $sub -ErrorAction SilentlyContinue |
@@ -183,12 +190,21 @@ if ((Invoke-AvdArm -Path $budgetPath -AllowNotFound) -and $PSCmdlet.ShouldProces
 }
 
 $diagPath = "$sub/providers/Microsoft.Insights/diagnosticSettings/avdlz-activity-log?api-version=2021-05-01-preview"
-if ((Invoke-AvdArm -Path $diagPath -AllowNotFound) -and $PSCmdlet.ShouldProcess('avdlz-activity-log', 'Delete activity log diagnostic setting')) {
+$diag = Invoke-AvdArm -Path $diagPath -AllowNotFound
+# The export belongs to the landing zone whose workspace it sends to; one sending to this landing
+# zone's (deleted) workspace goes even when another landing zone remains.
+$diagIsOurs = $diag -and ([string]$diag.properties.workspaceId) -match "/resourceGroups/rg-$([regex]::Escape($lz.BaseName))-"
+if ($diag -and $others.Count -and -not $diagIsOurs) { Add-AvdCheckResult 'Subscription' 'Activity log diagnostic setting' 'Skip' -Detail $keptFor }
+elseif ($diag -and $PSCmdlet.ShouldProcess('avdlz-activity-log', 'Delete activity log diagnostic setting')) {
   Invoke-AvdArm -Method DELETE -Path $diagPath | Out-Null
   Add-AvdCheckResult 'Subscription' 'Activity log diagnostic setting' 'Fixed' -Detail 'Deleted.'
 }
 
-foreach ($d in @(Get-AzDeployment -ErrorAction SilentlyContinue | Where-Object DeploymentName -like 'avdlz-*')) {
+# Deployment records: this landing zone's own when another remains (deploy.sh names them
+# avdlz-<parameter file>-<time>; module deployments carry <prefix>-<env>), otherwise every avdlz-* record.
+$records = @(Get-AzDeployment -ErrorAction SilentlyContinue | Where-Object DeploymentName -like 'avdlz-*')
+if ($others.Count) { $records = @($records | Where-Object { $_.DeploymentName -like "*$($lz.BaseName)*" -or $_.DeploymentName -like "avdlz-$($lz.Environment)-*" }) }
+foreach ($d in $records) {
   if ($PSCmdlet.ShouldProcess($d.DeploymentName, 'Delete deployment record')) {
     Remove-AzDeployment -Name $d.DeploymentName | Out-Null
     Add-AvdCheckResult 'Subscription' "Deployment record $($d.DeploymentName)" 'Fixed' -Detail 'Deleted.'

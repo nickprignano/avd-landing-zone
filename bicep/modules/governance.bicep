@@ -12,6 +12,8 @@ param location string
 param baseName string
 param logAnalyticsWorkspaceResourceId string
 param enablePolicyGuardrails bool
+@description('Export the subscription activity log to the workspace (one landing zone per subscription does).')
+param deployActivityLog bool = true
 param allowedLocations string[]
 param enableDefenderForCloud bool
 param monthlyBudgetAmount int
@@ -184,7 +186,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = if (deployBudget) {
 }
 
 // ---------- Activity log -> Log Analytics ----------
-resource activityLog 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+resource activityLog 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployActivityLog) {
   name: 'avdlz-activity-log'
   properties: {
     workspaceId: logAnalyticsWorkspaceResourceId

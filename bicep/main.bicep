@@ -221,6 +221,9 @@ param autoShutdownRunbookUri string = 'https://raw.githubusercontent.com/nickpri
 @description('Enable Microsoft Defender for Cloud plans (Servers P2, Storage, Key Vault) on the subscription.')
 param enableDefenderForCloud bool = true
 
+@description('Deploy the subscription-wide pieces: the policy guardrails (when enablePolicyGuardrails) and the activity log export. One landing zone per subscription owns them; a second one beside it (parameters/test.bicepparam) sets this to false.')
+param deploySubscriptionSettings bool = true
+
 @description('Assign the landing zone\'s Azure Policy guardrails (allowed locations, tag inheritance) to the subscription.')
 param enablePolicyGuardrails bool = true
 
@@ -318,7 +321,8 @@ module governance 'modules/governance.bicep' = {
     location: location
     baseName: baseName
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
-    enablePolicyGuardrails: enablePolicyGuardrails
+    enablePolicyGuardrails: enablePolicyGuardrails && deploySubscriptionSettings
+    deployActivityLog: deploySubscriptionSettings
     allowedLocations: allowedLocations
     enableDefenderForCloud: enableDefenderForCloud
     monthlyBudgetAmount: monthlyBudgetAmount
