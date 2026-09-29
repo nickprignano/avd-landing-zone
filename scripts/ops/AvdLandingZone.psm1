@@ -1699,6 +1699,61 @@ function Test-AvdSizing {
   return $estimate
 }
 
+function Test-AvdDeletedKeyVault {
+  <#
+    A soft-deleted, purge-protected Key Vault keeps the landing zone's vault name (prefix,
+    environment and a hash of subscription and region) for 90 days after a cleanup. -Fix
+    recovers it into its original resource group, creating the group again if the cleanup
+    removed it; the deployment then adopts the vault and the name prefix can stay.
+  #>
+  [CmdletBinding(SupportsShouldProcess)]
+  param([Parameter(Mandatory)] $Lz, [Parameter(Mandatory)][string] $Location, [switch] $Fix)
+  $area = 'Subscription'; $check = 'No soft-deleted Key Vault blocking the vault name'
+  $sub = "/subscriptions/$($Lz.SubscriptionId)"
+  $kvPrefix = "kv$($Lz.NamePrefix)$($Lz.Environment)"
+  $deleted = @(Get-AvdArmList -Path "$sub/providers/Microsoft.KeyVault/deletedVaults?api-version=2023-07-01" |
+      Where-Object { $_ -and $_.name -like "$kvPrefix*" -and $_.properties.location -eq $Location })
+  if (-not $deleted.Count) { Add-AvdCheckResult $area $check 'Pass'; return }
+
+  $names = @($deleted.name)
+  $fail = @{ Id = 'kv-softdeleted'; Data = @{ vaults = $names } }
+  $detail = "Deleted, purge-protected: $($names -join ', ')"
+  if ($deleted.Count -gt 1) {
+    Add-AvdCheckResult $area $check 'Fail' @fail -Detail $detail -Remediation 'Recover the one to keep with Undo-AzKeyVaultRemoval, or change namePrefix.'
+    return
+  }
+  $v = $deleted[0]; $vaultId = $v.properties.vaultId; $rg = ($vaultId -split '/')[4]
+  if (-not $Fix -or -not $PSCmdlet.ShouldProcess($v.name, "Recover the soft-deleted Key Vault into $rg")) {
+    Add-AvdCheckResult $area $check 'Fail' @fail -Detail $detail -Remediation "Rerun with -Fix to recover it into $rg (the deployment reuses it), or change namePrefix."
+    return
+  }
+
+  Write-Host "  Recovering Key Vault $($v.name) into $rg (up to 2 minutes)..." -ForegroundColor DarkGray
+  try {
+    # Recovery needs the original resource group; the cleanup deleted it with the vault.
+    if (-not (Get-AzResourceGroup -Name $rg -ErrorAction SilentlyContinue)) {
+      Invoke-AvdArm -Method PUT -Path "$sub/resourcegroups/$($rg)?api-version=2021-04-01" -Body @{ location = $Location } | Out-Null
+    }
+    Invoke-AvdArm -Method PUT -Path "$($vaultId)?api-version=2023-07-01" -Body @{
+      location   = $v.properties.location
+      properties = @{ tenantId = $Lz.TenantId; sku = @{ family = 'A'; name = 'standard' }; createMode = 'recover' }
+    } | Out-Null
+    # "Fixed" means the vault is back, not that the request was accepted.
+    $state = $null
+    for ($i = 0; $i -lt 24; $i++) {
+      $kv = Invoke-AvdArm -Path "$($vaultId)?api-version=2023-07-01" -AllowNotFound
+      $state = if ($kv) { $kv.properties.provisioningState } else { 'not found' }
+      if ($state -eq 'Succeeded') { break }
+      Start-Sleep -Seconds 5
+    }
+    if ($state -eq 'Succeeded') { Add-AvdCheckResult $area $check 'Fixed' -Detail "Recovered $($v.name) into $rg; the deployment reuses it." }
+    else { Add-AvdCheckResult $area $check 'Fail' @fail -Detail "Recovery of $($v.name) requested; the vault is still $state after 2 minutes." -Remediation 'Rerun the preflight in a few minutes.' }
+  }
+  catch {
+    Add-AvdCheckResult $area $check 'Fail' @fail -Detail "Recovering $($v.name) into $rg failed: $($_.Exception.Message)" -Remediation 'Recover it with Undo-AzKeyVaultRemoval, or change namePrefix.'
+  }
+}
+
 function Test-AvdPreDeployment {
   <# Everything the landing zone deployment needs, checked against the effective parameters. #>
   [CmdletBinding(SupportsShouldProcess)]
@@ -1790,13 +1845,7 @@ function Test-AvdPreDeployment {
   if ($fileSku -and -not $skuBlocked) { Add-AvdCheckResult 'Subscription' "$($plan.profileStorageSku) file shares available in $($plan.location)" 'Pass' }
   else { Add-AvdCheckResult 'Subscription' "$($plan.profileStorageSku) file shares available in $($plan.location)" 'Fail' -Remediation "Set profileStorageSku = 'Premium_LRS', or choose a region with Premium ZRS file shares." }
 
-  # Soft-deleted Key Vault that would block the deterministic vault name
-  $kvPrefix = "kv$($lz.NamePrefix)$($lz.Environment)"
-  $deleted = @(Get-AzKeyVault -InRemovedState -ErrorAction SilentlyContinue | Where-Object { $_.VaultName -like "$kvPrefix*" -and $_.Location -eq $plan.location })
-  if ($deleted.Count) {
-    Add-AvdCheckResult 'Subscription' 'No soft-deleted Key Vault blocking the vault name' 'Fail' -Id 'kv-softdeleted' -Data @{ vaults = @($deleted.VaultName) } -Detail "Deleted, purge-protected: $($deleted.VaultName -join ', ')" -Remediation 'Recover it (Undo-AzKeyVaultRemoval) and redeploy into it, or change namePrefix.'
-  }
-  else { Add-AvdCheckResult 'Subscription' 'No soft-deleted Key Vault blocking the vault name' 'Pass' }
+  Test-AvdDeletedKeyVault -Lz $lz -Location $plan.location -Fix:$Fix
 
   # Budget parameters are skipped silently by the template if incomplete; say so here.
   if ($plan.monthlyBudgetAmount -gt 0 -and (-not $plan.budgetStartDate -or -not @($plan.alertEmailAddresses).Count)) {

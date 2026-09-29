@@ -20,7 +20,8 @@ $vnetId="$S/resourceGroups/rg-avdlz-dev-network/providers/Microsoft.Network/virt
 
 function Get-AzContext { [pscustomobject]@{ Subscription=[pscustomobject]@{Id=$sub;Name='AVD LZ Dev'}; Tenant=[pscustomobject]@{Id='tenant-1'}; Environment=[pscustomobject]@{StorageEndpointSuffix='core.windows.net'} } }
 function Set-AzContext { param($SubscriptionId,$ErrorAction) Get-AzContext }
-function Get-AzResourceGroup { param($Name,$ErrorAction) $list = $global:St.rgs | % { [pscustomobject]@{ResourceGroupName=$_;Location='eastus2'} }; if ($Name) { $list | ? ResourceGroupName -eq $Name } else { $list } }
+# Resource groups are in eastus2 unless created in the scenario with a location ($global:St.rgLocations).
+function Get-AzResourceGroup { param($Name,$ErrorAction) $list = $global:St.rgs | % { [pscustomobject]@{ResourceGroupName=$_;Location=$(if ($global:St.rgLocations -and $global:St.rgLocations[$_]) { $global:St.rgLocations[$_] } else { 'eastus2' })} }; if ($Name) { $list | ? ResourceGroupName -eq $Name } else { $list } }
 function Get-AzResource {
   param($ResourceGroupName,$ResourceType,$Name,$ResourceId,[switch]$ExpandProperties,$ErrorAction)
   if ($ResourceId) { return [pscustomobject]@{ Tags=$global:St.power.hpTags; Properties=[pscustomobject]@{publicNetworkAccess='EnabledForClientsOnly'} } }
@@ -41,6 +42,28 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   Log "ARM $Method $Path"
   $ok = { param($o) [pscustomobject]@{StatusCode=200;Content=($o|ConvertTo-Json -Depth 20)} }
   if ($Method -eq 'POST' -and $Path -match '/providers/([^/?]+)/register') { $global:St.registered += $Matches[1]; return & $ok @{} }
+  # Soft-deleted Key Vaults ($global:St.deletedVaults: VaultName, Location, ResourceGroup) and their
+  # recovery, which (as in Azure) needs the original resource group to exist.
+  if ($Path -match '/providers/Microsoft.KeyVault/deletedVaults\?') {
+    return & $ok @{ value = @($global:St.deletedVaults | ForEach-Object { @{ name = $_.VaultName; properties = @{ location = $_.Location; purgeProtectionEnabled = $true
+            vaultId = "$S/resourceGroups/$($_.ResourceGroup)/providers/Microsoft.KeyVault/vaults/$($_.VaultName)" } } }) }
+  }
+  if ($Method -eq 'PUT' -and $Path -match '^/subscriptions/[^/]+/resourcegroups/([^/?]+)\?') {
+    if (-not $global:St.rgLocations) { $global:St.rgLocations = @{} }
+    $global:St.rgs = @($global:St.rgs) + $Matches[1]; $global:St.rgLocations[$Matches[1]] = ($Payload | ConvertFrom-Json).location; return & $ok @{ name = $Matches[1] }
+  }
+  if ($Path -match '/resourceGroups/([^/]+)/providers/Microsoft.KeyVault/vaults/([^/?]+)\?') {
+    $rg = $Matches[1]; $name = $Matches[2]
+    if ($Method -eq 'PUT') {
+      $d = @($global:St.deletedVaults | Where-Object VaultName -eq $name)
+      if (($Payload | ConvertFrom-Json).properties.createMode -ne 'recover' -or -not $d.Count) { return [pscustomobject]@{ StatusCode=409; Content='{"error":{"code":"ConflictError","message":"A vault with the same name already exists in deleted state."}}' } }
+      if ($global:St.rgs -notcontains $rg) { return [pscustomobject]@{ StatusCode=404; Content="{""error"":{""code"":""ResourceGroupNotFound"",""message"":""Resource group '$rg' could not be found.""}}" } }
+      $global:St.deletedVaults = @($global:St.deletedVaults | Where-Object VaultName -ne $name); $global:St.recoveredVaults = @($global:St.recoveredVaults) + $name
+      return & $ok @{ name = $name; properties = @{ provisioningState = 'RegisteringDns' } }
+    }
+    if (@($global:St.recoveredVaults) -contains $name) { return & $ok @{ name = $name; properties = @{ provisioningState = 'Succeeded' } } }
+    return [pscustomobject]@{ StatusCode=404; Content='{"error":{"code":"ResourceNotFound"}}' }
+  }
   # Resource provider list (Get-AvdProviderState) and the AVD provider's regions (Test-AvdHostPoolRegion).
   if ($Path -match '/providers\?api-version') {
     $ns = 'Microsoft.DesktopVirtualization','Microsoft.Compute','Microsoft.Storage','Microsoft.Network','Microsoft.Insights','Microsoft.OperationalInsights','Microsoft.KeyVault','Microsoft.RecoveryServices','Microsoft.Security','Microsoft.PolicyInsights','Microsoft.GuestConfiguration','Microsoft.Consumption'
@@ -176,7 +199,6 @@ function Get-AzComputeResourceSku { param($Location,$ErrorAction)
         Capabilities=@([pscustomobject]@{Name='vCPUs';Value="$v"},[pscustomobject]@{Name='MemoryGB';Value="$($v * $series[2])"})}
     }
   } }
-function Get-AzKeyVault { param([switch]$InRemovedState,$ErrorAction) $global:St.deletedVaults }
 $global:St.quotaLimit = $null   # set to raise both limits (a subscription after a quota increase)
 # The deployed dev host is a D4as_v5 (as in the first real deployment); the Easv5 family is unused.
 function Get-AzVMUsage { param($Location) $l = $global:St.quotaLimit; @(

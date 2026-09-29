@@ -90,7 +90,7 @@ The sizing covers one pooled host pool, which is what the landing zone deploys. 
 | Tooling | PowerShell 7, Bicep CLI, `az` and `bash` (used by `deploy.sh`), Microsoft.Graph.Authentication | — |
 | Entra ID | `-UsersGroup` / `-AdminsGroup` (name or object ID) resolve to exactly one security group each, with members; the Azure Virtual Desktop service principal exists | Creates missing groups (by name) and the service principal. `-AddMeToGroups` (separate switch) adds you to both groups |
 | Parameters | The file compiles, with `-Location` overriding its region; prints prefix, environment, region, host count and size, zones, connectivity mode, Intune enrollment | — |
-| Subscription | Owner, or Contributor + RBAC Administrator, plus policy rights when `enablePolicyGuardrails`; every resource provider `deploy.sh` needs; AVD host pools offered in the region; `EncryptionAtHost` (when used); VM size offered in **every requested zone**; family and regional vCPU quota for the host count; the profile storage SKU (Premium ZRS/LRS file shares) in the region; no soft-deleted, purge-protected Key Vault holding the vault name; budget parameters complete | Registers providers and the feature and **waits** for them (up to 15 minutes; the feature takes about that long), then re-registers `Microsoft.Compute` so the feature takes effect |
+| Subscription | Owner, or Contributor + RBAC Administrator, plus policy rights when `enablePolicyGuardrails`; every resource provider `deploy.sh` needs; AVD host pools offered in the region; `EncryptionAtHost` (when used); VM size offered in **every requested zone**; family and regional vCPU quota for the host count; the profile storage SKU (Premium ZRS/LRS file shares) in the region; no soft-deleted, purge-protected Key Vault holding the vault name; budget parameters complete | Registers providers and the feature and **waits** for them (up to 15 minutes; the feature takes about that long), then re-registers `Microsoft.Compute` so the feature takes effect. Recovers a soft-deleted vault into its resource group (created again if the cleanup removed it), so a redeploy keeps the name prefix |
 | Network | HubPeered only: hub VNet readable; firewall IP set for egress; central DNS zone IDs present | — |
 | Landing zone | Whether `rg-<prefix>-<env>-*` already exists (deploying then updates in place), and fails if it exists in another region (resource groups can't move) | — |
 | Tenant | Intune licensing when `enrollInIntune = true` (the join fails without it); whether you hold active roles for the post-deployment steps; which Conditional Access policies will need the storage app excluded | — |
@@ -156,7 +156,7 @@ With `-IncludeLandingZone`, you must type the landing zone name to confirm (`-Fo
 4. **The landing zone hosts' device objects.**
 5. **Defender plans**, set back to Free, only with `-ResetDefender`.
 
-The Key Vault stays soft-deleted under purge protection for 90 days.
+The Key Vault stays soft-deleted under purge protection for 90 days. To redeploy with the same prefix, run the pre-deployment preflight with `-Fix`, which recovers it.
 
 ## Auto shutdown
 

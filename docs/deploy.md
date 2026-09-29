@@ -112,4 +112,4 @@ Configuring ACLs for Entra identities depends on your identity type (hybrid vs c
 2. `az group delete` the five `rg-<prefix>-<env>-*` groups (hosts first).
 3. Remove the `avdlz-*` policy assignments and their role assignments, the budget, and set Defender plans back to Free if you want.
 4. Delete the session hosts' device objects from Entra ID and Intune.
-5. Key Vault is soft-deleted with purge protection: the same name can't be reused for 90 days. See [gotchas](gotchas.md#key-vault-name-after-teardown).
+5. Key Vault is soft-deleted with purge protection, and its name stays reserved for 90 days. To redeploy with the same prefix, the pre-deployment preflight with `-Fix` recovers it. See [gotchas](gotchas.md#key-vault-name-after-teardown).

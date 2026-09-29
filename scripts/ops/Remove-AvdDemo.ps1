@@ -23,8 +23,9 @@
     - Entra ID / Intune device objects of the landing zone hosts
     - -ResetDefender also sets the Defender plans the landing zone enabled back to Free
 
-  Key Vault is left soft-deleted with purge protection (90 days); its name can't
-  be reused until then. See docs/gotchas.md.
+  Key Vault is left soft-deleted with purge protection (90 days). To redeploy with
+  the same name prefix, run the pre-deployment preflight with -Fix: it recovers
+  the vault. See docs/gotchas.md.
 
 .EXAMPLE
   ./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix avdlz -Environment dev
@@ -208,7 +209,7 @@ if (-not $KeepDevices) { Remove-AvdDevice -ComputerName $lzHosts }
 if ($lz.KeyVault) {
   # Under -WhatIf nothing was deleted yet: say what will happen, not what has.
   $kvState = if ($WhatIfPreference) { 'will be soft-deleted' } else { 'is soft-deleted' }
-  Add-AvdCheckResult 'Subscription' "Key Vault $($lz.KeyVault.Name) $kvState with purge protection" 'Warn' -Detail 'Its name is reserved for 90 days after deletion.' -Remediation 'Change namePrefix to redeploy sooner, or recover it with Undo-AzKeyVaultRemoval.'
+  Add-AvdCheckResult 'Subscription' "Key Vault $($lz.KeyVault.Name) $kvState with purge protection" 'Warn' -Detail 'Its name is reserved for 90 days after deletion.' -Remediation 'To redeploy with the same namePrefix, run the pre-deployment preflight with -Fix: it recovers the vault.'
 }
 Write-AvdSummary | Out-Null
 if (-not $WhatIfPreference) { Write-AvdPortalState (Get-AvdPortalState -Stage cleanup -Context @{ namePrefix = $NamePrefix; environment = $Environment; includeLandingZone = [bool]$IncludeLandingZone }) }

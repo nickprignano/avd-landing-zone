@@ -49,7 +49,7 @@ Subnets have no default outbound access. In `HubPeered` mode, set `hubFirewallPr
 Azure Backup puts a delete lock on protected storage accounts. Stop protection and delete the backup data first.
 
 ### Key Vault name after teardown
-The vault name is deterministic (prefix + environment + subscription + region hash) and purge protection keeps a deleted vault for 90 days. Redeploying the same name in that window fails. Either recover the vault (`az keyvault recover`) or change `namePrefix`.
+The vault name is deterministic (prefix + environment + subscription + region hash) and purge protection keeps a deleted vault for 90 days. Redeploying the same name in that window fails. The pre-deployment preflight with `-Fix` recovers the vault into its resource group, creating the group again if needed. The deployment then reuses the vault and the prefix can stay. Otherwise change `namePrefix` ([lesson 0022](lessons/0022-key-vault-recovery.md)).
 
 ### Orphaned devices
 Deleting VMs doesn't remove their Entra ID and Intune device objects. Clean them up, or rebuilt hosts with the same names will be confusing to manage.
