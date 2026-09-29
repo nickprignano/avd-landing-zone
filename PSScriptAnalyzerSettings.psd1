@@ -2,7 +2,7 @@
 @{
   Severity     = @('Error', 'Warning')
   ExcludeRules = @(
-    # The ops scripts are interactive console tools; coloured Write-Host output is intended.
+    # The ops scripts are interactive console tools; colored Write-Host output is intended.
     'PSAvoidUsingWriteHost'
   )
 }

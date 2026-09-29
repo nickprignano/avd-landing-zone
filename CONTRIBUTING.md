@@ -37,7 +37,7 @@ The routine is written up in [`.claude/skills/retro/SKILL.md`](.claude/skills/re
 - **Ops scripts** (`scripts/ops/`) must stay check-by-default: anything that changes state goes behind `-Fix` or a confirmation, and supports `-WhatIf`.
 - **Secure by default.** New resources get private endpoints where supported, diagnostics to Log Analytics, and least-privilege RBAC on Entra groups.
 - **No tenant data in the repo.** Identity values and secrets come from environment variables.
-- Every parameter gets an `@description`. Update `docs/` when behaviour changes.
+- Every parameter gets an `@description`. Update `docs/` when behavior changes.
 
 ## License
 

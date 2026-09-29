@@ -203,9 +203,9 @@ test('host pool region not offered -> closest supported region from the latency 
   assert.equal(r.actions.length, 1, 'no extra rerun in the old region');
 });
 
-test('nothing recognisable -> ask for the whole output', () => {
+test('nothing recognizable -> ask for the whole output', () => {
   const r = P.analyze('hello world');
-  assert.equal(r.recognised, false);
+  assert.equal(r.recognized, false);
   assert.match(r.actions[0].why, /AVDLZ-STATE/);
 });
 
@@ -250,7 +250,7 @@ test('portal commands only use parameters the scripts define', () => {
     P.commands.demo(cfg), P.commands.removeDemo(cfg), P.commands.deploy(cfg), P.commands.wellArchitected(cfg)
   ];
   // The same commands once a sizing is set.
-  const sizedCfg = { ...cfg, sizing: P.toSizing(P.computePool({ users: 120, workload: 'heavy' }, 'prod')) };
+  const sizedCfg = { ...cfg, sizing: P.toSizing(P.computePool({ users: 120, workload: 'heavy', vmSize: '', hostCount: 'auto' }, 'prod')) };
   commands.push(P.commands.predeploy(sizedCfg, true), P.commands.deploy(sizedCfg), P.commands.postdeploy(sizedCfg, true));
   commands.push(P.commands.power(cfg, 'Resume'), P.commands.power(cfg, 'Lock'));
   let checked = 0;
@@ -304,10 +304,10 @@ test('real: first live Well-Architected review (dev, northcentralus) -> sign-in,
 });
 
 // ---------------------------------------------------------------- sizing and cost (decision 0010)
-test('sizing: users, concurrency and workload -> hosts, sessions per host, quota and profile share', () => {
-  const r = P.computePool({ users: 50, concurrencyPercent: 80, workload: 'medium' }, 'dev');
+test('sizing (automatic): users, concurrency and workload -> hosts, sessions per host, quota and profile share', () => {
+  const r = P.computePool({ users: 50, concurrencyPercent: 80, workload: 'medium', vmSize: '', hostCount: 'auto', profileGiBPerUser: 10 }, 'dev');
   assert.equal(r.concurrentUsers, 40);
-  assert.equal(r.vmSize, 'Standard_E8as_v5');          // suggested for medium: memory-optimised
+  assert.equal(r.vmSize, 'Standard_E8as_v5');          // suggested for medium: memory-optimized
   assert.equal(r.memoryPerSessionGiB, 2);              // 64 GiB for 32 sessions
   assert.equal(r.osDisk, 'Premium SSD (P10, 128 GiB)');
   assert.equal(r.sessionsPerHost, 32);                 // 8 vCPU x 4 per vCPU
@@ -318,20 +318,45 @@ test('sizing: users, concurrency and workload -> hosts, sessions per host, quota
 });
 
 test('sizing: prod adds a spare host by default and never goes below two; small shares are 100 GiB', () => {
-  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5' }, 'prod').hosts, 2);   // 16 of 24 -> 1 + spare
-  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', spareHost: false }, 'prod').hosts, 2); // minimum two
-  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5' }, 'dev').hosts, 1);
-  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', spareHost: true }, 'dev').hosts, 2);
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', hostCount: 'auto' }, 'prod').hosts, 2);   // 16 of 24 -> 1 + spare
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', spareHost: false, hostCount: 'auto' }, 'prod').hosts, 2); // minimum two
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', hostCount: 'auto' }, 'dev').hosts, 1);
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', spareHost: true, hostCount: 'auto' }, 'dev').hosts, 2);
   assert.equal(P.computePool({ users: 5, profileGiBPerUser: 5 }, 'dev').profileQuotaGiB, 100);
 });
 
 test('sizing: suggests E-series for every workload, and flags too little memory per session', () => {
-  for (const w of Object.keys(P.WORKLOADS)) assert.match(P.computePool({ workload: w }, 'dev').vmSize, /^Standard_E/, w);
+  for (const w of Object.keys(P.WORKLOADS)) assert.match(P.computePool({ workload: w, vmSize: '' }, 'dev').vmSize, /^Standard_E/, w);
   // D-series at Microsoft's medium density: 1 GiB per session -> suggest the E-series equivalent.
   assert.match(P.computePool({ users: 30, workload: 'medium', vmSize: 'Standard_D8as_v5' }, 'dev').notes.join(' '), /Standard_E8as_v5 has twice the memory/);
   // E-series at light density (1.3 GiB per session) is fine; below 1 GiB on any size is not.
-  assert.deepEqual(P.computePool({ users: 30, workload: 'light', vmSize: 'Standard_E4as_v5' }, 'dev').notes, []);
+  assert.deepEqual(P.computePool({ users: 30, workload: 'light', vmSize: 'Standard_E4as_v5', hostCount: 'auto' }, 'dev').notes, []);
   assert.match(P.computePool({ users: 30, workload: 'light', vmSize: 'Standard_D16as_v5' }, 'dev').notes.join(' '), /Standard_E16as_v5/);
+});
+
+test('sizing: defaults to the minimum viable kit, the same as the dev parameter file', () => {
+  const r = P.computePool({}, 'dev');
+  assert.equal(r.hosts, 1);
+  assert.equal(r.hostCountAuto, false);
+  assert.equal(r.vmSize, 'Standard_E4as_v5');
+  assert.equal(r.profileQuotaGiB, 100);
+  assert.equal(r.sessionsPerHost, 16);                 // 4 vCPU x 4 per vCPU (medium)
+  assert.match(r.notes.join(' '), /One host: no redundancy/);
+  const dev = readFileSync(new URL('../../parameters/dev.bicepparam', import.meta.url), 'utf8');
+  assert.match(dev, /AVD_SESSION_HOST_COUNT', ''\)\) \? 1 :/);
+  assert.match(dev, /AVD_SESSION_HOST_VM_SIZE', ''\)\) \? 'Standard_E4as_v5' :/);
+  assert.match(dev, /AVD_PROFILE_QUOTA_GIB', ''\)\) \? 100 :/);
+});
+
+test('sizing: a chosen host count is kept, even in prod, and says when it is short', () => {
+  const r = P.computePool({ users: 100, hostCount: 3 }, 'prod');
+  assert.equal(r.hosts, 3);                             // no spare or minimum added to a chosen count
+  assert.equal(r.capacity, 48);
+  assert.match(r.notes.join(' '), /3 hosts carry 48 sessions, but 80 people are expected/);
+  assert.match(P.computePool({ hostCount: 1 }, 'prod').notes.join(' '), /flags one host in prod/);
+  assert.equal(P.computePool({ hostCount: 500 }, 'dev').hosts, P.MAX_HOSTS);
+  assert.equal(P.computePool({ hostCount: '4' }, 'dev').hosts, 4);   // from a <select>
+  assert.deepEqual(P.computePool({ users: 20, hostCount: 2 }, 'dev').notes, []);
 });
 
 test('sizing: falls back from an unknown size to the suggested one', () => {
@@ -349,7 +374,7 @@ test('sizing: every size and workload the portal offers is well formed; one host
 test('sizing: commands carry it only once it is set', () => {
   const plain = { ...P.DEFAULTS };
   assert.doesNotMatch(P.commands.predeploy(plain, false), /-SessionHostCount/);
-  const cfg = { ...P.DEFAULTS, sizing: P.toSizing(P.computePool({ users: 50 }, 'dev')) };
+  const cfg = { ...P.DEFAULTS, sizing: P.toSizing(P.computePool({ users: 50, vmSize: '', hostCount: 'auto', profileGiBPerUser: 10 }, 'dev')) };
   assert.match(last(P.commands.predeploy(cfg, true)), / -SessionHostCount 2 -SessionHostVmSize Standard_E8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 50 -Fix$/);
   assert.match(last(P.commands.deploy(cfg)), / --hosts 2 --vm-size Standard_E8as_v5 --max-sessions 32 --profile-quota 600$/);
   assert.match(last(P.commands.postdeploy(cfg, false)), / -SessionHostVmSize Standard_E8as_v5 -SessionHostCount 2$/);

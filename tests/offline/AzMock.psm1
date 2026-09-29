@@ -1,7 +1,7 @@
 # Offline stand-in for the Az, ARM (Invoke-AzRestMethod) and Microsoft Graph calls the
 # ops scripts make. State lives in $global:St; every state-changing call is logged in
 # $global:Calls. Used by tests/offline/*.Scenario.ps1 (run by tests/OfflineScenarios.Tests.ps1).
-# When a real run exposes a behaviour this mock gets wrong, fix the mock AND add the case.
+# When a real run exposes a behavior this mock gets wrong, fix the mock AND add the case.
 
 # ---- State ----
 $global:Calls = [System.Collections.Generic.List[string]]::new()

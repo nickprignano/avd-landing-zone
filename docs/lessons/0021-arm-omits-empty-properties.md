@@ -14,7 +14,7 @@ The storage finding also lost its "ZRS needs a region with availability zones" n
 ## Why
 ARM omits a property that has no value. A regional VM has no `zones` property, and a region without zones has no `availabilityZoneMappings`. The code counted them with `@($vm.zones).Count` and `@($loc.availabilityZoneMappings).Count`, and in PowerShell `@($null)` is a one-element array, so both counts were 1. The mock returned empty arrays (`zones = @()`) instead of omitting the property, so it was more permissive than Azure and hid the bug.
 
-The same run also found two PSRule for Azure rules that can't read this design: `Azure.PublicIP.IsAttached` only looks at `ipConfiguration`, not `natGateway`, and `Azure.VM.ADE` doesn't recognise encryption at host. `Azure.VM.AMA` reported the Azure Monitor Agent missing although `Get-AzVMExtension` showed `AzureMonitorWindowsAgent` Succeeded: the export doesn't attach VM extensions to the VM. PSRule's export also printed raw warnings for optional lookups (classic administrators, a preview Defender for Storage API).
+The same run also found two PSRule for Azure rules that can't read this design: `Azure.PublicIP.IsAttached` only looks at `ipConfiguration`, not `natGateway`, and `Azure.VM.ADE` doesn't recognize encryption at host. `Azure.VM.AMA` reported the Azure Monitor Agent missing although `Get-AzVMExtension` showed `AzureMonitorWindowsAgent` Succeeded: the export doesn't attach VM extensions to the VM. PSRule's export also printed raw warnings for optional lookups (classic administrators, a preview Defender for Storage API).
 
 ## Fix
 - Count only real entries: `@($x | Where-Object { $_ }).Count`.

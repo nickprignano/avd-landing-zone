@@ -39,14 +39,16 @@ Without Pester, run an offline scenario directly: `pwsh -File tests/offline/Post
 - **Commands given to operators are self-contained Cloud Shell blocks:** clone or update, `Set-Location`, `Connect-MgGraph` when needed. Sessions are ephemeral and disconnect. (0015)
 - **When the offline mock disagrees with a real run, fix the mock and add the case.** `tests/offline/AzMock.psm1` must not be more permissive than Azure: it omits empty properties the way ARM does. Offline tests provide every tool they touch. (0020, 0021)
 - **Count ARM properties with `@($x | Where-Object { $_ }).Count`, never `@($x).Count`:** ARM omits empty properties and `@($null).Count` is 1. (0021)
-- **The deployment portal (`docs/portal`) reads the scripts' state line.** Changing a script's output, parameters or a check the portal recognises means updating `portal-core.js` and its tests (`node --test "tests/portal/*.test.mjs"`). A real paste analysed wrongly becomes a fixture. (decision 0007)
+- **The deployment portal (`docs/portal`) reads the scripts' state line.** Changing a script's output, parameters or a check the portal recognizes means updating `portal-core.js` and its tests (`node --test "tests/portal/*.test.mjs"`). A real paste analyzed wrongly becomes a fixture. (decision 0007)
 - **Portal issue reports are redacted in the browser (`docs/portal/report.js`).** A new kind of private value in output means a pattern, a line in `fixtures/pii-sample.txt`, and a test. New GUIDs in `bicep/` or `scripts/` go into `PUBLIC_IDS`. Check a `portal-report` issue for anything the patterns missed before committing it as a fixture. (decision 0008)
 
 - **Well-Architected findings (`-WellArchitected`) are warnings, never failures,** and each carries `waf-<check>` with `data.pillar`/`data.accepted`. A new check reads through REST, gets a mock response in `AzMock.psm1` and an assertion in the WellArchitected scenario. (decision 0009)
 
-- **Sizing flows through `AVD_SESSION_HOST_COUNT`, `AVD_SESSION_HOST_VM_SIZE`, `AVD_MAX_SESSION_LIMIT`, `AVD_PROFILE_QUOTA_GIB`** (parameter files with `empty()` guards, `deploy.sh` flags, preflight parameters, portal commands). A cost line must match exactly one retail price meter, or be reported with the meters it saw; never guess a price. Session hosts default to memory-optimised E-series (`Standard_E4as_v5`) on Premium SSD; a change of size on an existing landing zone must be warned about, not applied silently. (decision 0010)
+- **Sizing flows through `AVD_SESSION_HOST_COUNT`, `AVD_SESSION_HOST_VM_SIZE`, `AVD_MAX_SESSION_LIMIT`, `AVD_PROFILE_QUOTA_GIB`** (parameter files with `empty()` guards, `deploy.sh` flags, preflight parameters, portal commands). A cost line must match exactly one retail price meter, or be reported with the meters it saw; never guess a price. Session hosts default to memory-optimized E-series (`Standard_E4as_v5`) on Premium SSD; a change of size on an existing landing zone must be warned about, not applied silently. (decision 0010)
 
 - **Auto shutdown (`scripts/automation/Invoke-AvdPowerAction.ps1`) is an Automation runbook: Windows PowerShell 5.1, no modules, ARM REST with the managed identity's token.** Lock must survive the next sign-in (drain, scaling plan exclusion tag, Start VM on Connect off); a new action or call gets a mock path in `AzMock.psm1` and an assertion in the AutoShutdown scenario. New role GUIDs come from Microsoft's built-in role reference and go into `PUBLIC_IDS`. (decision 0011)
+
+- **American English** in docs, script output, the portal and comments (a portal test fails on British spellings; recorded fixtures are exempt).
 
 ## Git and PRs
 - Work on the designated branch; open PRs only when asked. The PR template asks for a Lessons section.

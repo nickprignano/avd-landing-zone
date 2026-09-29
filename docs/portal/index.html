@@ -152,7 +152,7 @@
     </section>
     <section class="slide" id="size-panel" data-step="size" aria-label="Size and cost">
       <h2><span class="n"></span>Size and cost <span class="muted" style="font-weight:400">· <span id="size-summary"></span></span></h2>
-      <p class="status">Sizes the session hosts from how many people use them and how they work (Microsoft's multi-session guidance: light 6, medium 4, heavy 2, power 1 user per vCPU). It suggests memory-optimised E-series sizes, because hosts shared by many users run out of memory before CPU, and every host gets a Premium SSD OS disk. Once you apply a sizing, the commands carry it: the pre-deployment preflight checks quota and availability for it and prices it in your region at Azure list prices, and <code>deploy.sh</code> deploys it.</p>
+      <p class="status">Starts from the minimum viable kit: one memory-optimized E4as_v5 host and a 100&nbsp;GiB profile share. Choose the number of hosts, or Automatic to size them from how many people use them and how they work (Microsoft's multi-session guidance: light 6, medium 4, heavy 2, power 1 user per vCPU). It suggests memory-optimized E-series sizes, because hosts shared by many users run out of memory before CPU, and every host gets a Premium SSD OS disk. Once you apply a sizing, the commands carry it: the pre-deployment preflight checks quota and availability for it and prices it in your region at Azure list prices, and <code>deploy.sh</code> deploys it.</p>
       <div id="pools"></div>
       <div class="row">
         <button type="button" class="secondary" id="add-pool" disabled title="The landing zone deploys one host pool today">Add a host pool</button>
@@ -204,7 +204,7 @@
     <h3>Paste Cloud Shell output</h3>
     <textarea id="paste" spellcheck="false" placeholder="Paste everything from the command to the prompt that follows it. The scripts end with a line starting &lt;&lt;&lt;AVDLZ-STATE, which is what this page reads."></textarea>
     <div class="row" style="margin-top:10px">
-      <button id="analyze">Analyse output</button>
+      <button id="analyze">Analyze output</button>
       <button class="secondary" id="clear-paste">Clear</button>
       <span class="status" id="paste-status" role="status"></span>
     </div>
@@ -420,7 +420,7 @@
     var chip = $('next-chip'), head = $('next-headline');
     if (lastAnalysis) {
       var r = lastAnalysis;
-      $('next-title').textContent = r.recognised ? 'What to do next' : 'Not recognised';
+      $('next-title').textContent = r.recognized ? 'What to do next' : 'Not recognized';
       var good = /^(ready|succeeded|done|resumed|stopped)$/.test(r.status || '');
       chip.textContent = r.status ? (good ? 'Done' : r.status === 'started' ? 'Running' : 'Action needed') : 'Action needed';
       chip.className = 'chip ' + (good ? 'good' : r.status === 'started' ? 'ok' : 'poor');
@@ -447,7 +447,7 @@
     renderSizeResult();
     if (r.step && r.step !== (step || 'region')) goTo(r.step);
     lastAnalysis = r;
-    $('paste-status').textContent = r.recognised ? 'Analysed: ' + r.headline : 'Nothing recognisable in the pasted text.';
+    $('paste-status').textContent = r.recognized ? 'Analyzed: ' + r.headline : 'Nothing recognizable in the pasted text.';
     render(); refreshReport(true);
     $('next').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -496,11 +496,13 @@
   });
 
   // ---------------------------------------------------------------- sizing and cost (decision 0010)
-  var pools = load('hostPools', null) || [Object.assign({}, P.HOST_POOL_DEFAULTS)];
+  // Sizings saved before the host count could be chosen start again from the minimum viable kit.
+  var pools = (load('hostPools', null) || []).filter(function (p) { return p && p.hostCount !== undefined; });
+  if (!pools.length) pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)];
   var estimate = load('estimate', null);
   var POOL_FIELDS = [
     ['name', 'Name', 'text'], ['users', 'People who will use it', 'number'], ['concurrencyPercent', 'Signed in at the busiest time (%)', 'number'],
-    ['workload', 'How they work', 'workload'], ['vmSize', 'VM size', 'vmsize'], ['spareHost', 'Spare host', 'spare'],
+    ['workload', 'How they work', 'workload'], ['vmSize', 'VM size', 'vmsize'], ['hostCount', 'Session hosts', 'hostcount'], ['spareHost', 'Spare host (Automatic only)', 'spare'],
     ['profileGiBPerUser', 'Profile size per person (GiB)', 'number'], ['activeHoursPerWeek', 'Hours per week hosts run', 'number']
   ];
   function money(n, cur) { return (n === null || n === undefined) ? '–' : Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + (cur || ''); }
@@ -513,19 +515,22 @@
       POOL_FIELDS.forEach(function (f) {
         var lab = el('label', 'field'); lab.appendChild(el('span', '', f[1]));
         var input;
-        if (f[2] === 'workload' || f[2] === 'vmsize' || f[2] === 'spare') {
+        if (f[2] === 'workload' || f[2] === 'vmsize' || f[2] === 'spare' || f[2] === 'hostcount') {
           input = document.createElement('select');
           var opts = f[2] === 'workload' ? Object.keys(P.WORKLOADS).map(function (k) { return [k, P.WORKLOADS[k].label + ' (' + P.WORKLOADS[k].usersPerVcpu + '/vCPU)']; })
-            : f[2] === 'vmsize' ? [['', 'Suggested: memory-optimised E-series']].concat(Object.keys(P.VM_SIZES).map(function (k) { return [k, k.replace('Standard_', '') + ' (' + P.VM_SIZES[k].vcpu + ' vCPU, ' + P.VM_SIZES[k].ramGiB + ' GiB' + (P.VM_SIZES[k].recommended ? ', recommended' : '') + ')']; }))
-              : [['', 'Automatic (one in prod)'], ['true', 'Yes'], ['false', 'No']];
+            : f[2] === 'vmsize' ? [['', 'Suggested: memory-optimized E-series']].concat(Object.keys(P.VM_SIZES).map(function (k) { return [k, k.replace('Standard_', '') + ' (' + P.VM_SIZES[k].vcpu + ' vCPU, ' + P.VM_SIZES[k].ramGiB + ' GiB' + (P.VM_SIZES[k].recommended ? ', recommended' : '') + ')']; }))
+              : f[2] === 'hostcount' ? [['auto', 'Automatic: enough for the busiest time']].concat(Array.from({ length: P.MAX_HOSTS }, function (_, n) { return [String(n + 1), (n + 1) + (n ? ' hosts' : ' host (minimum)')]; }))
+                : [['', 'Automatic (one in prod)'], ['true', 'Yes'], ['false', 'No']];
           opts.forEach(function (o) { var op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; input.appendChild(op); });
           input.value = pool[f[0]] === null || pool[f[0]] === undefined ? '' : String(pool[f[0]]);
+          if (f[2] === 'spare') input.disabled = pool.hostCount !== 'auto';
         }
         else { input = document.createElement('input'); input.type = f[2]; if (f[2] === 'number') input.min = '1'; input.value = pool[f[0]]; input.autocomplete = 'off'; }
         input.addEventListener('input', function () {
           var v = input.value;
-          pools[i][f[0]] = f[2] === 'number' ? Number(v) : (f[2] === 'spare' ? (v === '' ? null : v === 'true') : v);
-          save('hostPools', pools); renderSizeResult();
+          pools[i][f[0]] = f[2] === 'number' ? Number(v) : f[2] === 'spare' ? (v === '' ? null : v === 'true') : f[2] === 'hostcount' ? (v === 'auto' ? 'auto' : Number(v)) : v;
+          save('hostPools', pools);
+          if (f[2] === 'hostcount') renderPools(); else renderSizeResult();
         });
         lab.appendChild(input); row.appendChild(lab);
       });
@@ -537,7 +542,7 @@
   function renderSizeResult() {
     var r = poolResult(0), tb = $('size-result'); tb.textContent = '';
     [['Concurrent sessions', r.concurrentUsers + ' of ' + r.users + ' people'],
-      ['Session hosts', r.hosts + ' × ' + r.vmSize.replace('Standard_', '') + ' (' + r.vcpuPerHost + ' vCPU, ' + r.ramGiBPerHost + ' GiB each; ' + r.memoryPerSessionGiB + ' GiB per session)'],
+      ['Session hosts', (r.hostCountAuto ? '' : 'Chosen: ') + r.hosts + ' × ' + r.vmSize.replace('Standard_', '') + ' (' + r.vcpuPerHost + ' vCPU, ' + r.ramGiBPerHost + ' GiB each; ' + r.memoryPerSessionGiB + ' GiB per session)'],
       ['OS disk', r.osDisk + ' on every host'],
       ['Sessions per host (max session limit)', String(r.sessionsPerHost)],
       ['Capacity', r.capacity + ' sessions'],

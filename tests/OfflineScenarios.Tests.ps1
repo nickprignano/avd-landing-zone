@@ -84,7 +84,7 @@ Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
     $s[1].context.location | Should -Be 'northcentralus'
     $s[1].context.usersGroup | Should -Be 'AVD Users'
     $quota = $s[3].failures | Where-Object id -eq 'quota'
-    $quota.data.quotaName | Should -Be 'standardEASv5Family'   # memory-optimised default (E4as_v5)
+    $quota.data.quotaName | Should -Be 'standardEASv5Family'   # memory-optimized default (E4as_v5)
     $quota.data.needed | Should -Be 16
     ($s[3].failures | Where-Object id -eq 'kv-softdeleted').data.vaults | Should -Contain 'kvavdlzprodabc123'
   }
@@ -209,7 +209,7 @@ Describe 'Well-Architected review of the deployed landing zone' {
     $out | Should -Match 'eastus2 has no availability zones'
     $out | Should -Not -Match 'Zones: \r?\n'
   }
-  It 'summarises PSRule export warnings and shows why a rule failed' {
+  It 'summarizes PSRule export warnings and shows why a rule failed' {
     $out | Should -Not -Match 'WARNING: Failed to get'
     $out | Should -Match 'PSRule could not read 1 optional setting'
     $out | Should -Match "Azure.VM.UseHybridUseBenefit on avdlzdsh-001 \(The field 'properties.licenseType' does not exist.\)"

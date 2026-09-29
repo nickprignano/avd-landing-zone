@@ -3,7 +3,7 @@
 - **Status:** Accepted
 
 ## Context
-Operators get stuck at steps the portal doesn't recognise, and a real paste is the best input for a fix (decision 0006: a real paste analysed wrongly becomes a fixture). Cloud Shell output is full of tenant details: UPNs, subscription and tenant IDs, subscription names, storage and key vault names, group names, sometimes device codes or keys. GitHub issues are public. The portal is a static page with no server (decision 0007).
+Operators get stuck at steps the portal doesn't recognize, and a real paste is the best input for a fix (decision 0006: a real paste analyzed wrongly becomes a fixture). Cloud Shell output is full of tenant details: UPNs, subscription and tenant IDs, subscription names, storage and key vault names, group names, sometimes device codes or keys. GitHub issues are public. The portal is a static page with no server (decision 0007).
 
 ## Decision
 - **No backend, no token:** the portal opens `github.com/<repo>/issues/new` with the title and body filled in. The reporter reviews the report on GitHub and submits it with their own account.

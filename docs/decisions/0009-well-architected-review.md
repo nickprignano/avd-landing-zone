@@ -15,7 +15,7 @@ CI already checks the templates against the Well-Architected rules in PSRule for
   - PSRule for Azure on the exported live resources, with the repo's suppressions, so the same rule set covers both the templates and the deployment.
   Each source is filtered to the landing zone's resource groups. A source that can't be read becomes a warning with the error, and the rest still run.
 - **Warnings, never failures.** Well-Architected findings are trade-offs to decide on, not blockers, and a dev landing zone must still come back Ready. Findings that are deliberate in the dev and test parameter files carry `data.accepted` and say so. In prod the same findings are plain warnings.
-- **The portal** offers the review once post-deployment is Ready, and summarises its findings by pillar. The state line carries `context.wellArchitected`, and each finding has an id `waf-<check>` with `data.pillar` and `data.accepted`.
+- **The portal** offers the review once post-deployment is Ready, and summarizes its findings by pillar. The state line carries `context.wellArchitected`, and each finding has an id `waf-<check>` with `data.pillar` and `data.accepted`.
 
 ## Consequences
 - "Would it pass a review?" has a concrete, repeatable answer per pillar, and it can be rerun after changes.

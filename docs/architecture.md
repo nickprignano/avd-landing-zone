@@ -59,7 +59,7 @@ In **hub-peered** mode your firewall must allow the [AVD required FQDNs](https:/
 ## Deployment order
 
 `monitoring` → `network` → `privateDns` → `keyVault`, `storage` (→ `backup`), `controlPlane` → `sessionHosts` (VMs → FSLogix run command → agent run command). `governance` runs as soon as the workspace exists.
-Dependencies come from outputs, so ARM parallelises everything else.
+Dependencies come from outputs, so ARM parallelizes everything else.
 
 ## Why AVM
 

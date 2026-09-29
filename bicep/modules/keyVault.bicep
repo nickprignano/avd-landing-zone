@@ -1,5 +1,5 @@
 // Key Vault — holds the session hosts' break-glass local admin credential.
-// RBAC-authorised, purge-protected, reachable only over its private endpoint.
+// RBAC-authorized, purge-protected, reachable only over its private endpoint.
 
 param location string
 param tags object
