@@ -217,7 +217,8 @@ test('portal commands only use parameters the scripts define', () => {
   const scripts = {
     'Test-AvdLandingZoneReadiness.ps1': psParams('scripts/ops/Test-AvdLandingZoneReadiness.ps1'),
     'Deploy-AvdDemo.ps1': psParams('scripts/ops/Deploy-AvdDemo.ps1'),
-    'Remove-AvdDemo.ps1': psParams('scripts/ops/Remove-AvdDemo.ps1')
+    'Remove-AvdDemo.ps1': psParams('scripts/ops/Remove-AvdDemo.ps1'),
+    'Invoke-AvdPowerAction.ps1': psParams('scripts/automation/Invoke-AvdPowerAction.ps1')
   };
   const cfg = { ...P.DEFAULTS, testUserUpn: 'alex@contoso.com' };
   const commands = [
@@ -227,6 +228,7 @@ test('portal commands only use parameters the scripts define', () => {
   // The same commands once a sizing is set.
   const sizedCfg = { ...cfg, sizing: P.toSizing(P.computePool({ users: 120, workload: 'heavy' }, 'prod')) };
   commands.push(P.commands.predeploy(sizedCfg, true), P.commands.deploy(sizedCfg), P.commands.postdeploy(sizedCfg, true));
+  commands.push(P.commands.power(cfg, 'Resume'), P.commands.power(cfg, 'Lock'));
   let checked = 0;
   for (const c of commands) {
     const line = last(c);
@@ -348,4 +350,23 @@ test('state: sized preflight ready -> deploy with the validated sizing', () => {
   assert.equal(last(r.actions[0].command), "bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins' --hosts 3 --vm-size Standard_D8as_v5 --max-sessions 32 --profile-quota 600");
   assert.equal(r.estimate.unpriced.length, 0);
   assertSelfContained(r);
+});
+
+// ---------------------------------------------------------------- auto shutdown (decision 0011)
+test('state: auto shutdown locked the hosts -> resume command', () => {
+  const r = analyze('state-power-locked.txt');
+  assert.equal(r.stage, 'power');
+  assert.equal(r.status, 'locked');
+  assert.match(r.headline, /^Auto shutdown: Locked/);
+  assert.equal(last(r.actions[0].command), './scripts/automation/Invoke-AvdPowerAction.ps1 -Action Resume -NamePrefix avdlz -Environment dev');
+  assertSelfContained(r);
+});
+
+test('state: post-deployment check on locked hosts -> resume first, then sign in', () => {
+  const r = analyze('state-postdeploy-locked.txt');
+  assert.equal(r.status, 'ready');
+  assert.equal(r.actions[0].title, 'Resume the session hosts');
+  assert.match(r.actions[0].why, /budget/);
+  assert.match(last(r.actions[0].command), /Invoke-AvdPowerAction\.ps1 -Action Resume -NamePrefix avdlz -Environment dev$/);
+  assert.ok(r.actions.some((a) => a.title === 'Sign in to the desktop'));
 });

@@ -35,6 +35,7 @@ The host pool is deployed in the same region, so the region must offer AVD host 
 | `AVD_ALERT_EMAIL` | no | you |
 | `AVD_MONTHLY_BUDGET` | no (prod) | you |
 | `AVD_LOCATION` | no | `deploy.sh -l`, or the preflight's `-Location`. Defaults to `northcentralus` |
+| `AVD_RUNBOOK_URI` | no | `deploy.sh`: the auto-shutdown runbook at the commit being deployed. Defaults to the repo's `master` |
 | `AVD_SESSION_HOST_COUNT`, `AVD_SESSION_HOST_VM_SIZE`, `AVD_MAX_SESSION_LIMIT`, `AVD_PROFILE_QUOTA_GIB` | no | `deploy.sh --hosts --vm-size --max-sessions --profile-quota`, or the preflight's `-SessionHostCount -SessionHostVmSize -MaxSessionLimit -ProfileShareQuotaGiB`; the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/)'s sizing step fills them in. Empty = the file's values |
 
 Things you'll most likely change in the file: `namePrefix`, address ranges, `scalingTimeZone`, and for hub-peered mode the hub settings (examples are in `prod.bicepparam`).

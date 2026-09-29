@@ -149,6 +149,10 @@
       return block(cfg, ['./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
         ' -WellArchitected -SkipTenant -SkipNtfs']);
     },
+    // Auto shutdown (decision 0011): Stop, Lock or Resume the session hosts by hand.
+    power: function (cfg, action) {
+      return block(cfg, ['./scripts/automation/Invoke-AvdPowerAction.ps1 -Action ' + action + ' -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment]);
+    },
     demo: function (cfg) {
       return block(cfg, ['./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
         (cfg.testUserUpn ? ' -TestUserUpn ' + psQuote(cfg.testUserUpn) : '')]);
@@ -357,6 +361,8 @@
         else note('Deploy the landing zone first', 'Nothing is deployed under this name in this subscription. Start with the pre-deployment preflight (or switch subscription with Set-AzContext).', cmd.predeploy(cfg, false));
         return { step: found.length ? 'postdeploy' : 'predeploy', actions: a };
       }
+      var locked = byId(warnings, 'power-locked');
+      if (locked.length) note('Resume the session hosts', 'Auto shutdown locked them (' + ((locked[0].data && locked[0].data.lock) || 'locked') + '): they are drained and off, and nobody can sign in until they are resumed. Resume once the cost is dealt with; hosts then start on the next connection.', cmd.power(cfg, 'Resume'));
       if (state.status === 'ready') {
         var waf = (state.warnings || []).filter(function (w) { return /^waf-/.test(w.id || ''); });
         if (state.context && state.context.wellArchitected) {
@@ -395,6 +401,19 @@
       return { step: 'signin', actions: a };
     }
 
+    if (S === 'power') {
+      var pw = state.power || {};
+      if (state.status === 'locked') {
+        note('The session hosts are locked', (pw.deallocated || []).length + ' host(s) deallocating; they stay off, drained and outside the scaling plan until resumed. Resume once the cost is dealt with.', cmd.power(cfg, 'Resume'));
+        return { step: 'signin', actions: a };
+      }
+      if (state.status === 'resumed') {
+        note('Sign in to the desktop', 'The hosts take sessions again. The first connection starts a host (Start VM on Connect), which takes a few minutes.', '');
+        return { step: 'signin', actions: a };
+      }
+      note('Session hosts stopped', (pw.deallocated || []).length + ' deallocated' + ((pw.skipped || []).length ? ', ' + pw.skipped.length + ' left running because users are signed in' : '') + '. They start again on the next connection.', '');
+      return { step: 'signin', actions: a };
+    }
     if (S === 'cleanup') {
       if (state.context && state.context.includeLandingZone) note('The landing zone is removed', 'To deploy again, start with the pre-deployment preflight. The Key Vault name stays reserved for 90 days: change namePrefix to reuse the subscription sooner.', cmd.predeploy(cfg, false));
       else note('The demo is removed', 'The landing zone is untouched.', '');
@@ -403,8 +422,8 @@
     return { step: null, actions: a };
   }
 
-  var STAGE_LABEL = { predeploy: 'Pre-deployment preflight', deploy: 'Deployment', postdeploy: 'Post-deployment setup', demo: 'Demo validation', cleanup: 'Cleanup' };
-  var STATUS_LABEL = { done: 'Done', ready: 'Ready', notready: 'Not ready', succeeded: 'Succeeded', failed: 'Failed', started: 'Still running (or disconnected)', whatif: 'What-if only' };
+  var STAGE_LABEL = { predeploy: 'Pre-deployment preflight', deploy: 'Deployment', postdeploy: 'Post-deployment setup', demo: 'Demo validation', cleanup: 'Cleanup', power: 'Auto shutdown' };
+  var STATUS_LABEL = { done: 'Done', ready: 'Ready', notready: 'Not ready', succeeded: 'Succeeded', failed: 'Failed', started: 'Still running (or disconnected)', whatif: 'What-if only', locked: 'Locked', resumed: 'Resumed', stopped: 'Stopped' };
 
   /*
    * analyze(text, config, options) -> {

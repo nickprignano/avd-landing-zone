@@ -23,7 +23,7 @@ function Set-AzContext { param($SubscriptionId,$ErrorAction) Get-AzContext }
 function Get-AzResourceGroup { param($Name,$ErrorAction) $list = $global:St.rgs | % { [pscustomobject]@{ResourceGroupName=$_;Location='eastus2'} }; if ($Name) { $list | ? ResourceGroupName -eq $Name } else { $list } }
 function Get-AzResource {
   param($ResourceGroupName,$ResourceType,$Name,$ResourceId,[switch]$ExpandProperties,$ErrorAction)
-  if ($ResourceId) { return [pscustomobject]@{ Properties=[pscustomobject]@{publicNetworkAccess='EnabledForClientsOnly'} } }
+  if ($ResourceId) { return [pscustomobject]@{ Tags=$global:St.power.hpTags; Properties=[pscustomobject]@{publicNetworkAccess='EnabledForClientsOnly'} } }
   $r = switch ($ResourceType) {
     'Microsoft.Network/virtualNetworks' { [pscustomobject]@{Name='vnet-avdlz-dev';ResourceId=$vnetId;Location='eastus2'} }
     'Microsoft.KeyVault/vaults' { [pscustomobject]@{Name='kvavdlzdevabc';ResourceId="$S/rg/kv";ResourceGroupName=$ResourceGroupName} }
@@ -55,6 +55,34 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
       @{ id="$S/pe-hp"; properties=@{ privateLinkServiceConnections=@(@{properties=@{privateLinkServiceId=$hpId}}); manualPrivateLinkServiceConnections=@() } }) } }
   if ($Path -match 'pe-st/privateDnsZoneGroups') { return & $ok @{ value=@(@{properties=@{privateDnsZoneConfigs=@(@{properties=@{privateDnsZoneId="$S/zones/privatelink.file.core.windows.net"}})}}) } }
   if ($Path -match 'pe-hp/privateDnsZoneGroups') { return & $ok @{ value=@(@{properties=@{privateDnsZoneConfigs=@(@{properties=@{privateDnsZoneId="$S/zones/privatelink.wvd.microsoft.com"}})}}) } }
+  # ---- Power runbook (scripts/automation/Invoke-AvdPowerAction.ps1): the landing zone host pool,
+  # two hosts (001 with two user sessions, 002 idle), their VMs' power state and tags.
+  $pw = $global:St.power
+  $hpRe = [regex]::Escape($hpId)   # not -like: '?' is a wildcard there
+  if ($Method -eq 'PATCH' -and $pw.failHostPoolPatch -and $Path -match "^$hpRe\?") {
+    return [pscustomobject]@{ StatusCode=403; Content='{"error":{"code":"AuthorizationFailed","message":"The client does not have authorization to perform action Microsoft.DesktopVirtualization/hostpools/write."}}' }
+  }
+  if ($Path -match 'rg-avdlz-dev-avd/providers/Microsoft.DesktopVirtualization/hostPools\?') { return & $ok @{ value=@(@{ name='vdpool-avdlz-dev'; id=$hpId; tags=$pw.hpTags; properties=@{ startVMOnConnect=$pw.startVMOnConnect } }) } }
+  if ($Method -eq 'PATCH' -and $Path -match "^$hpRe\?") {
+    # Kept as a hashtable: Get-AzResource returns Tags that way.
+    $b = $Payload | ConvertFrom-Json; $pw.startVMOnConnect = $b.properties.startVMOnConnect
+    $pw.hpTags = @{}; foreach ($t in $b.tags.PSObject.Properties) { $pw.hpTags[$t.Name] = $t.Value }
+    return & $ok @{}
+  }
+  if ($Path -match "^$hpRe/sessionHosts\?") {
+    return & $ok @{ value=@('avdlzdsh-001', 'avdlzdsh-002' | ForEach-Object { @{ name="vdpool-avdlz-dev/$_"; properties=@{ resourceId="$S/resourceGroups/rg-avdlz-dev-hosts/providers/Microsoft.Compute/virtualMachines/$_"; sessions=$pw.sessions[$_]; allowNewSession=$pw.allowNew[$_] } } }) }
+  }
+  if ($Method -eq 'PATCH' -and $Path -match "^$hpRe/sessionHosts/([^/?]+)\?") { $pw.allowNew[$Matches[1]] = ($Payload | ConvertFrom-Json).properties.allowNewSession; return & $ok @{} }
+  if ($Path -match "/sessionHosts/([^/]+)/userSessions\?") { $h = $Matches[1]; return & $ok @{ value=@(1..([int]$pw.sessions[$h]) | Where-Object { $_ } | ForEach-Object { @{ name="vdpool-avdlz-dev/$h/$_" } }) } }
+  if ($Path -match '/sendMessage\?') { return & $ok @{} }
+  if ($Path -match 'virtualMachines/([^/]+)/providers/Microsoft.Resources/tags/default') {
+    $b = $Payload | ConvertFrom-Json; $h = $Matches[1]
+    if ($b.operation -eq 'Merge') { $pw.vmTags[$h] = @($pw.vmTags[$h]) + @($b.properties.tags.PSObject.Properties.Name) | Where-Object { $_ } | Select-Object -Unique }
+    else { $pw.vmTags[$h] = @($pw.vmTags[$h] | Where-Object { $_ -notin $b.properties.tags.PSObject.Properties.Name }) }
+    return & $ok @{}
+  }
+  if ($Path -match 'virtualMachines/([^/]+)/instanceView\?') { return & $ok @{ statuses=@(@{ code='ProvisioningState/succeeded' }, @{ code="PowerState/$($pw.state[$Matches[1]])" }) } }
+  if ($Method -eq 'POST' -and $Path -match 'virtualMachines/([^/]+)/deallocate\?') { $pw.state[$Matches[1]] = 'deallocating'; return [pscustomobject]@{ StatusCode=202; Content='' } }
   if ($Path -match '/sessionHosts\?') { return & $ok @{ value=@(@{ name='vdpool-avdlz-dev-demo/avdlzddemo-001'; properties=@{status='Available';allowNewSession=$true;agentVersion='1.0.9999';sessionHostHealthCheckResults=@(@{healthCheckName='DomainJoinedCheck';healthCheckResult='HealthCheckSucceeded'})} }) } }
   if ($Path -match '/runCommands/') { return & $ok @{ properties=@{ instanceView=@{executionState='Succeeded';exitCode=0} } } }
   if ($Path -match 'policyAssignments\?') { return & $ok @{ value=@(@{name='avdlz-allowed-locations';id="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-allowed-locations"},@{name='avdlz-inherit-rg-tag-workload';id="$S/pa2";identity=@{principalId='44444444-0000-0000-0000-000000000000'}},@{name='someone-else';id='x'}) } }
@@ -126,11 +154,14 @@ function Get-AzRoleAssignment { param($Scope,$RoleDefinitionName,$ObjectId,$Obje
 }
 function New-AzRoleAssignment { param($ObjectId,$ObjectType,$RoleDefinitionName,$Scope,$ErrorAction) Log "RBAC + $RoleDefinitionName $ObjectId"; $global:St.roleAssignments += [pscustomobject]@{Scope=$Scope;RoleDefinitionName=$RoleDefinitionName;ObjectId=$ObjectId;ObjectType=$ObjectType} }
 function Remove-AzRoleAssignment { param($ObjectId,$RoleDefinitionName,$Scope,$InputObject,$ErrorAction) Log "RBAC - $RoleDefinitionName $ObjectId $($InputObject.ObjectId)"; $global:St.roleAssignments = @($global:St.roleAssignments | ? { $_.ObjectId -ne $ObjectId }) }
+function Get-AzAccessToken { param($ResourceUrl,$ErrorAction) [pscustomobject]@{ Token = (ConvertTo-SecureString 'cs-token' -AsPlainText -Force) } }
 function Get-AzADUser { param([switch]$SignedIn,$ErrorAction) [pscustomobject]@{Id='me';UserPrincipalName='admin@contoso.com'} }
 $global:St.registered = @()
 $global:St.unregistered = @('Microsoft.GuestConfiguration')
 $global:St.skuZones = @('1','2','3')
 $global:St.hostSize = 'Standard_D4as_v5'
+$global:St.power = @{ startVMOnConnect = $true; hpTags = @{ workload = 'avd' }; sessions = @{ 'avdlzdsh-001' = 2; 'avdlzdsh-002' = 0 }
+  allowNew = @{ 'avdlzdsh-001' = $true; 'avdlzdsh-002' = $true }; state = @{ 'avdlzdsh-001' = 'running'; 'avdlzdsh-002' = 'running' }; vmTags = @{}; failHostPoolPatch = $false }
 $global:St.deletedVaults = @()
 $global:St.groups = @(@{id='11111111-1111-1111-1111-111111111111';displayName='AVD Users';securityEnabled=$true},@{id='22222222-2222-2222-2222-222222222222';displayName='AVD Admins';securityEnabled=$true})
 $global:St.avdSp = $true
@@ -208,7 +239,20 @@ function Invoke-PSRule { param($InputPath,$Module,$Outcome,$Path,$WarningAction,
 # ---- Azure Retail Prices API (Get-AvdRetailPrice). Prices here are placeholders for tests, not real
 # list prices. Shapes follow the public API: Items, NextPageLink; one VM query spans two pages.
 $global:St.pricesDown = $false
-function Invoke-RestMethod { param($Uri,$Method,$ErrorAction)
+function Invoke-RestMethod { param($Uri,$Method,$Headers,$Body,$ContentType,$ErrorAction)
+  # The Automation managed identity endpoint (IDENTITY_ENDPOINT) and ARM, as the power runbook calls them.
+  if ($Uri -like 'http://127.0.0.1:42/msi/token*') { if ($Headers['X-IDENTITY-HEADER'] -ne 'test-header') { throw 'missing X-IDENTITY-HEADER' }; return [pscustomobject]@{ access_token='mi-token' } }
+  if ($Uri -match '^https://management\.azure\.com(/.*)$') {
+    $armPath = $Matches[1]
+    if ($Headers.Authorization -notin 'Bearer mi-token', 'Bearer cs-token') { throw "no bearer token for $Uri" }
+    $r = Invoke-AzRestMethod -Path $armPath -Method $Method -Payload $Body
+    if ($r.StatusCode -ge 400) {
+      # As Invoke-RestMethod in PowerShell 7: the body in ErrorDetails.
+      $e = [System.Management.Automation.ErrorRecord]::new([Exception]::new("Response status code does not indicate success: $($r.StatusCode)."), 'HttpError', 'InvalidOperation', $null)
+      $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($r.Content); throw $e
+    }
+    if ($r.Content) { return ($r.Content | ConvertFrom-Json) } else { return }
+  }
   if ($Uri -notmatch '^https://prices\.azure\.com/api/retail/prices') { throw "unmocked REST $Uri" }
   Log "PRICE $Uri"
   if ($global:St.pricesDown) { throw 'Response status code does not indicate success: 503 (Service Unavailable).' }

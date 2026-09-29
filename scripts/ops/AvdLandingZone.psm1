@@ -655,7 +655,15 @@ function Test-AvdLandingZoneResource {
     else { Add-AvdCheckResult $area 'Storage private endpoint with DNS zone group' 'Fail' -Remediation 'Profiles will not resolve privately. Check the storage private endpoint.' }
   }
   if ($Lz.HostPool) {
-    $hpAccess = (Get-AzResource -ResourceId $Lz.HostPool.ResourceId -ExpandProperties).Properties.publicNetworkAccess
+    $hpResource = Get-AzResource -ResourceId $Lz.HostPool.ResourceId -ExpandProperties
+    # Auto shutdown (decision 0011): a budget alert (or an operator) locked the hosts off.
+    $lock = if ($hpResource.Tags) { $hpResource.Tags['avdlz-power-lock'] }
+    if ($lock) {
+      Add-AvdCheckResult $area 'Session hosts not locked by auto shutdown' 'Warn' -Id 'power-locked' -Data @{ lock = $lock } `
+        -Detail "Locked ($lock): hosts are drained and deallocated, the scaling plan skips them and Start VM on Connect is off." `
+        -Remediation "Resume when the cost is dealt with: ./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Resume -NamePrefix $($Lz.NamePrefix) -Environment $($Lz.Environment)"
+    }
+    $hpAccess = $hpResource.Properties.publicNetworkAccess
     if ($hpAccess -eq 'EnabledForClientsOnly' -and -not $Lz.AvdDnsZoneId) {
       Add-AvdCheckResult $area 'AVD Private Link DNS zone' 'Fail' -Detail 'Host pool is private for session hosts but its endpoint has no DNS zone.' -Remediation 'Link privatelink.wvd.microsoft.com to the spoke or pass central zones.'
     }
