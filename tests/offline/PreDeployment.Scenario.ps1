@@ -49,3 +49,8 @@ $global:Calls.Clear()
 Invoke-ScenarioStep 'vault-recover' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre -Fix -Force }
 Write-Host "RESULT vault-recover-calls $(@($global:Calls | Where-Object { $_ -match '^ARM PUT' }) -join ' | ')"
 Invoke-ScenarioStep 'vault-recovered' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre }
+
+# The portal's Cost step with both power settings off: hosts run around the clock, and the
+# estimate and state line say so.
+$global:St.deletedVaults = @()
+Invoke-ScenarioStep 'power-off' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre -AutoShutdownTime none -StartVmOnConnect false -ActiveHoursPerWeek 168 }

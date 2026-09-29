@@ -3,11 +3,12 @@
 [`index.html`](index.html) is a static page (GitHub Pages: <https://nickprignano.github.io/avd-landing-zone/portal/>) that walks an operator through a deployment:
 
 1. **Choose a region.** Latency measured from the browser; the closest region is selected.
-2. **Size and cost.** Starts at the minimum viable kit (one E4as_v5 host). You choose the number of hosts, or Automatic sizes it from people and workload; the commands then carry the sizing, and the preflight prices it ([decision 0010](../decisions/0010-sizing-and-cost.md)).
-3. **Pre-deployment preflight.**
-4. **Deploy the landing zone.**
-5. **Post-deployment setup.**
-6. **Sign in** (and optionally the demo host pool).
+2. **Size the host pool.** Starts at the minimum viable kit (one E4as_v5 host). You choose the number of hosts, or Automatic sizes it from people and workload; the commands then carry the sizing ([decision 0010](../decisions/0010-sizing-and-cost.md)).
+3. **Cost.** Toggles for Start VM on Connect and the scheduled auto shutdown, and the hours people work. Together they give the hours each host runs. The commands deploy the settings, the preflight prices the plan, and after that the toggles reprice it in the page (`repriceEstimate`).
+4. **Pre-deployment preflight.**
+5. **Deploy the landing zone.**
+6. **Post-deployment setup.**
+7. **Sign in** (and optionally the demo host pool).
 
 The steps sit side by side and scroll horizontally (swipe, trackpad, or Back and Next); a step stays hidden until the deployment reaches it, so the page opens on the latency check. A pasted output moves to the step it leads to. Next skips a step without running it, for an operator who did it earlier or elsewhere.
 
@@ -33,7 +34,7 @@ Written by `Write-AvdPortalState` (PowerShell scripts) and `portal_state` (`depl
 | `stage` | `predeploy`, `deploy`, `postdeploy`, `demo` or `cleanup`. |
 | `status` | `ready` / `notready` (preflight, demo, cleanup); `started` / `succeeded` / `failed` / `whatif` (`deploy.sh`). A deployment prints `started` before it begins, so output cut off by a disconnect still says what is running. |
 | `fix` | Whether the run used `-Fix`. |
-| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`) (whichever apply). |
+| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `power` (`autoShutdownTime`: `HH:mm` or `none`, `startVmOnConnect`: the power settings a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`) (whichever apply). |
 | `counts` | `pass`, `fail`, `warn`, `fixed`, `skip`. |
 | `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognize the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
 

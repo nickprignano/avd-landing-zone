@@ -53,5 +53,9 @@ param autoShutdownRunbookUri = empty(readEnvironmentVariable('AVD_RUNBOOK_URI', 
   ? 'https://raw.githubusercontent.com/nickprignano/avd-landing-zone/master/scripts/automation/Invoke-AvdPowerAction.ps1'
   : readEnvironmentVariable('AVD_RUNBOOK_URI', '')
 // Dev stops every idle host at 20:00 Central, and a budget alert (when set) locks them.
-param autoShutdownTime = '20:00'
+// The deployment portal's Cost step and deploy.sh (--auto-shutdown HH:mm | none, --start-vm-on-connect
+// true | false) override the schedule and Start VM on Connect through AVD_AUTO_SHUTDOWN_TIME and
+// AVD_START_VM_ON_CONNECT (empty = the value here; 'none' = no scheduled stop).
+param autoShutdownTime = empty(readEnvironmentVariable('AVD_AUTO_SHUTDOWN_TIME', '')) ? '20:00' : (readEnvironmentVariable('AVD_AUTO_SHUTDOWN_TIME', '') == 'none' ? '' : readEnvironmentVariable('AVD_AUTO_SHUTDOWN_TIME', ''))
+param startVmOnConnect = empty(readEnvironmentVariable('AVD_START_VM_ON_CONNECT', '')) ? true : bool(readEnvironmentVariable('AVD_START_VM_ON_CONNECT', ''))
 param autoShutdownTimeZone = 'Central Standard Time'

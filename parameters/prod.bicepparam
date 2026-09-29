@@ -66,3 +66,8 @@ param autoShutdownRunbookUri = empty(readEnvironmentVariable('AVD_RUNBOOK_URI', 
   : readEnvironmentVariable('AVD_RUNBOOK_URI', '')
 // Prod relies on the scaling plan for daily scale-down; a budget alert locks the hosts
 // (autoShutdownBudgetAction = 'Lock', the default) until someone runs Resume.
+// No scheduled stop by default. The deployment portal's Cost step and deploy.sh (--auto-shutdown
+// HH:mm | none, --start-vm-on-connect true | false) set one and Start VM on Connect through
+// AVD_AUTO_SHUTDOWN_TIME and AVD_START_VM_ON_CONNECT (empty = the value here; 'none' = no scheduled stop).
+param autoShutdownTime = empty(readEnvironmentVariable('AVD_AUTO_SHUTDOWN_TIME', '')) || readEnvironmentVariable('AVD_AUTO_SHUTDOWN_TIME', '') == 'none' ? '' : readEnvironmentVariable('AVD_AUTO_SHUTDOWN_TIME', '')
+param startVmOnConnect = empty(readEnvironmentVariable('AVD_START_VM_ON_CONNECT', '')) ? true : bool(readEnvironmentVariable('AVD_START_VM_ON_CONNECT', ''))

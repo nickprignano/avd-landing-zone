@@ -19,6 +19,9 @@ param logAnalyticsWorkspaceResourceId string
 param usersGroupObjectId string
 param avdServicePrincipalObjectId string
 
+@description('Start a deallocated session host when a user connects. Off: hosts must already be running (the scaling plan starts them on weekdays). The host pool carries tag avdlz-start-vm-on-connect = false, so Resume after an auto-shutdown lock keeps it off.')
+param startVmOnConnect bool = true
+
 @description('Deploy the autoscale plan. The demo host pool turns this off so its host stays up while it is validated.')
 param deployScalingPlan bool = true
 
@@ -41,14 +44,14 @@ module hostPool 'br/public:avm/res/desktop-virtualization/host-pool:0.8.1' = {
   params: {
     name: hostPoolName
     location: location
-    tags: tags
+    tags: startVmOnConnect ? tags : union(tags, { 'avdlz-start-vm-on-connect': 'false' })
     hostPoolType: 'Pooled'
     loadBalancerType: 'BreadthFirst'
     preferredAppGroupType: 'Desktop'
     maxSessionLimit: maxSessionLimit
     customRdpProperty: rdpProperties
     validationEnvironment: validationEnvironment
-    startVMOnConnect: true
+    startVMOnConnect: startVmOnConnect
     // Registration token for this deployment's session hosts; short-lived on purpose.
     tokenValidityLength: 'PT4H'
     // Private Link: session hosts reach the service privately, users still

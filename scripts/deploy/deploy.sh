@@ -4,11 +4,13 @@
 # Usage:
 #   ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
 #       --users-group "AVD Users" --admins-group "AVD Admins" [--what-if] \
-#       [--hosts 3 --vm-size Standard_D8as_v5 --max-sessions 16 --profile-quota 600]
+#       [--hosts 3 --vm-size Standard_D8as_v5 --max-sessions 16 --profile-quota 600] \
+#       [--auto-shutdown 20:00|none --start-vm-on-connect true|false]
 #
 # -l is the region the landing zone is deployed to (it sets AVD_LOCATION, which
 # the parameter files read). The sizing flags (from the deployment portal's sizing
-# step) override the parameter file's session hosts and profile share the same way.
+# step) override the parameter file's session hosts and profile share the same way;
+# the power flags (its Cost step) override the scheduled stop and Start VM on Connect.
 #
 # Environment variables (any flag above overrides):
 #   AVD_USERS_GROUP_ID, AVD_ADMINS_GROUP_ID   Entra group object IDs
@@ -26,10 +28,12 @@ HOSTS=""
 VM_SIZE=""
 MAX_SESSIONS=""
 PROFILE_QUOTA=""
+AUTO_SHUTDOWN=""
+START_ON_CONNECT=""
 AVD_APP_ID="9cdead84-a844-4324-93f2-b2e6bb768d07"   # Azure Virtual Desktop first-party app
 
 usage() {
-  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -44,6 +48,8 @@ while [[ $# -gt 0 ]]; do
     --vm-size) VM_SIZE="$2"; shift 2 ;;
     --max-sessions) MAX_SESSIONS="$2"; shift 2 ;;
     --profile-quota) PROFILE_QUOTA="$2"; shift 2 ;;
+    --auto-shutdown) AUTO_SHUTDOWN="$2"; shift 2 ;;
+    --start-vm-on-connect) START_ON_CONNECT="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -54,6 +60,8 @@ for n in "$HOSTS" "$MAX_SESSIONS" "$PROFILE_QUOTA"; do
   [[ -z "$n" || "$n" =~ ^[0-9]+$ ]] || { echo "Sizing flags take whole numbers: '$n'"; exit 1; }
 done
 [[ -z "$VM_SIZE" || "$VM_SIZE" =~ ^Standard_[A-Za-z0-9_]+$ ]] || { echo "Not a VM size: '$VM_SIZE'"; exit 1; }
+[[ -z "$AUTO_SHUTDOWN" || "$AUTO_SHUTDOWN" == none || "$AUTO_SHUTDOWN" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { echo "--auto-shutdown takes HH:mm or none: '$AUTO_SHUTDOWN'"; exit 1; }
+[[ -z "$START_ON_CONNECT" || "$START_ON_CONNECT" == true || "$START_ON_CONNECT" == false ]] || { echo "--start-vm-on-connect takes true or false: '$START_ON_CONNECT'"; exit 1; }
 
 echo "==> Checking az and Bicep"
 az bicep version >/dev/null 2>&1 || az bicep install
@@ -133,6 +141,13 @@ if [[ -n "$HOSTS$VM_SIZE$MAX_SESSIONS$PROFILE_QUOTA" ]]; then
   echo "    Sizing: ${HOSTS:-file} host(s) x ${VM_SIZE:-file size}, ${MAX_SESSIONS:-file} sessions per host, ${PROFILE_QUOTA:-file} GiB profile share"
 fi
 
+# Power overrides from the portal's Cost step (empty = the parameter file's values; none = no scheduled stop).
+AVD_AUTO_SHUTDOWN_TIME="$AUTO_SHUTDOWN" AVD_START_VM_ON_CONNECT="$START_ON_CONNECT"
+export AVD_AUTO_SHUTDOWN_TIME AVD_START_VM_ON_CONNECT
+if [[ -n "$AUTO_SHUTDOWN$START_ON_CONNECT" ]]; then
+  echo "    Power: scheduled stop ${AUTO_SHUTDOWN:-file}, Start VM on Connect ${START_ON_CONNECT:-file}"
+fi
+
 DEPLOY_NAME="avdlz-$(basename "$PARAM_FILE" .bicepparam)-$(date +%Y%m%d-%H%M%S)"
 
 # Machine-readable state for the deployment portal (docs/portal). Schema: docs/portal/README.md.
@@ -144,6 +159,9 @@ portal_state() {
   local sizing=""
   if [[ -n "$HOSTS$VM_SIZE$MAX_SESSIONS$PROFILE_QUOTA" ]]; then
     sizing=",\"sizing\":{\"hosts\":${HOSTS:-null},\"vmSize\":$( [[ -n "$VM_SIZE" ]] && json_str "$VM_SIZE" || printf null ),\"maxSessions\":${MAX_SESSIONS:-null},\"profileQuotaGiB\":${PROFILE_QUOTA:-null}}"
+  fi
+  if [[ -n "$AUTO_SHUTDOWN$START_ON_CONNECT" ]]; then
+    sizing="$sizing,\"power\":{\"autoShutdownTime\":$( [[ -n "$AUTO_SHUTDOWN" ]] && json_str "$AUTO_SHUTDOWN" || printf null ),\"startVmOnConnect\":${START_ON_CONNECT:-null}}"
   fi
   printf '<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"%s","context":{"parameterFile":%s,"location":%s,"usersGroup":%s,"adminsGroup":%s,"deploymentName":%s%s%s}} AVDLZ-STATE>>>\n' \
     "$1" "$(json_str "$PARAM_FILE")" "$(json_str "$LOCATION")" "$(json_str "$USERS_GROUP")" "$(json_str "$ADMINS_GROUP")" "$(json_str "$DEPLOY_NAME")" "$sizing" "${2:-}"

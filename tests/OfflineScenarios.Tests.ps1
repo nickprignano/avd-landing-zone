@@ -79,7 +79,7 @@ Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
   }
   It 'gives the portal the context and structured failures it needs' {
     $s = Get-PortalState $out
-    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' | Should -Be 'predeploy:notready predeploy:ready predeploy:ready predeploy:notready predeploy:notready predeploy:ready predeploy:ready predeploy:ready predeploy:ready predeploy:ready'
+    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' | Should -Be 'predeploy:notready predeploy:ready predeploy:ready predeploy:notready predeploy:notready predeploy:ready predeploy:ready predeploy:ready predeploy:ready predeploy:ready predeploy:ready'
     $s[1].context.parameterFile | Should -Be 'parameters/dev.bicepparam'
     $s[1].context.location | Should -Be 'northcentralus'
     $s[1].context.usersGroup | Should -Be 'AVD Users'
@@ -96,6 +96,17 @@ Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
     $calls | Should -Match 'PUT /subscriptions/[^/]+/resourcegroups/rg-avdlz-dev-management\?.*\| ARM PUT .*/vaults/kvavdlzdevs7abc123\?'
     $calls | Should -Not -Match 'kvavdlzdevq9xyz789'   # same prefix, another region
     Get-StepExit $out 'vault-recovered' | Should -Be 0
+  }
+  It 'prices the power settings from the portal''s Cost step and reports them to the portal' {
+    Get-StepExit $out 'power-off' | Should -Be 0
+    $s = (Get-PortalState $out)[10]
+    $s.context.power.autoShutdownTime | Should -Be 'none'
+    $s.context.power.startVmOnConnect | Should -BeFalse
+    $s.context.sizing | Should -BeNullOrEmpty                   # power alone is not a sizing
+    $c = $s.context.estimate.lines | Where-Object key -eq 'compute'
+    $c.quantity | Should -Be 728                                 # 1 host x 168 h x 52 / 12
+    $c.note | Should -Be '168 h/week each (no Start VM on Connect: hosts stay up through the working day; no scheduled stop)'
+    ((Get-PortalState $out)[1].context.estimate.lines | Where-Object key -eq 'compute').note | Should -Match 'Start VM on Connect starts hosts on demand; stopped daily at 20:00'
   }
   It 'check mode points at -Fix for the vault' {
     ((Get-PortalState $out)[3].failures | Where-Object id -eq 'kv-softdeleted').remediation | Should -Match 'Rerun with -Fix to recover it into rg-avdlz-prod-management'
@@ -266,8 +277,12 @@ Describe 'Auto shutdown runbook' {
   It 'Resume (from Cloud Shell, with the operator''s token) undoes the lock without starting hosts' {
     Get-PowerLine 'resume' | Should -Match 'startVMOnConnect=True locked=False allowNew=True,True state=deallocating,deallocating excluded=False,False deallocateCalls=0'
   }
+  It 'Resume keeps Start VM on Connect off when the deployment turned it off (host pool tag)' {
+    Get-PowerLine 'resume-svmoc-off' | Should -Match 'startVMOnConnect=False locked=False'
+    $out | Should -Match 'Clear the lock \(Start VM on Connect stays off, as deployed\)'
+  }
   It 'reports what ARM returned when a call fails' { $out | Should -Match 'RESULT error ARM PATCH .*vdpool-avdlz-dev.* failed: .*AuthorizationFailed' }
   It 'prints a portal state line for each action' {
-    ((Get-PortalState $out | Where-Object stage -eq 'power') | ForEach-Object status) -join ' ' | Should -Be 'stopped locked locked resumed'
+    ((Get-PortalState $out | Where-Object stage -eq 'power') | ForEach-Object status) -join ' ' | Should -Be 'stopped locked locked resumed locked resumed'
   }
 }

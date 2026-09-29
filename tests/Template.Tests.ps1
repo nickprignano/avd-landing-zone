@@ -63,6 +63,21 @@ Describe 'Sizing overrides' {
       $d.maxSessionLimit.value | Should -Be 8
     }
   }
+
+  # The portal's Cost step passes these through deploy.sh (--auto-shutdown, --start-vm-on-connect).
+  It 'takes the scheduled stop and Start VM on Connect from the environment; none = no scheduled stop' {
+    $read = { param($file) ((& $script:bicep build-params $file --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters }
+    foreach ($case in @(
+        @{ file = 'parameters/dev.bicepparam'; time = ''; svmoc = ''; expectTime = '20:00'; expectSvmoc = $true },
+        @{ file = 'parameters/prod.bicepparam'; time = ''; svmoc = ''; expectTime = ''; expectSvmoc = $true },
+        @{ file = 'parameters/dev.bicepparam'; time = 'none'; svmoc = 'false'; expectTime = ''; expectSvmoc = $false },
+        @{ file = 'parameters/prod.bicepparam'; time = '18:30'; svmoc = 'true'; expectTime = '18:30'; expectSvmoc = $true })) {
+      $env:AVD_AUTO_SHUTDOWN_TIME = $case.time; $env:AVD_START_VM_ON_CONNECT = $case.svmoc
+      try { $p = & $read $case.file } finally { $env:AVD_AUTO_SHUTDOWN_TIME = ''; $env:AVD_START_VM_ON_CONNECT = '' }
+      $p.autoShutdownTime.value | Should -Be $case.expectTime -Because "$($case.file) time='$($case.time)'"
+      $p.startVmOnConnect.value | Should -Be $case.expectSvmoc -Because "$($case.file) svmoc='$($case.svmoc)'"
+    }
+  }
 }
 
 Describe 'Auto shutdown' {

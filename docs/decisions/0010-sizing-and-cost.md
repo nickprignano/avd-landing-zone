@@ -15,7 +15,9 @@ Operators decide how many session hosts they need, and of what size, from the nu
 - **Memory-optimized E-series and Premium SSD by default.** Hosts shared by many users run out of memory before CPU. The template and parameter files default to `Standard_E4as_v5`, the portal suggests E-series for every workload, and OS disks are Premium SSD.
   - Warnings: below 1 GiB per session on any size, and below 1.5 GiB on D-series, where the warning names the E-series equivalent.
   - Deployed D-series hosts are not resized silently: the preflight warns first. The post-deployment quota check and the demo use the deployed size.
-- **The estimate is in the state line** (`context.estimate`). The portal shows it next to the sizing.
+- **The estimate is in the state line** (`context.estimate`). The portal shows it on its own **Cost** step, after sizing.
+- **Power settings belong to the cost.** The Cost step has toggles for Start VM on Connect and the scheduled auto shutdown, plus the hours people work. From them it derives the hours each host runs. The estimate uses an upper bound where the schedule, not use, decides: 168 hours without a scheduled stop, and the 07:00-to-stop weekday window without Start VM on Connect. The settings are deployed, not just priced: `AVD_START_VM_ON_CONNECT` and `AVD_AUTO_SHUTDOWN_TIME` (`none` = no stop), `deploy.sh --start-vm-on-connect --auto-shutdown`, and the preflight's `-StartVmOnConnect -AutoShutdownTime`. The preflight reports them in `context.power`.
+- **The portal reprices** a preflight estimate from its unit prices when the hours, host count or profile share change. A different size or region is marked stale instead, because the unit prices would be wrong.
 
 ## Consequences
 - The quota request, availability checks and deployment all follow the sizing the operator chose.

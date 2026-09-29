@@ -58,7 +58,7 @@
 
   /* Progress tracker: one row, scrolls sideways on narrow screens. Steps not reached yet are locked. */
   ol.steps { list-style: none; display: flex; gap: 6px; padding: 0 0 4px; margin: 0 0 12px; overflow-x: auto; scroll-snap-type: x proximity; }
-  ol.steps li { flex: 1 0 150px; scroll-snap-align: start; }
+  ol.steps li { flex: 1 0 118px; scroll-snap-align: start; }
   ol.steps button { width: 100%; height: 100%; text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--border); font-weight: 500; padding: 8px 10px; }
   ol.steps .n { display: inline-block; width: 1.5em; font-weight: 700; color: var(--muted); }
   ol.steps li.done button { border-color: var(--good); }
@@ -114,6 +114,14 @@
   td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; }
   ul.notes { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
   #estimate-line { margin-top: 4px; }
+  label.switch { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+  label.switch > input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: 0 0 auto; width: 38px; height: 22px; border-radius: 11px; background: var(--border); position: relative; cursor: pointer; margin-top: 1px; transition: background .15s; }
+  label.switch > input[type=checkbox]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--panel); transition: left .15s; }
+  label.switch > input[type=checkbox]:checked { background: var(--accent); }
+  label.switch > input[type=checkbox]:checked::after { left: 19px; }
+  label.switch > input[type=checkbox]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=time] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; margin-left: 6px; }
+  input[type=time]:disabled { opacity: .5; }
   progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
 </style>
 </head>
@@ -181,9 +189,9 @@
         <button type="button" class="linkbtn hidden" id="more" aria-controls="rows" aria-expanded="false"></button>
       </div>
     </section>
-    <section class="slide" id="size-panel" data-step="size" aria-label="Size and cost">
-      <h2><span class="n"></span>Size and cost <span class="muted" style="font-weight:400">· <span id="size-summary"></span></span></h2>
-      <p class="status">Starts from the minimum viable kit: one memory-optimized E4as_v5 host and a 100&nbsp;GiB profile share. Choose the number of hosts, or Automatic to size them from how many people use them and how they work (Microsoft's multi-session guidance: light 6, medium 4, heavy 2, power 1 user per vCPU). It suggests memory-optimized E-series sizes, because hosts shared by many users run out of memory before CPU, and every host gets a Premium SSD OS disk. Once you apply a sizing, the commands carry it: the pre-deployment preflight checks quota and availability for it and prices it in your region at Azure list prices, and <code>deploy.sh</code> deploys it.</p>
+    <section class="slide" id="size-panel" data-step="size" aria-label="Size the host pool">
+      <h2><span class="n"></span>Size the host pool <span class="muted" style="font-weight:400">· <span id="size-summary"></span></span></h2>
+      <p class="status">Starts from the minimum viable kit: one memory-optimized E4as_v5 host and a 100&nbsp;GiB profile share. Choose the number of hosts, or Automatic to size them from how many people use them and how they work (Microsoft's multi-session guidance: light 6, medium 4, heavy 2, power 1 user per vCPU). It suggests memory-optimized E-series sizes, because hosts shared by many users run out of memory before CPU, and every host gets a Premium SSD OS disk. Once you apply a sizing, the commands carry it: the pre-deployment preflight checks quota and availability for it, and <code>deploy.sh</code> deploys it. The next step prices it.</p>
       <div id="pools"></div>
       <div class="row">
         <button type="button" class="secondary" id="add-pool" disabled title="The landing zone deploys one host pool today">Add a host pool</button>
@@ -196,8 +204,24 @@
         <button class="secondary" id="size-clear">Use the parameter file's values</button>
         <span class="status" id="size-status" role="status"></span>
       </div>
-      <h3 style="margin-top:16px">Estimated monthly cost</h3>
+    </section>
+    <section class="slide" id="cost-panel" data-step="cost" aria-label="Cost">
+      <h2><span class="n"></span>Cost <span class="muted" style="font-weight:400">· <span id="cost-summary"></span></span></h2>
+      <p class="status">Most of the cost is the hours the session hosts run, and two settings decide those hours. They are deployed with the landing zone. The pre-deployment preflight prices the plan at Azure list prices for your region; after that, changing a setting here reprices it without running anything.</p>
+      <div class="pool">
+        <label class="switch"><input type="checkbox" id="power-svmoc"><span><strong>Start VM on Connect</strong><br><span class="muted">Starts a stopped host when someone connects, so hosts don't need to be running before people arrive.</span></span></label>
+        <label class="switch"><input type="checkbox" id="power-shutdown"><span><strong>Scheduled auto shutdown</strong> <input type="time" id="power-time" step="900" aria-label="Stop time"><br><span class="muted">Stops the hosts every day at this time (idle hosts; the runbook also stops or locks them when the budget alert fires).</span></span></label>
+        <div class="row" style="margin-top:10px">
+          <label class="field" style="flex:0 1 220px"><span>Hours people work per week</span><input type="number" id="hours-worked" min="1" max="168"></label>
+          <p class="status" id="hours-basis" style="flex:1 1 300px;margin:0"></p>
+        </div>
+        <p class="status" id="power-source" style="margin:8px 0 0"></p>
+      </div>
       <div id="estimate"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="cost-continue">Continue to the preflight</button>
+        <button class="secondary hidden" id="power-reset">Use the parameter file's power settings</button>
+      </div>
     </section>
     <section class="slide" id="slide-predeploy" data-step="predeploy" aria-label="Pre-deployment preflight">
       <h2><span class="n"></span>Pre-deployment preflight</h2>
@@ -278,10 +302,12 @@
   $('repo-link').href = repoUrl;
   $('issues-link').href = repoUrl + '/issues';
 
-  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null) });
+  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null), power: load('power', null), hoursWorkedPerWeek: load('hoursWorked', 50) });
   var step = load('step', null);
-  // Furthest step reached: later steps stay hidden until the deployment gets there.
-  var reached = Math.max(load('reached', 0), stepIndex(step || 'region'));
+  // Furthest step reached, by id: later steps stay hidden until the deployment gets there. (Saved as an
+  // index before the Cost step existed; those indexes are read against the old step list.)
+  var OLD_STEPS = ['region', 'size', 'predeploy', 'deploy', 'postdeploy', 'signin'];
+  var reached = Math.max(stepIndex(load('reachedStep', null) || (load('reached', null) !== null ? OLD_STEPS[Math.min(5, load('reached', 0))] : 'region')), stepIndex(step || 'region'));
   var ranked = load('ranked', null);
   var lastAnalysis = null;
 
@@ -290,13 +316,15 @@
     Object.keys(patch || {}).forEach(function (k) { if (FIELDS.indexOf(k) >= 0 && patch[k]) cfg[k] = patch[k]; });
     // A pasted preflight says which sizing it validated; the next commands keep it.
     if (patch && patch.sizing && patch.sizing.hosts) { cfg.sizing = patch.sizing; save('sizing', cfg.sizing); }
+    // ... and which power settings it priced.
+    if (patch && patch.power && patch.power.autoShutdownTime) { cfg.power = { startVmOnConnect: patch.power.startVmOnConnect !== false, autoShutdownTime: patch.power.autoShutdownTime }; save('power', cfg.power); }
     var keep = {}; FIELDS.forEach(function (k) { keep[k] = cfg[k]; }); save('config', keep);
     FIELDS.forEach(function (k) { var el = $(k); if (el && el.value !== cfg[k]) el.value = cfg[k] || ''; });
     $('region-summary').textContent = cfg.location + (ranked && ranked.length ? (ranked[0] === cfg.location ? ' (closest measured)' : '') : ' (not measured yet)');
     $('region-skip').textContent = 'Skip: use ' + cfg.location + ' (change it in Deployment settings)';
   }
   FIELDS.forEach(function (k) {
-    $(k).addEventListener('change', function () { var p = {}; p[k] = $(k).value.trim(); setConfig(p); lastAnalysis = null; render(); if (typeof renderSizeResult === 'function') renderSizeResult(); });
+    $(k).addEventListener('change', function () { var p = {}; p[k] = $(k).value.trim(); setConfig(p); lastAnalysis = null; render(); renderSizeResult(); renderCost(); });
   });
 
   // ---------------------------------------------------------------- deployment settings (header link)
@@ -317,7 +345,7 @@
   function goTo(id, opts) {
     opts = opts || {};
     var i = stepIndex(id);
-    if (i > reached) { reached = i; save('reached', reached); }
+    if (i > reached) { reached = i; save('reachedStep', P.STEPS[i].id); }
     if (id !== (step || 'region')) lastAnalysis = null;
     step = id; save('step', step);
     render();
@@ -445,7 +473,7 @@
       chip.className = 'chip ' + (good ? 'good' : r.status === 'started' ? 'ok' : 'poor');
       head.textContent = r.headline; head.classList.remove('hidden');
       var eline = $('estimate-line');
-      if (r.estimate) { eline.textContent = 'Estimated cost: ' + money(r.estimate.total, r.estimate.currency) + ' per month at list prices (details under Size and cost).'; eline.classList.remove('hidden'); }
+      if (r.estimate) { eline.textContent = 'Estimated cost: ' + money(r.estimate.total, r.estimate.currency) + ' per month at list prices (details on the Cost step).'; eline.classList.remove('hidden'); }
       else eline.classList.add('hidden');
       renderFindings(r);
       renderActions(r.actions);
@@ -462,7 +490,8 @@
     if (!text.trim()) { $('paste-status').textContent = 'Paste some output first.'; return; }
     var r = P.analyze(text, config(), { rankedRegions: ranked, currentStep: step || 'predeploy' });
     setConfig(r.config);
-    if (r.estimate) { estimate = r.estimate; save('estimate', estimate); renderEstimate(); }
+    if (r.estimate) { estimate = r.estimate; save('estimate', estimate); }
+    renderCost();
     renderSizeResult();
     if (r.step && r.step !== (step || 'region')) goTo(r.step);
     lastAnalysis = r;
@@ -475,8 +504,8 @@
   $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); refreshReport(true); });
   $('reset').addEventListener('click', function () {
     try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
-    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
-    pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)]; estimate = null; renderPools(); renderEstimate();
+    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null, power: null, hoursWorkedPerWeek: 50 }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
+    pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)]; estimate = null; renderPools(); renderCost();
     $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render(); showStep();
   });
 
@@ -522,7 +551,7 @@
   var POOL_FIELDS = [
     ['name', 'Name', 'text'], ['users', 'People who will use it', 'number'], ['concurrencyPercent', 'Signed in at the busiest time (%)', 'number'],
     ['workload', 'How they work', 'workload'], ['vmSize', 'VM size', 'vmsize'], ['hostCount', 'Session hosts', 'hostcount'], ['spareHost', 'Spare host (Automatic only)', 'spare'],
-    ['profileGiBPerUser', 'Profile size per person (GiB)', 'number'], ['activeHoursPerWeek', 'Hours per week hosts run', 'number']
+    ['profileGiBPerUser', 'Profile size per person (GiB)', 'number']
   ];
   function money(n, cur) { return (n === null || n === undefined) ? '–' : Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + (cur || ''); }
   function poolResult(i) { return P.computePool(pools[i], cfg.environment); }
@@ -566,8 +595,7 @@
       ['Sessions per host (max session limit)', String(r.sessionsPerHost)],
       ['Capacity', r.capacity + ' sessions'],
       ['vCPU quota needed', r.vcpus + ' vCPUs'],
-      ['Profile share', r.profileQuotaGiB + ' GiB provisioned (storage SKU from ' + cfg.parameterFile.replace(/^parameters\//, '') + ')'],
-      ['Hosts run', r.activeHoursPerWeek + ' hours per week (the scaling plan stops them outside use)']
+      ['Profile share', r.profileQuotaGiB + ' GiB provisioned (storage SKU from ' + cfg.parameterFile.replace(/^parameters\//, '') + ')']
     ].forEach(function (kv) { var tr = el('tr'); tr.appendChild(el('td', '', kv[0])); tr.appendChild(el('td', '', kv[1])); tb.appendChild(tr); });
     var ul = $('size-notes'); ul.textContent = ''; r.notes.forEach(function (n) { ul.appendChild(el('li', '', n)); });
     var s = cfg.sizing, mine = P.toSizing(r);
@@ -577,45 +605,81 @@
   }
   function renderSizeSummary() {
     var s = cfg.sizing;
-    $('size-summary').textContent = s ? s.hosts + ' × ' + s.vmSize.replace('Standard_', '') + ', ' + (s.hosts * s.maxSessions) + ' sessions' + (estimate && estimate.total !== undefined ? ', about ' + money(estimate.total, estimate.currency) + '/month' : '') : 'not set (the parameter file\'s values)';
+    $('size-summary').textContent = s ? s.hosts + ' × ' + s.vmSize.replace('Standard_', '') + ', ' + (s.hosts * s.maxSessions) + ' sessions' : 'not set (the parameter file\'s values)';
   }
-  function renderEstimate() {
+  // ---------------------------------------------------------------- cost (power settings reprice the estimate)
+  function renderCost() {
+    var p = P.effectivePower(cfg), hh = P.hostHours(cfg.hoursWorkedPerWeek, p);
+    $('power-svmoc').checked = p.startVmOnConnect;
+    var on = p.autoShutdownTime !== 'none';
+    $('power-shutdown').checked = on; $('power-time').disabled = !on;
+    if (on) $('power-time').value = p.autoShutdownTime; else if (!$('power-time').value) $('power-time').value = '20:00';
+    $('hours-worked').value = cfg.hoursWorkedPerWeek;
+    $('hours-basis').textContent = 'Each host runs about ' + hh.hoursPerWeek + ' hours a week. ' + hh.basis;
+    $('power-source').textContent = p.fromFile ? 'These are what ' + cfg.parameterFile + ' deploys. Change them and the commands carry your choice.' : 'The commands deploy these settings (deploy.sh --auto-shutdown ' + p.autoShutdownTime + ' --start-vm-on-connect ' + p.startVmOnConnect + ').';
+    $('power-reset').classList.toggle('hidden', p.fromFile);
+
     var box = $('estimate'); box.textContent = '';
-    if (!estimate) {
-      box.appendChild(el('p', 'status', 'The pre-deployment preflight prices the sizing in ' + cfg.location + ' at Azure list prices (the public Retail Prices API, from Cloud Shell). Paste its output and the estimate appears here.'));
+    var e = P.repriceEstimate(estimate, cfg.sizing, hh.hoursPerWeek, cfg.location);
+    $('cost-summary').textContent = e && !e.stale.length ? 'about ' + money(e.total, e.currency) + '/month' : hh.hoursPerWeek + ' h/week per host';
+    if (!e) {
+      var r = poolResult(0), s = cfg.sizing || P.toSizing(r), q = Math.round(s.hosts * hh.hoursPerWeek * 52 / 12 * 10) / 10;
+      box.appendChild(el('h3', '', 'What gets priced'));
+      var t0 = el('table', 'kv'), tb0 = el('tbody');
+      [['Session hosts', s.hosts + ' × ' + s.vmSize.replace('Standard_', '') + ' × ' + hh.hoursPerWeek + ' h/week = ' + q + ' host-hours a month'],
+        ['OS disks', s.hosts + ' × Premium SSD P10'], ['Profile share', s.profileQuotaGiB + ' GiB provisioned'], ['Also', 'private endpoints, NAT Gateway and its public IP']
+      ].forEach(function (kv) { var tr = el('tr'); tr.appendChild(el('td', '', kv[0])); tr.appendChild(el('td', '', kv[1])); tb0.appendChild(tr); });
+      t0.appendChild(tb0); var w0 = el('div', 'table-wrap'); w0.appendChild(t0); box.appendChild(w0);
+      box.appendChild(el('p', 'status', 'The pre-deployment preflight prices these in ' + cfg.location + ' at Azure list prices (the public Retail Prices API, from Cloud Shell). Paste its output and the estimate appears here; then these settings reprice it as you change them.'));
       return;
     }
+    box.appendChild(el('h3', '', 'Estimated monthly cost'));
+    if (e.stale.length) box.appendChild(el('p', 'status', 'This estimate was ' + e.stale.join(' and ') + ', so the settings above can\'t reprice it. Run the pre-deployment preflight again.'));
     var t = el('table'), tb = el('tbody');
-    var head = el('tr'); head.appendChild(el('th', '', 'Item')); var th = el('th', 'money', 'Per month'); head.appendChild(th); t.appendChild(head);
-    (estimate.lines || []).forEach(function (l) {
+    var head = el('tr'); head.appendChild(el('th', '', 'Item')); head.appendChild(el('th', 'money', 'Per month')); t.appendChild(head);
+    e.lines.forEach(function (l) {
       var tr = el('tr'), td = el('td', 'region'); td.appendChild(document.createTextNode(l.item));
       td.appendChild(el('span', 'muted', l.quantity + ' ' + l.unit + ' × ' + l.unitPrice + ' per ' + l.unitOfMeasure + (l.note ? ' · ' + l.note : '')));
-      tr.appendChild(td); tr.appendChild(el('td', 'money', money(l.monthly, estimate.currency))); tb.appendChild(tr);
+      tr.appendChild(td); tr.appendChild(el('td', 'money', money(l.monthly, e.currency))); tb.appendChild(tr);
     });
-    var tot = el('tr'); tot.appendChild(el('td', '', 'Total (list prices, ' + estimate.location + ')')); var tt = el('td', 'money'); tt.appendChild(el('strong', '', money(estimate.total, estimate.currency))); tot.appendChild(tt); tb.appendChild(tot);
+    var tot = el('tr'); tot.appendChild(el('td', '', 'Total (list prices, ' + e.location + ')')); var tt = el('td', 'money'); tt.appendChild(el('strong', '', money(e.total, e.currency))); tot.appendChild(tt); tb.appendChild(tot);
     t.appendChild(tb); var wrap = el('div', 'table-wrap'); wrap.appendChild(t); box.appendChild(wrap);
     var notes = el('ul', 'notes');
-    if (estimate.alwaysOnTotal !== null && estimate.alwaysOnTotal !== undefined) notes.appendChild(el('li', '', 'If the hosts ran around the clock: ' + money(estimate.alwaysOnTotal, estimate.currency) + ' per month.'));
-    (estimate.unpriced || []).forEach(function (u) { notes.appendChild(el('li', '', 'Not priced: ' + u.item + ' (no matching meter; not in the total).')); });
-    notes.appendChild(el('li', '', 'Not included (usage-based): ' + (estimate.excluded || []).join('; ') + '.'));
+    if (e.alwaysOnTotal !== null && e.alwaysOnTotal > e.total) notes.appendChild(el('li', '', 'Around the clock it would be ' + money(e.alwaysOnTotal, e.currency) + ' a month; these settings save ' + money(e.alwaysOnTotal - e.total, e.currency) + '.'));
+    e.unpriced.forEach(function (u) { notes.appendChild(el('li', '', 'Not priced: ' + u.item + ' (no matching meter; not in the total).')); });
+    notes.appendChild(el('li', '', 'Not included (usage-based): ' + e.excluded.join('; ') + '.'));
     notes.appendChild(el('li', '', 'Pay-as-you-go list prices; reservations, savings plans and agreements lower them.'));
     box.appendChild(notes);
   }
+  function setPower(patch) {
+    var p = P.effectivePower(cfg);
+    cfg.power = { startVmOnConnect: p.startVmOnConnect, autoShutdownTime: p.autoShutdownTime };
+    Object.keys(patch).forEach(function (k) { cfg.power[k] = patch[k]; });
+    save('power', cfg.power); lastAnalysis = null; renderCost(); render();
+  }
+  $('power-svmoc').addEventListener('change', function () { setPower({ startVmOnConnect: $('power-svmoc').checked }); });
+  $('power-shutdown').addEventListener('change', function () { setPower({ autoShutdownTime: $('power-shutdown').checked ? ($('power-time').value || '20:00') : 'none' }); });
+  $('power-time').addEventListener('change', function () { if (/^\d{2}:\d{2}$/.test($('power-time').value)) setPower({ autoShutdownTime: $('power-time').value }); });
+  $('hours-worked').addEventListener('input', function () {
+    var v = Math.round(Number($('hours-worked').value));
+    if (v >= 1 && v <= 168) { cfg.hoursWorkedPerWeek = v; save('hoursWorked', v); lastAnalysis = null; renderCost(); render(); }
+  });
+  $('power-reset').addEventListener('click', function () { cfg.power = null; save('power', null); lastAnalysis = null; renderCost(); render(); });
+  $('cost-continue').addEventListener('click', function () { goTo('predeploy'); });
+
   function applySizing(s) {
     cfg.sizing = s; save('sizing', s);
-    if (!s) { estimate = null; save('estimate', null); }
-    renderSizeResult(); renderEstimate(); lastAnalysis = null; render();
+    renderSizeResult(); renderCost(); lastAnalysis = null; render();
   }
   $('size-apply').addEventListener('click', function () {
     var r = poolResult(0);
     applySizing(P.toSizing(r));
-    estimate = null; save('estimate', null); renderEstimate(); renderSizeSummary();
     $('size-status').textContent = 'Applied: the commands now check and price ' + r.hosts + ' × ' + r.vmSize.replace('Standard_', '') + '.';
-    if (curIndex() <= stepIndex('size')) goTo('predeploy');
+    if (curIndex() <= stepIndex('size')) goTo('cost');
   });
   $('size-clear').addEventListener('click', function () {
     applySizing(null); $('size-status').textContent = 'The commands use the parameter file\'s sizing.';
-    if (curIndex() <= stepIndex('size')) goTo('predeploy');
+    if (curIndex() <= stepIndex('size')) goTo('cost');
   });
 
   // ---------------------------------------------------------------- region latency
@@ -689,7 +753,7 @@
       if (ok.length) {
         $('lat-status').textContent = 'Closest: ' + ok[0].display + ' (' + Math.round(ok[0].median) + ' ms). Selected for the deployment; click another row to change it, then select Next.';
         setConfig({ location: ok[0].name });
-        if (!step || step === 'region') { reached = Math.max(reached, stepIndex('size')); save('reached', reached); }
+        if (!step || step === 'region') { reached = Math.max(reached, stepIndex('size')); save('reachedStep', P.STEPS[reached].id); }
       }
       else $('lat-status').textContent = 'No region answered. A firewall or content blocker may be stopping the requests.';
       lastAnalysis = null;
@@ -729,9 +793,9 @@
   $('more').addEventListener('click', function () { expanded = !expanded; renderLatency(); });
 
   // ---------------------------------------------------------------- start
-  if (/^#(region|size)$/.test(location.hash) && stepIndex(location.hash.slice(1)) <= reached) step = location.hash.slice(1);
+  if (/^#(region|size|cost)$/.test(location.hash) && stepIndex(location.hash.slice(1)) <= reached) step = location.hash.slice(1);
   setConfig({});
-  renderPools(); renderEstimate();
+  renderPools(); renderCost();
   render(); showStep('instant');
 })();
 </script>

@@ -108,9 +108,12 @@ function Set-HostPoolLock {
   $tags = @{}
   if ($hp.tags) { foreach ($p in $hp.tags.PSObject.Properties) { $tags[$p.Name] = $p.Value } }
   if ($Locked) { $tags[$lockTag] = "$Reason $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" } else { $tags.Remove($lockTag) }
-  $verb = if ($Locked) { 'Turn off Start VM on Connect and mark the host pool locked' } else { 'Turn Start VM on Connect back on and clear the lock' }
+  # Resume restores what the deployment chose: the template tags the host pool
+  # avdlz-start-vm-on-connect = false when Start VM on Connect is off.
+  $startOnConnect = (-not $Locked) -and ($tags['avdlz-start-vm-on-connect'] -ne 'false')
+  $verb = if ($Locked) { 'Turn off Start VM on Connect and mark the host pool locked' } elseif ($startOnConnect) { 'Turn Start VM on Connect back on and clear the lock' } else { 'Clear the lock (Start VM on Connect stays off, as deployed)' }
   if ($PSCmdlet.ShouldProcess($hp.name, $verb)) {
-    Invoke-Arm -Method PATCH -Path "$($hp.id)?api-version=$apiAvd" -Body @{ tags = $tags; properties = @{ startVMOnConnect = (-not $Locked) } } | Out-Null
+    Invoke-Arm -Method PATCH -Path "$($hp.id)?api-version=$apiAvd" -Body @{ tags = $tags; properties = @{ startVMOnConnect = $startOnConnect } } | Out-Null
     $summary.changes++
     Write-Output "  $($hp.name): $verb"
   }
