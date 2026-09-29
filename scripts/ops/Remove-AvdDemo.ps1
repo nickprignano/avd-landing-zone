@@ -188,7 +188,10 @@ if ((Invoke-AvdArm -Path $diagPath -AllowNotFound) -and $PSCmdlet.ShouldProcess(
 }
 
 foreach ($d in @(Get-AzDeployment -ErrorAction SilentlyContinue | Where-Object DeploymentName -like 'avdlz-*')) {
-  if ($PSCmdlet.ShouldProcess($d.DeploymentName, 'Delete deployment record')) { Remove-AzDeployment -Name $d.DeploymentName | Out-Null }
+  if ($PSCmdlet.ShouldProcess($d.DeploymentName, 'Delete deployment record')) {
+    Remove-AzDeployment -Name $d.DeploymentName | Out-Null
+    Add-AvdCheckResult 'Subscription' "Deployment record $($d.DeploymentName)" 'Fixed' -Detail 'Deleted.'
+  }
 }
 
 if ($ResetDefender) {

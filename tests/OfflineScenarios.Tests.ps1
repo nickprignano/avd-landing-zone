@@ -46,6 +46,9 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     $real = $out.Substring($out.IndexOf('######## remove-lz'+"`n"))
     $real | Should -Match 'Key Vault kvavdlzdevabc is soft-deleted with purge protection'
   }
+  It 'reports each deployment record it deletes' {
+    $out.Substring($out.IndexOf('######## remove-lz'+"`n")) | Should -Match '\[FIXED\] Deployment record avdlz-governance-x'
+  }
   It 'removes every landing zone resource group' {
     Get-StepExit $out 'remove-lz' | Should -Be 0
     $out | Should -Match 'RESULT remove-lz remainingRgs=0'
