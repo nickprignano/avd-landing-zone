@@ -3,7 +3,7 @@
 [`index.html`](index.html) is a static page (GitHub Pages: <https://nickprignano.github.io/avd-landing-zone/portal/>) that walks an operator through a deployment:
 
 1. **Choose a region.** Latency measured from the browser; the closest region is selected.
-2. **Size and cost.** Sessions, hosts and profile share from people and workload; the commands then carry the sizing, and the preflight prices it ([decision 0010](../decisions/0010-sizing-and-cost.md)).
+2. **Size and cost.** Starts at the minimum viable kit (one E4as_v5 host). You choose the number of hosts, or Automatic sizes it from people and workload; the commands then carry the sizing, and the preflight prices it ([decision 0010](../decisions/0010-sizing-and-cost.md)).
 3. **Pre-deployment preflight.**
 4. **Deploy the landing zone.**
 5. **Post-deployment setup.**
@@ -35,7 +35,7 @@ Written by `Write-AvdPortalState` (PowerShell scripts) and `portal_state` (`depl
 | `fix` | Whether the run used `-Fix`. |
 | `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`) (whichever apply). |
 | `counts` | `pass`, `fail`, `warn`, `fixed`, `skip`. |
-| `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognise the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
+| `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognize the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
 
 Add fields; don't rename or remove them without bumping `v` and keeping the old reading in `portal-core.js`.
 
@@ -59,11 +59,11 @@ The same value always gets the same placeholder. Reports carry `<!-- avdlz-porta
 
 ## Sizing
 
-`portal-core.js` keeps sizing per host pool: `HOST_POOL_DEFAULTS` describes one entry (name, type, users, `concurrencyPercent`, workload, `vmSize`, `spareHost`, `profileGiBPerUser`, `activeHoursPerWeek`), `computePool()` sizes it, and `toSizing()` turns the result into the object the commands use. The page stores a list (`avdlz.portal.hostPools`) with one entry while `MAX_HOST_POOLS` is 1. To add host pools: raise the limit, give each entry its own commands, and extend the templates. The single-pool commands don't change.
+`portal-core.js` keeps sizing per host pool: `HOST_POOL_DEFAULTS` describes one entry (name, type, users, `concurrencyPercent`, workload, `vmSize`, `hostCount` (a number, or `'auto'`), `spareHost` (Automatic only), `profileGiBPerUser`, `activeHoursPerWeek`), `computePool()` sizes it, and `toSizing()` turns the result into the object the commands use. The page stores a list (`avdlz.portal.hostPools`) with one entry while `MAX_HOST_POOLS` is 1. To add host pools: raise the limit, give each entry its own commands, and extend the templates. The single-pool commands don't change.
 
 ## Changing it
 
 - **A script's output or parameters change:** run the portal tests. One of them checks that every parameter the portal puts in a command exists in the script.
-- **A real paste is analysed wrongly:** add it (redacted) to `tests/portal/fixtures/`, add a test, then fix `portal-core.js`. This is the retro routine (`.claude/skills/retro`).
+- **A real paste is analyzed wrongly:** add it (redacted) to `tests/portal/fixtures/`, add a test, then fix `portal-core.js`. This is the retro routine (`.claude/skills/retro`).
 - **A new kind of private value turns up in a report:** add it to `fixtures/pii-sample.txt` and to the `PRIVATE` list in `tests/portal/report.test.mjs`, then add the pattern to `report.js`. A new GUID in `bicep/` or `scripts/` must go into `PUBLIC_IDS`, and a test checks this.
 - **A new known error:** add it to `ARM_ERRORS` (deployment errors) or `shellProblems` (errors before a script can report) in `portal-core.js`, with a fixture.

@@ -23,7 +23,7 @@ module workspace 'br/public:avm/res/operational-insights/workspace:0.16.1' = {
   }
 }
 
-// AVD Insights only recognises DCRs whose name starts with "microsoft-avdi-".
+// AVD Insights only recognizes DCRs whose name starts with "microsoft-avdi-".
 // Counters and event logs follow the Microsoft-published AVD Insights set.
 module avdInsightsDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
   name: 'dcr-avd-insights'

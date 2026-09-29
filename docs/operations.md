@@ -52,9 +52,11 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 
 ## Sizing and cost
 
-The portal's **Size and cost** step sizes the host pool from how many people use it, how many are signed in at the busiest time, and how they work. It uses Microsoft's multi-session guidance: light 6, medium 4, heavy 2 and power 1 user per vCPU.
+The portal's **Size and cost** step starts from the **minimum viable kit**, the same as `parameters/dev.bicepparam`: one `Standard_E4as_v5` host and a 100 GiB profile share. You choose the number of hosts (1–50). The portal shows the sessions they carry, and warns when that is fewer than the people expected at the busiest time or when a single host leaves no redundancy.
 
-It **suggests memory-optimised E-series** sizes: E4as_v5 for light work, E8as_v5 for medium and heavy, and E16as_v5 for power users. Hosts shared by many users run out of memory before CPU, and E-series has 8 GiB per vCPU against 4 on D-series. Every host has a **Premium SSD** OS disk. The template and both parameter files default to `Standard_E4as_v5`.
+Choose **Automatic** to size the host pool from how many people use it, how many are signed in at the busiest time, and how they work instead. It uses Microsoft's multi-session guidance: light 6, medium 4, heavy 2 and power 1 user per vCPU. Only Automatic adds a spare host, and in prod it never goes below two hosts. A number you choose is kept as it is.
+
+It **suggests memory-optimized E-series** sizes: E4as_v5 for light work, E8as_v5 for medium and heavy, and E16as_v5 for power users. Hosts shared by many users run out of memory before CPU, and E-series has 8 GiB per vCPU against 4 on D-series. Every host has a **Premium SSD** OS disk. The template and both parameter files default to `Standard_E4as_v5`.
 
 **Memory warnings.** Both the portal and the preflight warn below 1 GiB of memory per session on any size. On a D-series size they warn below 1.5 GiB and name the E-series equivalent.
 
@@ -77,7 +79,7 @@ bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus -
 - private endpoints;
 - the NAT Gateway and its public IP.
 
-It also shows the cost if the hosts ran around the clock. Usage-based charges are listed as not included: Log Analytics, data processed, backup, Defender and licences. Each line must match exactly one price meter. A line that matches none, or several, is reported with the meters the API returned instead of being guessed, and is left out of the total. The portal shows the estimate after you paste the output. Reservations, savings plans and agreements lower these prices.
+It also shows the cost if the hosts ran around the clock. Usage-based charges are listed as not included: Log Analytics, data processed, backup, Defender and licenses. Each line must match exactly one price meter. A line that matches none, or several, is reported with the meters the API returned instead of being guessed, and is left out of the total. The portal shows the estimate after you paste the output. Reservations, savings plans and agreements lower these prices.
 
 The sizing covers one pooled host pool, which is what the landing zone deploys. The portal keeps it as a list of host pools, so more can be added later ([decision 0010](decisions/0010-sizing-and-cost.md)).
 

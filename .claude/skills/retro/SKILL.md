@@ -21,9 +21,9 @@ A finding is only captured when something automated would fail if it came back. 
 |---|---|
 | Bicep / compiled template | `tests/Template.Tests.ps1`: compile the parameter files and assert on the nested deployment |
 | A pure function in `AvdLandingZone.psm1` | `tests/AvdLandingZone.Tests.ps1` with `Mock -ModuleName AvdLandingZone` |
-| A flow across scripts, or an Azure behaviour | a new or extended `tests/offline/<Name>.Scenario.ps1` (print `RESULT <step> ...`) plus assertions in `tests/OfflineScenarios.Tests.ps1` |
+| A flow across scripts, or an Azure behavior | a new or extended `tests/offline/<Name>.Scenario.ps1` (print `RESULT <step> ...`) plus assertions in `tests/OfflineScenarios.Tests.ps1` |
 | Something to check in the customer's subscription | a preflight check (`Add-AvdCheckResult`) with a remediation, and `-Fix` if it can be fixed safely |
-| Process or operator behaviour | a rule in `CLAUDE.md` |
+| Process or operator behavior | a rule in `CLAUDE.md` |
 
 Prove the guard works: break the fix temporarily and confirm the guard fails, then restore it.
 

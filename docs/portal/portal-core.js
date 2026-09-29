@@ -7,7 +7,7 @@
  * Input: whatever the operator pasted. The scripts end every run with a state line:
  *   <<<AVDLZ-STATE {json} AVDLZ-STATE>>>
  * (schema in docs/portal/README.md). Output from before state lines existed, and errors that
- * stop a script before it can print one, are recognised from their text.
+ * stop a script before it can print one, are recognized from their text.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -48,7 +48,7 @@
 
   // ---------------------------------------------------------------- sizing (decision 0010)
   // Users per vCPU for Windows multi-session hosts, from Microsoft's session host sizing guidance.
-  // Suggested sizes are memory-optimised E-series: with many users on one host, memory runs out
+  // Suggested sizes are memory-optimized E-series: with many users on one host, memory runs out
   // before CPU (8 GiB per vCPU, against 4 on D-series). Hosts use Premium SSD OS disks.
   var WORKLOADS = {
     light: { label: 'Light: a few line-of-business apps, data entry', usersPerVcpu: 6, suggestedSize: 'Standard_E4as_v5' },
@@ -56,7 +56,7 @@
     heavy: { label: 'Heavy: many apps at once, large files', usersPerVcpu: 2, suggestedSize: 'Standard_E8as_v5' },
     power: { label: 'Power: developers, analysts, light graphics', usersPerVcpu: 1, suggestedSize: 'Standard_E16as_v5' }
   };
-  // Sizes suited to multi-session hosts (vCPUs, memory in GiB), memory-optimised first.
+  // Sizes suited to multi-session hosts (vCPUs, memory in GiB), memory-optimized first.
   var VM_SIZES = {
     Standard_E4as_v5: { vcpu: 4, ramGiB: 32, recommended: true }, Standard_E8as_v5: { vcpu: 8, ramGiB: 64, recommended: true }, Standard_E16as_v5: { vcpu: 16, ramGiB: 128, recommended: true },
     Standard_E4s_v5: { vcpu: 4, ramGiB: 32, recommended: true }, Standard_E8s_v5: { vcpu: 8, ramGiB: 64, recommended: true }, Standard_E16s_v5: { vcpu: 16, ramGiB: 128, recommended: true },
@@ -64,10 +64,13 @@
     Standard_D4s_v5: { vcpu: 4, ramGiB: 16 }, Standard_D8s_v5: { vcpu: 8, ramGiB: 32 }, Standard_D16s_v5: { vcpu: 16, ramGiB: 64 }
   };
   var OS_DISK = 'Premium SSD (P10, 128 GiB)';
-  // spareHost: true / false, or null for automatic (a spare in prod).
-  // One entry per host pool. The landing zone deploys one pooled host pool today; the list shape
-  // leaves room for more (each would get its own sizing and, later, its own deployment).
-  var HOST_POOL_DEFAULTS = { name: 'Pooled desktops', type: 'pooled', users: 50, concurrencyPercent: 80, workload: 'medium', vmSize: '', spareHost: null, profileGiBPerUser: 10, activeHoursPerWeek: 50 };
+  // hostCount: a number of hosts, or 'auto' to size from people and workload.
+  // spareHost (automatic sizing only): true / false, or null for automatic (a spare in prod).
+  // Defaults are the minimum viable kit, matching parameters/dev.bicepparam: one E4as_v5 host and
+  // a 100 GiB profile share. One entry per host pool. The landing zone deploys one pooled host pool
+  // today; the list shape leaves room for more (each would get its own sizing and, later, its own deployment).
+  var HOST_POOL_DEFAULTS = { name: 'Pooled desktops', type: 'pooled', users: 10, concurrencyPercent: 80, workload: 'medium', vmSize: 'Standard_E4as_v5', hostCount: 1, spareHost: null, profileGiBPerUser: 5, activeHoursPerWeek: 50 };
+  var MAX_HOSTS = 50;
   var MAX_HOST_POOLS = 1;
 
   function num(v, d) { var n = Number(v); return isFinite(n) && n > 0 ? n : d; }
@@ -75,27 +78,40 @@
   // Sizing for one host pool: hosts, sessions per host, vCPUs to request quota for, profile share size.
   function computePool(spec, environment) {
     var p = merge(HOST_POOL_DEFAULTS, spec || {}), notes = [];
+    // '' is a choice here ('Suggested' size, 'Automatic' host count), not a missing value.
+    ['vmSize', 'hostCount'].forEach(function (k) { if (spec && spec[k] === '') p[k] = ''; });
     var w = WORKLOADS[p.workload] || WORKLOADS.medium;
     var vmSize = p.vmSize || w.suggestedSize, vm = VM_SIZES[vmSize];
     if (!vm) { vmSize = w.suggestedSize; vm = VM_SIZES[vmSize]; notes.push('Unknown size; using ' + vmSize + '.'); }
     var users = Math.round(num(p.users, 1));
     var concurrent = Math.max(1, Math.ceil(users * Math.min(num(p.concurrencyPercent, 100), 100) / 100));
     var sessionsPerHost = Math.max(1, vm.vcpu * w.usersPerVcpu);
-    var hosts = Math.ceil(concurrent / sessionsPerHost);
-    var spare = p.spareHost === true || p.spareHost === 'true' || (environment === 'prod' && p.spareHost !== false && p.spareHost !== 'false');
-    if (spare) { hosts += 1; notes.push('One spare host, so a host can be drained or fail without turning users away.'); }
-    if (environment === 'prod' && hosts < 2) { hosts = 2; notes.push('At least two hosts in prod (the Well-Architected review flags one).'); }
+    var auto = p.hostCount === 'auto' || p.hostCount === '' || p.hostCount === null || p.hostCount === undefined;
+    var hosts;
+    if (auto) {
+      hosts = Math.ceil(concurrent / sessionsPerHost);
+      var spare = p.spareHost === true || p.spareHost === 'true' || (environment === 'prod' && p.spareHost !== false && p.spareHost !== 'false');
+      if (spare) { hosts += 1; notes.push('One spare host, so a host can be drained or fail without turning users away.'); }
+      if (environment === 'prod' && hosts < 2) { hosts = 2; notes.push('At least two hosts in prod (the Well-Architected review flags one).'); }
+    }
+    else {
+      // The number chosen is kept; the notes say what it means.
+      hosts = Math.min(MAX_HOSTS, Math.max(1, Math.round(num(p.hostCount, 1))));
+      if (hosts * sessionsPerHost < concurrent)
+        notes.push(hosts + ' host' + (hosts > 1 ? 's' : '') + ' carry ' + hosts * sessionsPerHost + ' sessions, but ' + concurrent + ' people are expected at the busiest time. Add hosts, choose a larger size, or choose Automatic.');
+      if (hosts === 1) notes.push('One host: no redundancy. Users can\'t sign in while it is drained, updated or down.' + (environment === 'prod' ? ' The Well-Architected review flags one host in prod.' : ''));
+    }
     // Premium file shares are provisioned (minimum 100 GiB); 20% headroom over the expected profile sizes.
     var profileQuotaGiB = Math.max(100, Math.ceil(users * num(p.profileGiBPerUser, 10) * 1.2 / 100) * 100);
     // Too little memory per session: below 1 GiB on any size, below 1.5 GiB on a D-series (the
     // preflight applies the same rule).
     var ramPerSession = vm.ramGiB / sessionsPerHost, isE = /^Standard_E/.test(vmSize);
     if (ramPerSession < 1 || (ramPerSession < 1.5 && !isE))
-      notes.push('Only ' + ramPerSession.toFixed(1) + ' GiB of memory per session. ' + (isE ? 'Use a larger E-series size.' : 'The memory-optimised ' + vmSize.replace(/^Standard_D/, 'Standard_E') + ' has twice the memory for the same vCPUs.'));
+      notes.push('Only ' + ramPerSession.toFixed(1) + ' GiB of memory per session. ' + (isE ? 'Use a larger E-series size.' : 'The memory-optimized ' + vmSize.replace(/^Standard_D/, 'Standard_E') + ' has twice the memory for the same vCPUs.'));
     return {
       name: p.name, workload: p.workload, users: users, concurrentUsers: concurrent, vmSize: vmSize, vcpuPerHost: vm.vcpu, ramGiBPerHost: vm.ramGiB,
       memoryPerSessionGiB: Math.round(ramPerSession * 10) / 10, osDisk: OS_DISK,
-      sessionsPerHost: sessionsPerHost, hosts: hosts, vcpus: hosts * vm.vcpu, capacity: hosts * sessionsPerHost,
+      sessionsPerHost: sessionsPerHost, hosts: hosts, hostCountAuto: auto, vcpus: hosts * vm.vcpu, capacity: hosts * sessionsPerHost,
       profileQuotaGiB: profileQuotaGiB, activeHoursPerWeek: Math.min(168, Math.round(num(p.activeHoursPerWeek, 50))), notes: notes
     };
   }
@@ -430,7 +446,7 @@
 
   /*
    * analyze(text, config, options) -> {
-   *   recognised, stage, status, headline, source ('state' | 'text' | 'none'),
+   *   recognized, stage, status, headline, source ('state' | 'text' | 'none'),
    *   problems [{what, fix}], failures [...], warnings [...],
    *   actions [{title, why, command}], step (next step id), config (updated with the run's context)
    * }
@@ -448,7 +464,7 @@
     if (state && state.context) cfg = merge(cfg, state.context);
     if (state && state.context && state.context.parameterFile && !state.context.environment) cfg.environment = envFromFile(state.context.parameterFile) || cfg.environment;
 
-    var result = { recognised: !!state || problems.length > 0, source: source, problems: problems, config: cfg, failures: [], warnings: [], actions: [], stage: null, status: null, headline: '', step: options.currentStep || null,
+    var result = { recognized: !!state || problems.length > 0, source: source, problems: problems, config: cfg, failures: [], warnings: [], actions: [], stage: null, status: null, headline: '', step: options.currentStep || null,
       estimate: (state && state.context && state.context.estimate) || null, sizing: (state && state.context && state.context.sizing) || null };
     if (state) {
       var d = decide(state, cfg, { text: text, rankedRegions: options.rankedRegions });
@@ -470,7 +486,7 @@
       });
       result.headline = result.headline || 'The step did not run to completion';
     }
-    if (!result.recognised) {
+    if (!result.recognized) {
       result.headline = 'No landing zone output found';
       result.actions = [{ title: 'Paste the whole output of the command', why: 'Include everything from the command to the prompt that follows it. The scripts end with a line starting <<<AVDLZ-STATE, which is what this page reads.', command: '' }];
     }
@@ -510,5 +526,5 @@
     }
   }
 
-  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, computePool: computePool, toSizing: toSizing, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
+  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
 });

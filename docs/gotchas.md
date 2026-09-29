@@ -12,7 +12,7 @@ If the storage deployment fails on SKU, set `profileStorageSku = 'Premium_LRS'`.
 `deploy.sh` registers `Microsoft.Compute/EncryptionAtHost` and waits for it. If you deploy another way, register it first or set `encryptionAtHost = false`.
 
 ### Intune enrollment needs Intune
-With `enrollInIntune = true` and no Intune licence in the tenant, the Entra join extension fails. Set it to `false` for lab tenants.
+With `enrollInIntune = true` and no Intune license in the tenant, the Entra join extension fails. Set it to `false` for lab tenants.
 
 ## During and after deployment
 

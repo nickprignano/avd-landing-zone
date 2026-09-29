@@ -61,7 +61,7 @@ test('redact: every fixture keeps the analysis the portal made of it', () => {
   for (const f of fixtures) {
     const text = fixture(f);
     const a = P.analyze(text, {}), b = P.analyze(R.redact(text).text, {});
-    assert.equal(b.recognised, a.recognised, f);
+    assert.equal(b.recognized, a.recognized, f);
     assert.equal(b.source, a.source, f);
     assert.equal(b.stage, a.stage, f);
     assert.equal(b.status, a.status, f);

@@ -50,7 +50,7 @@ Brand-new subscriptions often start with **very low vCPU quota** — this is the
 az vm list-usage --location northcentralus -o table | grep -i "standard e"
 ```
 
-The dev parameters deploy one `Standard_E4as_v5` (4 vCPUs, memory-optimised; the *Standard EASv5 Family* quota). New subscriptions often have none. The pre-deployment preflight checks it, and the deployment portal builds the quota request. You can also use Portal → **Subscriptions → Usage + quotas**.
+The dev parameters deploy one `Standard_E4as_v5` (4 vCPUs, memory-optimized; the *Standard EASv5 Family* quota). New subscriptions often have none. The pre-deployment preflight checks it, and the deployment portal builds the quota request. You can also use Portal → **Subscriptions → Usage + quotas**.
 
 ### 5. Create the two Entra groups
 
@@ -62,7 +62,7 @@ az ad group member add --group "AVD Users" --member-id $(az ad signed-in-user sh
 
 ### 6. Lab-specific parameter changes
 
-A personal tenant has no Intune licence, so edit `parameters/dev.bicepparam` and add:
+A personal tenant has no Intune license, so edit `parameters/dev.bicepparam` and add:
 
 ```bicep
 param enrollInIntune = false
@@ -99,6 +99,6 @@ Deleting the resource groups stops the VM and storage charges. The subscription 
 
 - **One free account per person.** If you've used the Azure free account before, you won't get the $200 credit again — sign up pay-as-you-go instead.
 - **Entra tenant is included and free.** Entra ID Free comes with the billing account; you can't (and don't need to) cancel it.
-- **AVD access requires an eligible licence** for each user (e.g. Microsoft 365 E3/E5/Business Premium or Windows Enterprise E3/E5). For a short personal lab you're paying for the VMs and storage; check licensing before letting anyone else use it.
+- **AVD access requires an eligible license** for each user (e.g. Microsoft 365 E3/E5/Business Premium or Windows Enterprise E3/E5). For a short personal lab you're paying for the VMs and storage; check licensing before letting anyone else use it.
 - **Entra Kerberos for cloud-only identities**: a personal tenant only has cloud-only users. Check [Microsoft's current guidance](https://learn.microsoft.com/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable) for cloud-only support. If Entra Kerberos isn't working, FSLogix blocks sign-in on purpose (`PreventLoginWithFailure`); work through [gotchas](gotchas.md#fslogix-profiles-dont-attach).
 - These steps reflect Azure's signup flow as of mid-2026; Microsoft changes the portal and offer terms periodically, so if a screen differs, follow the on-screen prompts — the substance (card + phone + Microsoft account → tenant + subscription) is stable.

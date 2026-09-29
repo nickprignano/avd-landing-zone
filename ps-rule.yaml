@@ -1,4 +1,4 @@
-# PSRule for Azure — analyses the .bicepparam files (and the Bicep they use)
+# PSRule for Azure — analyzes the .bicepparam files (and the Bicep they use)
 # against the Azure Well-Architected Framework rules.
 # https://azure.github.io/PSRule.Rules.Azure/
 

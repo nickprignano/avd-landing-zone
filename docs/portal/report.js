@@ -193,7 +193,7 @@
     lines.push('- Step: ' + (input.step || 'none'));
     if (cfg.location || cfg.parameterFile) lines.push('- Settings: ' + [cfg.parameterFile, cfg.location, cfg.environment].filter(Boolean).join(', '));
     if (a) {
-      lines.push('- Read the output from: ' + ({ state: 'state line', text: 'text (no state line)', none: 'nothing recognised' }[a.source] || a.source));
+      lines.push('- Read the output from: ' + ({ state: 'state line', text: 'text (no state line)', none: 'nothing recognized' }[a.source] || a.source));
       if (a.headline) lines.push('- Analysis: ' + a.headline);
       var ids = (a.failures || []).concat(a.warnings || []).map(function (f) { return f.id || f.check; }).filter(Boolean);
       if (ids.length) lines.push('- Findings: ' + ids.join('; '));

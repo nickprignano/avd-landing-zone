@@ -7,7 +7,7 @@ The scaling plan already scales hosts down outside working hours, but it follows
 - a hard stop at a set time (dev especially);
 - a stop when spending passes the budget, which budgets alone can't do: they only notify, so costs keep running to the end of the month.
 
-A plain deallocate isn't enough for the budget case. Start VM on Connect and the scaling plan would start the hosts again at the next sign-in or ramp-up. The landing zone has no servers to run scripts on, and the repo's culture is that every behaviour is tested offline (decision 0006).
+A plain deallocate isn't enough for the budget case. Start VM on Connect and the scaling plan would start the hosts again at the next sign-in or ramp-up. The landing zone has no servers to run scripts on, and the repo's culture is that every behavior is tested offline (decision 0006).
 
 ## Decision
 - **One runbook, three actions** (`scripts/automation/Invoke-AvdPowerAction.ps1`):
@@ -33,4 +33,4 @@ A plain deallocate isn't enough for the budget case. Start VM on Connect and the
 - The budget is subscription-wide, so costs outside the landing zone can trigger the lock too. Its threshold and action are parameters.
 - Moving to PowerShell 7.4 later means a runtime environment, and the runbook's 5.1-compatible code keeps working there.
 - The runbook source comes from GitHub at deployment time. A fork or a private copy sets `AVD_RUNBOOK_URI` (`deploy.sh` does this for GitHub remotes).
-- Not verified against a real deployment yet: Automation and Logic App behaviour, budget-to-action-group delivery, and PSRule's view of the new resources. The first real deployment and CI will show.
+- Not verified against a real deployment yet: Automation and Logic App behavior, budget-to-action-group delivery, and PSRule's view of the new resources. The first real deployment and CI will show.

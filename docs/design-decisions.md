@@ -4,7 +4,7 @@ This landing zone is **opinionated on purpose**. Each opinion removes a class of
 
 ## Who this is for
 
-Organisations that are **cloud-native or going cloud-native with AVD**:
+Organizations that are **cloud-native or going cloud-native with AVD**:
 - identities in Entra ID (cloud-only or synced);
 - devices managed by Intune;
 - no requirement for AD DS-joined session hosts, Group Policy, or line of sight to domain controllers;

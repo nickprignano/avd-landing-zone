@@ -39,7 +39,7 @@ param(
   [Parameter(Mandatory)][ValidateSet('dev', 'test', 'prod')][string] $Environment,
   [string] $SubscriptionId,
 
-  # Empty: the same size as the landing zone's session hosts (memory-optimised E-series by default).
+  # Empty: the same size as the landing zone's session hosts (memory-optimized E-series by default).
   [string] $SessionHostVmSize,
   [ValidateRange(1, 5)][int] $SessionHostCount = 1,
   [int[]] $AvailabilityZones = @(),
@@ -229,8 +229,8 @@ if ($TestUserUpn) {
     $member = Invoke-AvdGraph -Method POST -Uri "v1.0/users/$($u.id)/checkMemberGroups" -Body @{ groupIds = @($lz.UsersGroupId) }
     if (@($member.value) -contains $lz.UsersGroupId) { Add-AvdCheckResult 'Test user' 'Member of the AVD Users group' 'Pass' }
     else { Add-AvdCheckResult 'Test user' 'Member of the AVD Users group' 'Fail' -Remediation 'Add the user (or a group they are in) to the AVD Users group.' }
-    if (@($u.assignedLicenses).Count) { Add-AvdCheckResult 'Test user' 'Has licences assigned' 'Pass' }
-    else { Add-AvdCheckResult 'Test user' 'Has licences assigned' 'Warn' -Remediation 'AVD needs an eligible licence (e.g. Microsoft 365 E3/E5/Business Premium, Windows Enterprise E3/E5).' }
+    if (@($u.assignedLicenses).Count) { Add-AvdCheckResult 'Test user' 'Has licenses assigned' 'Pass' }
+    else { Add-AvdCheckResult 'Test user' 'Has licenses assigned' 'Warn' -Remediation 'AVD needs an eligible license (e.g. Microsoft 365 E3/E5/Business Premium, Windows Enterprise E3/E5).' }
   }
   catch { Add-AvdCheckResult 'Test user' "Look up $TestUserUpn" 'Fail' -Detail $_.Exception.Message }
 }

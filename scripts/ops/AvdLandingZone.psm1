@@ -551,7 +551,7 @@ function Test-AvdResourceProvider {
   else { Add-AvdCheckResult $area $featureName 'Fail' -Detail "State: $featureState" -Remediation 'Rerun with -Fix, or set encryptionAtHost = false.' }
 }
 
-# Memory-optimised by default: multi-session hosts run out of memory before CPU (decision 0010).
+# Memory-optimized by default: multi-session hosts run out of memory before CPU (decision 0010).
 $script:DefaultVmSize = 'Standard_E4as_v5'
 
 function Get-AvdHostVmSize {
@@ -788,7 +788,7 @@ function Test-AvdCloudGroupSidTag {
     Add-AvdCheckResult $area "Storage app tagged $tag (cloud group SIDs in tickets)" 'Fixed'
   }
   else {
-    Add-AvdCheckResult $area "Storage app tagged $tag (cloud group SIDs in tickets)" 'Warn' -Detail 'Without it, NTFS entries for cloud-only groups are not honoured.' -Remediation 'Rerun with -Fix.'
+    Add-AvdCheckResult $area "Storage app tagged $tag (cloud group SIDs in tickets)" 'Warn' -Detail 'Without it, NTFS entries for cloud-only groups are not honored.' -Remediation 'Rerun with -Fix.'
   }
 }
 
@@ -1653,7 +1653,7 @@ function Get-AvdCostEstimate {
     lines              = @($lines)
     unpriced           = @($unpriced)
     excluded           = @('Log Analytics ingestion and retention (per GB)', 'NAT Gateway and private endpoint data processed (per GB)',
-      'Azure Backup of the profile share (when enabled)', 'Defender for Cloud plans (when enabled)', 'Windows / Microsoft 365 licences (per user)')
+      'Azure Backup of the profile share (when enabled)', 'Defender for Cloud plans (when enabled)', 'Windows / Microsoft 365 licenses (per user)')
   }
 }
 
@@ -1677,7 +1677,7 @@ function Test-AvdSizing {
     $perSession = $MemoryGiBPerHost / $max
     $isE = $Plan.sessionHostVmSize -match '^Standard_E'
     if ($perSession -lt 1 -or ($perSession -lt 1.5 -and -not $isE)) {
-      Add-AvdCheckResult 'Sizing' 'Memory per session' 'Warn' -Id 'sizing-memory' -Detail ("{0:N1} GiB per session ({1} GiB for {2} sessions on {3})." -f $perSession, $MemoryGiBPerHost, $max, $Plan.sessionHostVmSize) -Remediation $(if ($isE) { 'Lower maxSessionLimit (--max-sessions) or use a larger E-series size.' } else { "Use the memory-optimised E-series (e.g. $($Plan.sessionHostVmSize -replace '^Standard_D(\d+)(\w*)_v(\d)$', 'Standard_E$1$2_v$3')) with --vm-size, or lower maxSessionLimit." })
+      Add-AvdCheckResult 'Sizing' 'Memory per session' 'Warn' -Id 'sizing-memory' -Detail ("{0:N1} GiB per session ({1} GiB for {2} sessions on {3})." -f $perSession, $MemoryGiBPerHost, $max, $Plan.sessionHostVmSize) -Remediation $(if ($isE) { 'Lower maxSessionLimit (--max-sessions) or use a larger E-series size.' } else { "Use the memory-optimized E-series (e.g. $($Plan.sessionHostVmSize -replace '^Standard_D(\d+)(\w*)_v(\d)$', 'Standard_E$1$2_v$3')) with --vm-size, or lower maxSessionLimit." })
     }
   }
 
