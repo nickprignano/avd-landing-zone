@@ -28,7 +28,7 @@ param availabilityZones = []
 // --profile-quota) and the pre-deployment preflight override these through AVD_SESSION_HOST_COUNT,
 // AVD_SESSION_HOST_VM_SIZE, AVD_MAX_SESSION_LIMIT and AVD_PROFILE_QUOTA_GIB (empty = the value here).
 param sessionHostCount = empty(readEnvironmentVariable('AVD_SESSION_HOST_COUNT', '')) ? 1 : int(readEnvironmentVariable('AVD_SESSION_HOST_COUNT', ''))
-param sessionHostVmSize = empty(readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')) ? 'Standard_D4as_v5' : readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')
+param sessionHostVmSize = empty(readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')) ? 'Standard_E4as_v5' : readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')
 param maxSessionLimit = empty(readEnvironmentVariable('AVD_MAX_SESSION_LIMIT', '')) ? 8 : int(readEnvironmentVariable('AVD_MAX_SESSION_LIMIT', ''))
 
 // ---- Profiles ----

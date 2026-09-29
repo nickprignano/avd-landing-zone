@@ -91,8 +91,8 @@ param enableAvdPrivateLink bool = true
 @maxValue(200)
 param sessionHostCount int = 2
 
-@description('Session host VM size. Check vCPU quota and zonal availability first.')
-param sessionHostVmSize string = 'Standard_D4as_v5'
+@description('Session host VM size. Memory-optimised E-series by default: multi-session hosts run out of memory before CPU (8 GiB per vCPU, against 4 on D-series). Check vCPU quota (the Easv5 family) and zonal availability first.')
+param sessionHostVmSize string = 'Standard_E4as_v5'
 
 @description('Session host name prefix (max 11 chars; a 3-digit index is appended to stay within the 15-char Windows limit).')
 @maxLength(11)

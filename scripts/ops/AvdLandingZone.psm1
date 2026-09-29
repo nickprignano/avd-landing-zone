@@ -551,6 +551,18 @@ function Test-AvdResourceProvider {
   else { Add-AvdCheckResult $area $featureName 'Fail' -Detail "State: $featureState" -Remediation 'Rerun with -Fix, or set encryptionAtHost = false.' }
 }
 
+# Memory-optimised by default: multi-session hosts run out of memory before CPU (decision 0010).
+$script:DefaultVmSize = 'Standard_E4as_v5'
+
+function Get-AvdHostVmSize {
+  <# The size of the landing zone's deployed session hosts (the first one), or $null. #>
+  param([Parameter(Mandatory)] $Lz)
+  if (-not $Lz.RgExists.Hosts) { return $null }
+  $vm = @(Get-AzVM -ResourceGroupName $Lz.ResourceGroups.Hosts -ErrorAction SilentlyContinue) | Select-Object -First 1
+  if ($vm -and $vm.HardwareProfile) { return [string]$vm.HardwareProfile.VmSize }
+  return $null
+}
+
 function Test-AvdVmCapacity {
   param([Parameter(Mandatory)][string] $Location, [Parameter(Mandatory)][string] $VmSize, [int] $Count = 1, [int[]] $Zones = @())
   $area = 'Subscription'
@@ -575,6 +587,7 @@ function Test-AvdVmCapacity {
   else { Add-AvdCheckResult $area "VM size $VmSize available in $Location" 'Pass' }
 
   $vcpu = [int](($sku.Capabilities | Where-Object Name -eq 'vCPUs').Value)
+  $memoryGiB = [double](($sku.Capabilities | Where-Object Name -eq 'MemoryGB').Value)
   $need = $vcpu * $Count
   $usage = Get-AzVMUsage -Location $Location
   foreach ($name in @($sku.Family, 'cores')) {
@@ -586,7 +599,7 @@ function Test-AvdVmCapacity {
     if ($free -ge $need) { Add-AvdCheckResult $area $label 'Pass' -Detail "$free free, $need needed" -Id 'quota' -Data $quota }
     else { Add-AvdCheckResult $area $label 'Fail' -Detail "$free free, $need needed" -Remediation 'Request a quota increase (Portal > Quotas) or reduce host count/size.' -Id 'quota' -Data $quota }
   }
-  return $vcpu
+  return [pscustomobject]@{ Vcpu = $vcpu; MemoryGiB = $memoryGiB }
 }
 
 function Test-AvdHostPoolRegion {
@@ -1178,6 +1191,8 @@ function Test-AvdWellArchitected {
   }
 
   if ($vms.Count) {
+    $slowDisk = @($vms | Where-Object { $_.properties.storageProfile.osDisk.managedDisk.storageAccountType -notmatch '^Premium' } | ForEach-Object name)
+    & $waf 'Performance Efficiency' 'os-disk' 'Session host OS disks on Premium SSD' (-not $slowDisk.Count) $(if ($slowDisk.Count) { "Not Premium: $($slowDisk -join ', ')" } else { "$($vms.Count) host(s)" }) 'Redeploy the hosts (bicep/modules/sessionHosts.bicep uses Premium SSD): multi-session hosts page, sign in and update many users at once.'
     $weak = @($vms | Where-Object { $_.properties.securityProfile.securityType -ne 'TrustedLaunch' -or -not $_.properties.securityProfile.encryptionAtHost } | ForEach-Object name)
     & $waf 'Security' 'host-security' 'Session hosts: Trusted Launch and encryption at host' (-not $weak.Count) $(if ($weak.Count) { "Not on: $($weak -join ', ')" } else { "$($vms.Count) host(s)" }) 'Redeploy the hosts with encryptionAtHost = true (Trusted Launch is always on in bicep/modules/sessionHosts.bicep).'
   }
@@ -1316,7 +1331,8 @@ function Invoke-AvdReadinessCheck {
   param(
     [Parameter(Mandatory)] $Lz,
     [switch] $Fix,
-    [string] $VmSize = 'Standard_D4as_v5',
+    # Empty: the deployed hosts' size, else the default.
+    [string] $VmSize = '',
     [int] $VmCount = 1,
     [switch] $SkipTenant,
     [switch] $SkipNtfs,
@@ -1330,6 +1346,7 @@ function Invoke-AvdReadinessCheck {
   Write-AvdSection 'Subscription'
   Test-AvdCallerPermission -SubscriptionId $Lz.SubscriptionId
   Test-AvdResourceProvider -Fix:$Fix
+  if (-not $VmSize) { $VmSize = Get-AvdHostVmSize -Lz $Lz; if (-not $VmSize) { $VmSize = $script:DefaultVmSize } }
   if ($Lz.Location) { $null = Test-AvdVmCapacity -Location $Lz.Location -VmSize $VmSize -Count $VmCount }
 
   Write-AvdSection 'Landing zone'
@@ -1637,13 +1654,23 @@ function Test-AvdSizing {
     The capacity the plan deploys and what it costs at list prices. The vCPU quota and VM size
     checks (Test-AvdVmCapacity) already run against the same plan.
   #>
-  param([Parameter(Mandatory)][hashtable] $Plan, [int] $VcpuPerHost, [int] $ActiveHoursPerWeek = 50)
+  param([Parameter(Mandatory)][hashtable] $Plan, [int] $VcpuPerHost, [double] $MemoryGiBPerHost, [int] $ActiveHoursPerWeek = 50)
   Write-AvdSection 'Sizing and cost'
   $hosts = [int]$Plan.sessionHostCount; $max = [int]$Plan.maxSessionLimit
-  $detail = "Up to $($hosts * $max) concurrent sessions$(if ($VcpuPerHost) { "; $($hosts * $VcpuPerHost) vCPUs" }); profile share $($Plan.profileShareQuotaGiB) GiB ($($Plan.profileStorageSku))"
+  $detail = "Up to $($hosts * $max) concurrent sessions$(if ($VcpuPerHost) { "; $($hosts * $VcpuPerHost) vCPUs" })$(if ($MemoryGiBPerHost -and $max) { "; $([math]::Round($MemoryGiBPerHost / $max, 1)) GiB memory per session" }); Premium SSD OS disks; profile share $($Plan.profileShareQuotaGiB) GiB ($($Plan.profileStorageSku))"
   Add-AvdCheckResult 'Sizing' "$hosts session host(s) x $($Plan.sessionHostVmSize), $max sessions each" 'Pass' -Detail $detail
   if ($VcpuPerHost -and $max -gt 6 * $VcpuPerHost) {
     Add-AvdCheckResult 'Sizing' 'Sessions per vCPU within Microsoft''s multi-session guidance' 'Warn' -Detail "$max sessions on $VcpuPerHost vCPUs is $([math]::Round($max / $VcpuPerHost, 1)) per vCPU; light workloads are sized at 6 per vCPU, medium 4, heavy 2." -Remediation 'Lower maxSessionLimit (--max-sessions) or use a larger size.'
+  }
+
+  # Multi-session hosts run out of memory before CPU. Below 1 GiB per session is too little on any
+  # size; below 1.5 GiB on a D-series (4 GiB per vCPU), the E-series (8 GiB per vCPU) is the better fit.
+  if ($MemoryGiBPerHost -and $max) {
+    $perSession = $MemoryGiBPerHost / $max
+    $isE = $Plan.sessionHostVmSize -match '^Standard_E'
+    if ($perSession -lt 1 -or ($perSession -lt 1.5 -and -not $isE)) {
+      Add-AvdCheckResult 'Sizing' 'Memory per session' 'Warn' -Id 'sizing-memory' -Detail ("{0:N1} GiB per session ({1} GiB for {2} sessions on {3})." -f $perSession, $MemoryGiBPerHost, $max, $Plan.sessionHostVmSize) -Remediation $(if ($isE) { 'Lower maxSessionLimit (--max-sessions) or use a larger E-series size.' } else { "Use the memory-optimised E-series (e.g. $($Plan.sessionHostVmSize -replace '^Standard_D(\d+)(\w*)_v(\d)$', 'Standard_E$1$2_v$3')) with --vm-size, or lower maxSessionLimit." })
+    }
   }
 
   Write-Host "  Pricing the plan in $($Plan.location) from the Azure retail price API (list prices, pay-as-you-go) ..." -ForegroundColor DarkGray
@@ -1742,9 +1769,9 @@ function Test-AvdPreDeployment {
     'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.Security',
     'Microsoft.PolicyInsights', 'Microsoft.GuestConfiguration', 'Microsoft.Consumption')
   Test-AvdHostPoolRegion -Location $plan.location -SubscriptionId $lz.SubscriptionId
-  $vcpuPerHost = 0
+  $capacity = $null
   if ($plan.sessionHostCount -gt 0) {
-    $vcpuPerHost = [int](Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones | Select-Object -Last 1)
+    $capacity = Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones | Select-Object -Last 1
   }
   if (-not $plan.encryptionAtHost) { Add-AvdCheckResult 'Subscription' 'EncryptionAtHost not required (encryptionAtHost = false)' 'Pass' }
 
@@ -1769,7 +1796,7 @@ function Test-AvdPreDeployment {
   }
 
   # ---- Sizing and cost ----
-  $estimate = Test-AvdSizing -Plan $plan -VcpuPerHost $vcpuPerHost -ActiveHoursPerWeek $ActiveHoursPerWeek
+  $estimate = Test-AvdSizing -Plan $plan -VcpuPerHost $(if ($capacity) { $capacity.Vcpu } else { 0 }) -MemoryGiBPerHost $(if ($capacity) { $capacity.MemoryGiB } else { 0 }) -ActiveHoursPerWeek $ActiveHoursPerWeek
 
   # ---- Connectivity ----
   if ($plan.connectivityMode -eq 'HubPeered') {
@@ -1793,7 +1820,16 @@ function Test-AvdPreDeployment {
   if ($elsewhere.Count) {
     Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' region" 'Fail' -Id 'lz-region' -Data @{ deployedIn = @($elsewhere.Location | Select-Object -Unique) } -Detail "Already deployed in $(($elsewhere.Location | Select-Object -Unique) -join ', '): $($elsewhere.ResourceGroupName -join ', ')" -Remediation 'Resource groups cannot change region. Deploy to that region, use another namePrefix or environment, or remove the existing landing zone first.'
   }
-  elseif ($present.Count) { Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Existing session hosts keep their break-glass password.' }
+  elseif ($present.Count) {
+    Add-AvdCheckResult 'Landing zone' "Landing zone '$($lz.BaseName)' already exists" 'Warn' -Detail "Found: $(($present | ForEach-Object { $lz.ResourceGroups[$_] }) -join ', ')" -Remediation 'Deploying updates it in place. Existing session hosts keep their break-glass password.'
+    # Redeploying with a different size resizes (and restarts) every host.
+    $deployedSize = Get-AvdHostVmSize -Lz $lz
+    if ($deployedSize -and $deployedSize -ne $plan.sessionHostVmSize) {
+      Add-AvdCheckResult 'Landing zone' 'Session host size unchanged' 'Warn' -Id 'resize' -Data @{ from = $deployedSize; to = $plan.sessionHostVmSize } `
+        -Detail "The hosts are $deployedSize; deploying resizes them to $($plan.sessionHostVmSize), and each restarts." `
+        -Remediation "To keep $deployedSize, deploy with --vm-size $deployedSize (the portal's sizing step sets it). Otherwise resize outside working hours, with quota for the new size."
+    }
+  }
   else { Add-AvdCheckResult 'Landing zone' "Name '$($lz.BaseName)' is free in this subscription" 'Pass' }
 
   # ---- Tenant readiness for after the deployment ----

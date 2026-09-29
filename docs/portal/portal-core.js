@@ -48,18 +48,22 @@
 
   // ---------------------------------------------------------------- sizing (decision 0010)
   // Users per vCPU for Windows multi-session hosts, from Microsoft's session host sizing guidance.
+  // Suggested sizes are memory-optimised E-series: with many users on one host, memory runs out
+  // before CPU (8 GiB per vCPU, against 4 on D-series). Hosts use Premium SSD OS disks.
   var WORKLOADS = {
-    light: { label: 'Light: a few line-of-business apps, data entry', usersPerVcpu: 6, suggestedSize: 'Standard_D4as_v5' },
-    medium: { label: 'Medium: Office, web, email', usersPerVcpu: 4, suggestedSize: 'Standard_D8as_v5' },
-    heavy: { label: 'Heavy: many apps at once, large files', usersPerVcpu: 2, suggestedSize: 'Standard_D8as_v5' },
-    power: { label: 'Power: developers, analysts, light graphics', usersPerVcpu: 1, suggestedSize: 'Standard_D16as_v5' }
+    light: { label: 'Light: a few line-of-business apps, data entry', usersPerVcpu: 6, suggestedSize: 'Standard_E4as_v5' },
+    medium: { label: 'Medium: Office, web, email', usersPerVcpu: 4, suggestedSize: 'Standard_E8as_v5' },
+    heavy: { label: 'Heavy: many apps at once, large files', usersPerVcpu: 2, suggestedSize: 'Standard_E8as_v5' },
+    power: { label: 'Power: developers, analysts, light graphics', usersPerVcpu: 1, suggestedSize: 'Standard_E16as_v5' }
   };
-  // General-purpose sizes suited to multi-session hosts (vCPUs, memory in GiB).
+  // Sizes suited to multi-session hosts (vCPUs, memory in GiB), memory-optimised first.
   var VM_SIZES = {
+    Standard_E4as_v5: { vcpu: 4, ramGiB: 32, recommended: true }, Standard_E8as_v5: { vcpu: 8, ramGiB: 64, recommended: true }, Standard_E16as_v5: { vcpu: 16, ramGiB: 128, recommended: true },
+    Standard_E4s_v5: { vcpu: 4, ramGiB: 32, recommended: true }, Standard_E8s_v5: { vcpu: 8, ramGiB: 64, recommended: true }, Standard_E16s_v5: { vcpu: 16, ramGiB: 128, recommended: true },
     Standard_D4as_v5: { vcpu: 4, ramGiB: 16 }, Standard_D8as_v5: { vcpu: 8, ramGiB: 32 }, Standard_D16as_v5: { vcpu: 16, ramGiB: 64 },
-    Standard_D4s_v5: { vcpu: 4, ramGiB: 16 }, Standard_D8s_v5: { vcpu: 8, ramGiB: 32 }, Standard_D16s_v5: { vcpu: 16, ramGiB: 64 },
-    Standard_E4as_v5: { vcpu: 4, ramGiB: 32 }, Standard_E8as_v5: { vcpu: 8, ramGiB: 64 }, Standard_E16as_v5: { vcpu: 16, ramGiB: 128 }
+    Standard_D4s_v5: { vcpu: 4, ramGiB: 16 }, Standard_D8s_v5: { vcpu: 8, ramGiB: 32 }, Standard_D16s_v5: { vcpu: 16, ramGiB: 64 }
   };
+  var OS_DISK = 'Premium SSD (P10, 128 GiB)';
   // spareHost: true / false, or null for automatic (a spare in prod).
   // One entry per host pool. The landing zone deploys one pooled host pool today; the list shape
   // leaves room for more (each would get its own sizing and, later, its own deployment).
@@ -83,11 +87,14 @@
     if (environment === 'prod' && hosts < 2) { hosts = 2; notes.push('At least two hosts in prod (the Well-Architected review flags one).'); }
     // Premium file shares are provisioned (minimum 100 GiB); 20% headroom over the expected profile sizes.
     var profileQuotaGiB = Math.max(100, Math.ceil(users * num(p.profileGiBPerUser, 10) * 1.2 / 100) * 100);
-    var ramPerSession = vm.ramGiB / sessionsPerHost;
-    // Microsoft's examples work out at about 1 GiB per session; below that, memory runs out before CPU.
-    if (ramPerSession < 1) notes.push('Only ' + ramPerSession.toFixed(1) + ' GiB of memory per session; consider a memory-optimised (E-series) size.');
+    // Too little memory per session: below 1 GiB on any size, below 1.5 GiB on a D-series (the
+    // preflight applies the same rule).
+    var ramPerSession = vm.ramGiB / sessionsPerHost, isE = /^Standard_E/.test(vmSize);
+    if (ramPerSession < 1 || (ramPerSession < 1.5 && !isE))
+      notes.push('Only ' + ramPerSession.toFixed(1) + ' GiB of memory per session. ' + (isE ? 'Use a larger E-series size.' : 'The memory-optimised ' + vmSize.replace(/^Standard_D/, 'Standard_E') + ' has twice the memory for the same vCPUs.'));
     return {
-      name: p.name, workload: p.workload, users: users, concurrentUsers: concurrent, vmSize: vmSize, vcpuPerHost: vm.vcpu,
+      name: p.name, workload: p.workload, users: users, concurrentUsers: concurrent, vmSize: vmSize, vcpuPerHost: vm.vcpu, ramGiBPerHost: vm.ramGiB,
+      memoryPerSessionGiB: Math.round(ramPerSession * 10) / 10, osDisk: OS_DISK,
       sessionsPerHost: sessionsPerHost, hosts: hosts, vcpus: hosts * vm.vcpu, capacity: hosts * sessionsPerHost,
       profileQuotaGiB: profileQuotaGiB, activeHoursPerWeek: Math.min(168, Math.round(num(p.activeHoursPerWeek, 50))), notes: notes
     };

@@ -52,7 +52,15 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 
 ## Sizing and cost
 
-The portal's **Size and cost** step sizes the host pool from how many people use it, how many are signed in at the busiest time, and how they work. It uses Microsoft's multi-session guidance: light 6, medium 4, heavy 2 and power 1 user per vCPU. It gives the host count, VM size, sessions per host, the vCPU quota needed and the profile share size. In prod it adds a spare host by default and never goes below two. Once applied, the commands carry the sizing:
+The portal's **Size and cost** step sizes the host pool from how many people use it, how many are signed in at the busiest time, and how they work. It uses Microsoft's multi-session guidance: light 6, medium 4, heavy 2 and power 1 user per vCPU.
+
+It **suggests memory-optimised E-series** sizes: E4as_v5 for light work, E8as_v5 for medium and heavy, and E16as_v5 for power users. Hosts shared by many users run out of memory before CPU, and E-series has 8 GiB per vCPU against 4 on D-series. Every host has a **Premium SSD** OS disk. The template and both parameter files default to `Standard_E4as_v5`.
+
+**Memory warnings.** Both the portal and the preflight warn below 1 GiB of memory per session on any size. On a D-series size they warn below 1.5 GiB and name the E-series equivalent.
+
+**Existing landing zones.** When the landing zone already runs a different size (the first deployments used `Standard_D4as_v5`), the preflight warns that deploying resizes the hosts, and that each one restarts. To keep the current size, pass it with `--vm-size`. The post-deployment quota check and the demo host pool use the deployed hosts' size unless you give one.
+
+The Well-Architected review checks that every OS disk is Premium SSD. It gives the host count, VM size, sessions per host, the vCPU quota needed and the profile share size. In prod it adds a spare host by default and never goes below two. Once applied, the commands carry the sizing:
 
 ```powershell
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' `

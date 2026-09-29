@@ -59,7 +59,7 @@ Describe 'Sizing overrides' {
       $p.maxSessionLimit.value | Should -Be 16
       $p.profileShareQuotaGiB.value | Should -Be 600
       $d = ((& $script:bicep build-params $file --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters
-      $d.sessionHostVmSize.value | Should -Be 'Standard_D4as_v5'
+      $d.sessionHostVmSize.value | Should -Be 'Standard_E4as_v5'   # memory-optimised default for multi-session
       $d.maxSessionLimit.value | Should -Be 8
     }
   }

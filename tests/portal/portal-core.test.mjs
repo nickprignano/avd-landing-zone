@@ -281,12 +281,14 @@ test('real: first live Well-Architected review (dev, northcentralus) -> sign-in,
 test('sizing: users, concurrency and workload -> hosts, sessions per host, quota and profile share', () => {
   const r = P.computePool({ users: 50, concurrencyPercent: 80, workload: 'medium' }, 'dev');
   assert.equal(r.concurrentUsers, 40);
-  assert.equal(r.vmSize, 'Standard_D8as_v5');          // suggested for medium
+  assert.equal(r.vmSize, 'Standard_E8as_v5');          // suggested for medium: memory-optimised
+  assert.equal(r.memoryPerSessionGiB, 2);              // 64 GiB for 32 sessions
+  assert.equal(r.osDisk, 'Premium SSD (P10, 128 GiB)');
   assert.equal(r.sessionsPerHost, 32);                 // 8 vCPU x 4 per vCPU
   assert.equal(r.hosts, 2);
   assert.equal(r.vcpus, 16);
   assert.equal(r.profileQuotaGiB, 600);                // 50 x 10 GiB + 20%, rounded up to 100s
-  assert.deepEqual(r.notes, []);                       // 1 GiB per session is Microsoft's own example
+  assert.deepEqual(r.notes, []);
 });
 
 test('sizing: prod adds a spare host by default and never goes below two; small shares are 100 GiB', () => {
@@ -297,10 +299,18 @@ test('sizing: prod adds a spare host by default and never goes below two; small 
   assert.equal(P.computePool({ users: 5, profileGiBPerUser: 5 }, 'dev').profileQuotaGiB, 100);
 });
 
-test('sizing: flags too little memory per session and falls back from an unknown size', () => {
-  assert.match(P.computePool({ users: 30, workload: 'light', vmSize: 'Standard_D16as_v5' }, 'dev').notes.join(' '), /memory-optimised/);
+test('sizing: suggests E-series for every workload, and flags too little memory per session', () => {
+  for (const w of Object.keys(P.WORKLOADS)) assert.match(P.computePool({ workload: w }, 'dev').vmSize, /^Standard_E/, w);
+  // D-series at Microsoft's medium density: 1 GiB per session -> suggest the E-series equivalent.
+  assert.match(P.computePool({ users: 30, workload: 'medium', vmSize: 'Standard_D8as_v5' }, 'dev').notes.join(' '), /Standard_E8as_v5 has twice the memory/);
+  // E-series at light density (1.3 GiB per session) is fine; below 1 GiB on any size is not.
+  assert.deepEqual(P.computePool({ users: 30, workload: 'light', vmSize: 'Standard_E4as_v5' }, 'dev').notes, []);
+  assert.match(P.computePool({ users: 30, workload: 'light', vmSize: 'Standard_D16as_v5' }, 'dev').notes.join(' '), /Standard_E16as_v5/);
+});
+
+test('sizing: falls back from an unknown size to the suggested one', () => {
   const r = P.computePool({ users: 30, workload: 'heavy', vmSize: 'Standard_X99' }, 'dev');
-  assert.equal(r.vmSize, 'Standard_D8as_v5');
+  assert.equal(r.vmSize, 'Standard_E8as_v5');
   assert.match(r.notes[0], /Unknown size/);
 });
 
@@ -314,9 +324,9 @@ test('sizing: commands carry it only once it is set', () => {
   const plain = { ...P.DEFAULTS };
   assert.doesNotMatch(P.commands.predeploy(plain, false), /-SessionHostCount/);
   const cfg = { ...P.DEFAULTS, sizing: P.toSizing(P.computePool({ users: 50 }, 'dev')) };
-  assert.match(last(P.commands.predeploy(cfg, true)), / -SessionHostCount 2 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 50 -Fix$/);
-  assert.match(last(P.commands.deploy(cfg)), / --hosts 2 --vm-size Standard_D8as_v5 --max-sessions 32 --profile-quota 600$/);
-  assert.match(last(P.commands.postdeploy(cfg, false)), / -SessionHostVmSize Standard_D8as_v5 -SessionHostCount 2$/);
+  assert.match(last(P.commands.predeploy(cfg, true)), / -SessionHostCount 2 -SessionHostVmSize Standard_E8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 50 -Fix$/);
+  assert.match(last(P.commands.deploy(cfg)), / --hosts 2 --vm-size Standard_E8as_v5 --max-sessions 32 --profile-quota 600$/);
+  assert.match(last(P.commands.postdeploy(cfg, false)), / -SessionHostVmSize Standard_E8as_v5 -SessionHostCount 2$/);
 });
 
 test('state: sized preflight short of quota -> quota request for the sized hosts, rerun keeps the sizing, estimate shown', () => {

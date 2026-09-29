@@ -69,12 +69,12 @@ Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
   }
   It 'gives the portal the context and structured failures it needs' {
     $s = Get-PortalState $out
-    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' | Should -Be 'predeploy:notready predeploy:ready predeploy:ready predeploy:notready predeploy:notready predeploy:ready predeploy:ready'
+    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' | Should -Be 'predeploy:notready predeploy:ready predeploy:ready predeploy:notready predeploy:notready predeploy:ready predeploy:ready predeploy:ready'
     $s[1].context.parameterFile | Should -Be 'parameters/dev.bicepparam'
     $s[1].context.location | Should -Be 'northcentralus'
     $s[1].context.usersGroup | Should -Be 'AVD Users'
     $quota = $s[3].failures | Where-Object id -eq 'quota'
-    $quota.data.quotaName | Should -Be 'standardDASv5Family'
+    $quota.data.quotaName | Should -Be 'standardEASv5Family'   # memory-optimised default (E4as_v5)
     $quota.data.needed | Should -Be 16
     ($s[3].failures | Where-Object id -eq 'kv-softdeleted').data.vaults | Should -Contain 'kvavdlzprodabc123'
   }
@@ -92,6 +92,16 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
     ($sized.failures | Where-Object id -eq 'quota' | Select-Object -First 1).data.needed | Should -Be 24
   }
   It 'warns above 6 sessions per vCPU' { $out | Should -Match '60 sessions on 8 vCPUs is 7\.5 per vCPU' }
+  It 'warns when memory per session is too low, and suggests the E-series size' {
+    ($sized.warnings | Where-Object id -eq 'sizing-memory').remediation | Should -Match 'Standard_E8as_v5'
+  }
+  It 'warns before redeploying resizes the hosts (D4as_v5 deployed, E4as_v5 default)' {
+    Get-StepExit $out 'redeploy-resize' | Should -Be 0
+    $r = (Get-PortalState $out)[6].warnings | Where-Object id -eq 'resize'
+    $r.data.from | Should -Be 'Standard_D4as_v5'
+    $r.data.to | Should -Be 'Standard_E4as_v5'
+    $r.remediation | Should -Match '--vm-size Standard_D4as_v5'
+  }
   It 'tells the portal the sizing it validated' {
     $sized.context.sizing.hosts | Should -Be 3
     $sized.context.sizing.vmSize | Should -Be 'Standard_D8as_v5'
@@ -121,7 +131,7 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
   }
   It 'still finishes (and is ready) when the price API is down' {
     Get-StepExit $out 'prices-down' | Should -Be 0
-    ((Get-PortalState $out)[6].warnings | Where-Object id -eq 'cost-unavailable') | Should -Not -BeNullOrEmpty
+    ((Get-PortalState $out)[7].warnings | Where-Object id -eq 'cost-unavailable') | Should -Not -BeNullOrEmpty
   }
 }
 
@@ -196,6 +206,11 @@ Describe 'Well-Architected review of the deployed landing zone' {
     ($s[0].warnings | Where-Object { $_.detail -match 'Azure.VM.AMA' }) | Should -BeNullOrEmpty
     ($s[3].warnings | Where-Object id -eq 'waf-monitor-agent').detail | Should -Match 'avdlzdsh-001'
     ($s[3].warnings | Where-Object id -eq 'waf-psrule-operational-excellence').detail | Should -Match 'Azure.VM.AMA on avdlzdsh-001'
+  }
+  It 'flags a session host whose OS disk is not Premium SSD' {
+    $s = Get-PortalState $out
+    ($s[0].warnings | Where-Object id -eq 'waf-os-disk') | Should -BeNullOrEmpty
+    ($s[3].warnings | Where-Object id -eq 'waf-os-disk').detail | Should -Match 'avdlzdsh-001'
   }
   It 'adds nothing without -WellArchitected' {
     $s = Get-PortalState $out

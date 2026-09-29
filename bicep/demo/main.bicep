@@ -45,7 +45,7 @@ param avdServicePrincipalObjectId string
 @minValue(1)
 @maxValue(5)
 param sessionHostCount int = 1
-param sessionHostVmSize string = 'Standard_D4as_v5'
+param sessionHostVmSize string = 'Standard_E4as_v5'
 param availabilityZones int[] = []
 param enrollInIntune bool = true
 param encryptionAtHost bool = true

@@ -57,6 +57,7 @@ module vm 'br/public:avm/res/compute/virtual-machine:0.22.3' = [
       secureBootEnabled: true
       vTpmEnabled: true
       encryptionAtHost: encryptionAtHost
+      // Premium SSD for the OS disk: multi-session hosts page, log on and update many users at once.
       osDisk: {
         caching: 'ReadWrite'
         deleteOption: 'Delete'

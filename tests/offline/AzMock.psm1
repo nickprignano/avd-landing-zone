@@ -73,7 +73,7 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   if ($Path -match 'Microsoft.Compute/virtualMachines\?api-version') {
     $n = if ($g) { 2 } else { 1 }
     return & $ok @{ value=@(1..$n | ForEach-Object {
-          $vm = @{ name="avdlzdsh-00$_"; id="$S/resourceGroups/rg-avdlz-dev-hosts/providers/Microsoft.Compute/virtualMachines/avdlzdsh-00$_"; properties=@{ securityProfile=@{ securityType='TrustedLaunch'; encryptionAtHost=$true } } }
+          $vm = @{ name="avdlzdsh-00$_"; id="$S/resourceGroups/rg-avdlz-dev-hosts/providers/Microsoft.Compute/virtualMachines/avdlzdsh-00$_"; properties=@{ hardwareProfile=@{ vmSize=$global:St.hostSize }; securityProfile=@{ securityType='TrustedLaunch'; encryptionAtHost=$true }; storageProfile=@{ osDisk=@{ managedDisk=@{ storageAccountType=$(if ($global:St.waf.standardDisk) { 'StandardSSD_LRS' } else { 'Premium_LRS' }) } } } } }
           if ($g) { $vm.zones = @("$_") }
           $vm }) }
   }
@@ -130,6 +130,7 @@ function Get-AzADUser { param([switch]$SignedIn,$ErrorAction) [pscustomobject]@{
 $global:St.registered = @()
 $global:St.unregistered = @('Microsoft.GuestConfiguration')
 $global:St.skuZones = @('1','2','3')
+$global:St.hostSize = 'Standard_D4as_v5'
 $global:St.deletedVaults = @()
 $global:St.groups = @(@{id='11111111-1111-1111-1111-111111111111';displayName='AVD Users';securityEnabled=$true},@{id='22222222-2222-2222-2222-222222222222';displayName='AVD Admins';securityEnabled=$true})
 $global:St.avdSp = $true
@@ -138,13 +139,22 @@ function Register-AzResourceProvider { param($ProviderNamespace) Log "register $
 function Get-AzProviderFeature { param($ProviderNamespace,$FeatureName,$ErrorAction) [pscustomobject]@{RegistrationState='Registered'} }
 function Register-AzProviderFeature { param($ProviderNamespace,$FeatureName) }
 function Get-AzComputeResourceSku { param($Location,$ErrorAction)
-  foreach ($v in 4, 8, 16) { [pscustomobject]@{ResourceType='virtualMachines';Name="Standard_D$($v)as_v5";Family='standardDASv5Family';Restrictions=@();LocationInfo=@([pscustomobject]@{Location=$Location;Zones=$global:St.skuZones});Capabilities=@([pscustomobject]@{Name='vCPUs';Value="$v"})} } }
+  foreach ($series in @(@('D', 'standardDASv5Family', 4), @('E', 'standardEASv5Family', 8))) {
+    foreach ($v in 4, 8, 16) {
+      [pscustomobject]@{ResourceType='virtualMachines';Name="Standard_$($series[0])$($v)as_v5";Family=$series[1];Restrictions=@();LocationInfo=@([pscustomobject]@{Location=$Location;Zones=$global:St.skuZones})
+        Capabilities=@([pscustomobject]@{Name='vCPUs';Value="$v"},[pscustomobject]@{Name='MemoryGB';Value="$($v * $series[2])"})}
+    }
+  } }
 function Get-AzKeyVault { param([switch]$InRemovedState,$ErrorAction) $global:St.deletedVaults }
 $global:St.quotaLimit = $null   # set to raise both limits (a subscription after a quota increase)
-function Get-AzVMUsage { param($Location) $l = $global:St.quotaLimit; @([pscustomobject]@{Name=[pscustomobject]@{Value='standardDASv5Family'};Limit=$(if ($l) { $l } else { 10 });CurrentValue=4},[pscustomobject]@{Name=[pscustomobject]@{Value='cores'};Limit=$(if ($l) { $l } else { 20 });CurrentValue=4}) }
+# The deployed dev host is a D4as_v5 (as in the first real deployment); the Easv5 family is unused.
+function Get-AzVMUsage { param($Location) $l = $global:St.quotaLimit; @(
+    [pscustomobject]@{Name=[pscustomobject]@{Value='standardDASv5Family'};Limit=$(if ($l) { $l } else { 10 });CurrentValue=4},
+    [pscustomobject]@{Name=[pscustomobject]@{Value='standardEASv5Family'};Limit=$(if ($l) { $l } else { 10 });CurrentValue=0},
+    [pscustomobject]@{Name=[pscustomobject]@{Value='cores'};Limit=$(if ($l) { $l } else { 20 });CurrentValue=4}) }
 function Get-AzVM { param($ResourceGroupName,$Name,[switch]$Status,$ErrorAction)
   $n = if ($ResourceGroupName -like '*demo') {'avdlzddemo-001'} else {'avdlzdsh-001'}
-  $vm=[pscustomobject]@{Name=$n;Id="$S/resourceGroups/$ResourceGroupName/providers/Microsoft.Compute/virtualMachines/$n";Identity=[pscustomobject]@{PrincipalId="mi-$n"};PowerState='VM running';OSProfile=[pscustomobject]@{ComputerName=$n}}
+  $vm=[pscustomobject]@{Name=$n;HardwareProfile=[pscustomobject]@{VmSize=$global:St.hostSize};Id="$S/resourceGroups/$ResourceGroupName/providers/Microsoft.Compute/virtualMachines/$n";Identity=[pscustomobject]@{PrincipalId="mi-$n"};PowerState='VM running';OSProfile=[pscustomobject]@{ComputerName=$n}}
   if ($global:St.rgs -contains $ResourceGroupName) { if (-not $Name -or $Name -eq $n) { $vm } }
 }
 function Start-AzVM { param($ResourceGroupName,$Name) Log "start $Name" }
@@ -205,12 +215,12 @@ function Invoke-RestMethod { param($Uri,$Method,$ErrorAction)
   $f = [uri]::UnescapeDataString(($Uri -split '\$filter=')[1])
   $it = { param($product,$sku,$meter,$unit,$price,$tier=0) [pscustomobject]@{currencyCode='USD';productName=$product;skuName=$sku;meterName=$meter;unitOfMeasure=$unit;retailPrice=$price;tierMinimumUnits=$tier;type='Consumption'} }
   $items = switch -Regex ($f) {
-    "serviceName eq 'Virtual Machines'.*armSkuName eq '(Standard_D(\d+)as_v5)'" {
-      $v = [int]$Matches[2]; $n = $Matches[1] -replace 'Standard_' -replace '_', ' '
+    "serviceName eq 'Virtual Machines'.*armSkuName eq '(Standard_([DE])(\d+)as_v5)'" {
+      $v = [int]$Matches[3] * $(if ($Matches[2] -eq 'E') { 1.3 } else { 1 }); $n = $Matches[1] -replace 'Standard_' -replace '_', ' '
       if ($Uri -notmatch 'page=2') {
-        return [pscustomobject]@{ Items=@((& $it "Virtual Machines Dasv5 Series Windows" $n $n '1 Hour' (0.2 * $v)), (& $it "Virtual Machines Dasv5 Series" "$n Spot" "$n Spot" '1 Hour' (0.01 * $v))); NextPageLink="$Uri&page=2" }
+        return [pscustomobject]@{ Items=@((& $it "Virtual Machines Asv5 Series Windows" $n $n '1 Hour' (0.2 * $v)), (& $it "Virtual Machines Asv5 Series" "$n Spot" "$n Spot" '1 Hour' (0.01 * $v))); NextPageLink="$Uri&page=2" }
       }
-      @((& $it "Virtual Machines Dasv5 Series" $n $n '1 Hour' (0.1 * $v)), (& $it "Virtual Machines Dasv5 Series" "$n Low Priority" "$n Low Priority" '1 Hour' (0.02 * $v)))
+      @((& $it "Virtual Machines Asv5 Series" $n $n '1 Hour' (0.1 * $v)), (& $it "Virtual Machines Asv5 Series" "$n Low Priority" "$n Low Priority" '1 Hour' (0.02 * $v)))
     }
     "skuName eq 'P10 LRS'" { @((& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk' '1/Month' 20), (& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk Mount' '1/Month' 1)) }
     "productName eq 'Premium Files'" { @((& $it 'Premium Files' 'Premium LRS' 'LRS Provisioned' '1 GiB/Month' 0.2), (& $it 'Premium Files' 'Premium ZRS' 'ZRS Provisioned' '1 GiB/Month' 0.25), (& $it 'Premium Files' 'Premium LRS' 'LRS Snapshots' '1 GiB/Month' 0.1)) }

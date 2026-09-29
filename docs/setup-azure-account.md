@@ -47,10 +47,10 @@ If `az` isn't installed: https://learn.microsoft.com/cli/azure/install-azure-cli
 Brand-new subscriptions often start with **very low vCPU quota** — this is the most common thing that blocks an AVD demo.
 
 ```bash
-az vm list-usage --location northcentralus -o table | grep -i "standard d"
+az vm list-usage --location northcentralus -o table | grep -i "standard e"
 ```
 
-The dev parameters deploy one `Standard_D4as_v5` (4 vCPUs). If you're below that, request an increase: Portal → **Subscriptions → Usage + quotas**.
+The dev parameters deploy one `Standard_E4as_v5` (4 vCPUs, memory-optimised; the *Standard EASv5 Family* quota). New subscriptions often have none. The pre-deployment preflight checks it, and the deployment portal builds the quota request. You can also use Portal → **Subscriptions → Usage + quotas**.
 
 ### 5. Create the two Entra groups
 

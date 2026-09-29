@@ -12,6 +12,9 @@ Operators decide how many session hosts they need, and of what size, from the nu
   - The parameter files read these values from `AVD_SESSION_HOST_COUNT`, `AVD_SESSION_HOST_VM_SIZE`, `AVD_MAX_SESSION_LIMIT` and `AVD_PROFILE_QUOTA_GIB`, with `empty()` guards (lesson 0004), the same way as the region.
   - A pasted preflight's `context.sizing` (the sizing it validated) replaces the portal's, so the deploy command deploys what was checked.
 - **The preflight validates and prices** the compiled plan. Quota and VM availability are checked for the sized plan, and a warning is raised above 6 sessions per vCPU. Cost comes from the Retail Prices API, called from Cloud Shell. Each line must match exactly one meter; otherwise it is reported with the meters seen and left out of the total. Usage-based charges are listed as excluded. If the API fails, the result is a warning, never a failure.
+- **Memory-optimised E-series and Premium SSD by default.** Hosts shared by many users run out of memory before CPU. The template and parameter files default to `Standard_E4as_v5`, the portal suggests E-series for every workload, and OS disks are Premium SSD.
+  - Warnings: below 1 GiB per session on any size, and below 1.5 GiB on D-series, where the warning names the E-series equivalent.
+  - Deployed D-series hosts are not resized silently: the preflight warns first. The post-deployment quota check and the demo use the deployed size.
 - **The estimate is in the state line** (`context.estimate`). The portal shows it next to the sizing.
 
 ## Consequences

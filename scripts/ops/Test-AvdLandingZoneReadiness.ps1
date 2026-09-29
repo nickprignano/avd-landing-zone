@@ -94,9 +94,10 @@ param(
   # ---- Post-deployment ----
   [Parameter(Mandatory, ParameterSetName = 'PostDeployment')][ValidateLength(2, 8)][string] $NamePrefix,
   [Parameter(Mandatory, ParameterSetName = 'PostDeployment')][ValidateSet('dev', 'test', 'prod')][string] $Environment,
-  # Size and count to check quota for. Before deployment they override the parameter file (deploy.sh --vm-size / --hosts).
+  # Size and count to check quota for. Before deployment they override the parameter file (deploy.sh --vm-size / --hosts);
+  # after it, the size defaults to the deployed hosts' size.
   [Parameter(ParameterSetName = 'PreDeployment')]
-  [Parameter(ParameterSetName = 'PostDeployment')][ValidatePattern('^Standard_[A-Za-z0-9_]+$')][string] $SessionHostVmSize = 'Standard_D4as_v5',
+  [Parameter(ParameterSetName = 'PostDeployment')][ValidatePattern('^Standard_[A-Za-z0-9_]+$')][string] $SessionHostVmSize,
   [Parameter(ParameterSetName = 'PreDeployment')]
   [Parameter(ParameterSetName = 'PostDeployment')][ValidateRange(0, 200)][int] $SessionHostCount = 1,
   # NTFS check: pick the host, or allow starting a stopped one (it is stopped again afterwards).

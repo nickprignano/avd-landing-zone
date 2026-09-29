@@ -29,5 +29,11 @@ Invoke-ScenarioStep 'sized-ready' {
   & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre -SessionHostCount 3 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 60
 }
 $global:St.quotaLimit = $null
+
+# The landing zone already runs D4as_v5 hosts; the parameter file now defaults to E4as_v5.
+$global:St.rgs = @('rg-avdlz-dev-network', 'rg-avdlz-dev-management', 'rg-avdlz-dev-storage', 'rg-avdlz-dev-avd', 'rg-avdlz-dev-hosts')
+Invoke-ScenarioStep 'redeploy-resize' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre -Location eastus2 }
+$global:St.rgs = @()
+
 $global:St.pricesDown = $true
 Invoke-ScenarioStep 'prices-down' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre }
