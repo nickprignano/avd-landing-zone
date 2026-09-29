@@ -15,4 +15,8 @@ Write-Host "RESULT skip-psrule-calls psrule=$(@($global:Calls | Where-Object { $
 $global:St.waf = @{ good = $true; regionZones = $true }
 Invoke-ScenarioStep 'production-grade' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @lz -WellArchitected }
 
+$global:St.waf = @{ good = $false; regionZones = $false; amaFailed = $true }
+Invoke-ScenarioStep 'ama-failed' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @lz -WellArchitected }
+
+$global:St.waf = @{ good = $true; regionZones = $true }
 Invoke-ScenarioStep 'without-switch' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @lz }

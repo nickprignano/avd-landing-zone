@@ -111,7 +111,7 @@ Describe 'Well-Architected review of the deployed landing zone' {
   BeforeAll { $script:out = Invoke-OfflineScenario 'WellArchitected' }
 
   It 'reports findings as warnings, so a dev landing zone is still ready' {
-    foreach ($step in 'dev', 'skip-psrule', 'production-grade', 'without-switch') { Get-StepExit $out $step | Should -Be 0 }
+    foreach ($step in 'dev', 'skip-psrule', 'production-grade', 'ama-failed', 'without-switch') { Get-StepExit $out $step | Should -Be 0 }
   }
   It 'marks the dev parameter file''s trade-offs as expected' {
     $s = (Get-PortalState $out)[0]
@@ -128,6 +128,15 @@ Describe 'Well-Architected review of the deployed landing zone' {
     $out | Should -Not -Match 'Right-size underused VM|Other workload'
     $out | Should -Match 'assessmentPages=2'
   }
+  It 'reads a region without zones as having none (ARM omits the property; lesson 0021)' {
+    $out | Should -Match 'eastus2 has no availability zones'
+    $out | Should -Not -Match 'Zones: \r?\n'
+  }
+  It 'summarises PSRule export warnings and shows why a rule failed' {
+    $out | Should -Not -Match 'WARNING: Failed to get'
+    $out | Should -Match 'PSRule could not read 1 optional setting'
+    $out | Should -Match "Azure.VM.UseHybridUseBenefit on avdlzdsh-001 \(The field 'properties.licenseType' does not exist.\)"
+  }
   It 'runs PSRule on the landing zone resource groups with the repo suppressions, unless skipped' {
     $out | Should -Match 'RESULT dev-calls psruleExport=1 suppressions=1'
     $out | Should -Match 'RESULT skip-psrule-calls psrule=0'
@@ -137,9 +146,15 @@ Describe 'Well-Architected review of the deployed landing zone' {
     @($s[2].warnings).Count | Should -Be 0
     $out | Should -Match 'Reliability\s+7 of 7 pass'
   }
+  It 'checks the Azure Monitor Agent directly, and drops PSRule''s AMA finding only where the agent is confirmed' {
+    $s = Get-PortalState $out
+    ($s[0].warnings | Where-Object { $_.detail -match 'Azure.VM.AMA' }) | Should -BeNullOrEmpty
+    ($s[3].warnings | Where-Object id -eq 'waf-monitor-agent').detail | Should -Match 'avdlzdsh-001'
+    ($s[3].warnings | Where-Object id -eq 'waf-psrule-operational-excellence').detail | Should -Match 'Azure.VM.AMA on avdlzdsh-001'
+  }
   It 'adds nothing without -WellArchitected' {
     $s = Get-PortalState $out
-    $s[3].context.wellArchitected | Should -BeFalse
+    $s[4].context.wellArchitected | Should -BeFalse
     $out.Substring($out.IndexOf('######## without-switch')) | Should -Not -Match 'Well-Architected'
   }
 }

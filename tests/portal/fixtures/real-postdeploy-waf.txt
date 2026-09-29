@@ -1,0 +1,82 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -WellArchitected -SkipTenant -SkipNtfs
+AVD landing zone preflight - avdlz/dev in 'Azure subscription 1'
+
+== Tooling
+  [PASS ] PowerShell 7.6.6
+  [PASS ] Running in Azure Cloud Shell
+
+== Well-Architected review (avdlz-dev)
+  [WARN ] At least two session hosts
+          1 session host(s). Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set sessionHostCount to 2 or more in the parameter file and deploy again: one host is a single point of failure.
+  [PASS ] Session hosts spread across availability zones
+          Zones: 
+  [WARN ] Profile storage is zone-redundant
+          SKU Premium_LRS. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set profileStorageSku = Premium_ZRS where the region offers it.
+  [PASS ] Profile storage: TLS 1.2, HTTPS only, no shared keys
+  [PASS ] Profile share soft delete
+          14 days
+  [WARN ] Profile share backed up
+          No backup of the profile share. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set enableProfileBackup = true in the parameter file and deploy again.
+  [WARN ] Defender for Cloud plans for servers, storage and Key Vault
+          Not enabled: VirtualMachines, StorageAccounts, KeyVaults. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set enableDefenderForCloud = true in the parameter file and deploy again.
+  [PASS ] Session hosts: Trusted Launch and encryption at host
+          1 host(s)
+  [PASS ] Key Vault: purge protection, RBAC, private only
+  [WARN ] A cost budget with alerts
+          No budget on the subscription. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set AVD_MONTHLY_BUDGET (and alert emails) before deploy.sh, or create a budget in Cost Management.
+  [PASS ] Scaling plan enabled on the host pool
+          vdscaling-avdlz-dev
+  [PASS ] Host pool diagnostics sent to Log Analytics
+          vdpool-avdlz-dev-diagnosticSettings
+  [WARN ] Log retention of 90 days or more
+          30 days. Expected in dev (parameters/dev.bicepparam); change it before production.
+          -> Set logRetentionDays = 90 or more in the parameter file.
+  [WARN ] Resources compliant with the assigned policies
+          2 non-compliant resource(s); assignments: securitycenterbuiltin
+          -> Azure portal: Policy > Compliance, filtered to the landing zone resource groups.
+  [PASS ] Accelerated networking on session hosts
+          1 NIC(s)
+          Reading Defender for Cloud recommendations ...
+  [PASS ] Defender for Cloud: no open recommendations on landing zone resources
+          Reading Azure Advisor recommendations (Advisor refreshes about once a day; a landing zone deployed today may have none yet) ...
+  [PASS ] Azure Advisor: no reliability recommendations
+  [PASS ] Azure Advisor: no security recommendations
+  [PASS ] Azure Advisor: no cost optimization recommendations
+  [PASS ] Azure Advisor: no operational excellence recommendations
+  [PASS ] Azure Advisor: no performance efficiency recommendations
+          Running PSRule for Azure on the deployed resources (a minute or two) ...
+          Installing PSRule.Rules.Azure from the PowerShell Gallery (first run only) ...
+          Exporting 5 resource groups for PSRule ...
+WARNING: Failed to get 'https://management.azure.com//subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Authorization/classicAdministrators?api-version=2015-07-01': status=404, correlation-id=00000000-0000-0000-0000-000000000009, {"error":{"code":"InvalidResourceType","message":"The resource type could not be found in the namespace 'Microsoft.Authorization' for api version '2015-07-01'."}}
+WARNING: Failed to get 'https://management.azure.com//subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-avdlz-dev-storage/providers/Microsoft.Storage/storageAccounts/stavdlzdevabc123/providers/Microsoft.Security/DefenderForStorageSettings?api-version=2022-12-01-preview': status=400, correlation-id=00000000-0000-0000-0000-000000000009, {"error":{"code":"UnsupportedApiVersion","message":"The HTTP resource that matches the request URI 'https://northcentralus.a3.storageav.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-avdlz-dev-storage/providers/Microsoft.Storage/storageAccounts/stavdlzdevabc123/providers/Microsoft.Security/DefenderForStorageSettings' does not support the API version '2022-12-01-preview'."}}
+  [WARN ] PSRule for Azure: reliability rules pass
+          1: Azure.Monitor.ServiceHealth on Azure subscription 1
+          -> Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.
+  [WARN ] PSRule for Azure: security rules pass
+          5: Azure.PublicIP.IsAttached on pip-ng-vnet-avdlz-dev; Azure.Defender.SecurityContact on Azure subscription 1; Azure.DefenderCloud.Provisioning on Azure subscription 1; Azure.RBAC.PIM on Azure subscription 1; Azure.VM.ADE on avdlzdsh-001-disk-os-01
+          -> Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.
+  [PASS ] PSRule for Azure: cost optimization rules pass
+  [WARN ] PSRule for Azure: operational excellence rules pass
+          1: Azure.VM.AMA on avdlzdsh-001
+          -> Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.
+  [PASS ] PSRule for Azure: performance efficiency rules pass
+
+  Well-Architected scorecard
+  Reliability              3 of 7 pass; 4 to review (3 expected in dev)
+  Security                 5 of 7 pass; 2 to review (1 expected in dev)
+  Cost Optimization        3 of 4 pass; 1 to review (1 expected in dev)
+  Operational Excellence   2 of 5 pass; 3 to review (1 expected in dev)
+  Performance Efficiency   3 of 3 pass
+
+== Summary: 53 Pass, 1 Skip, 10 Warn
+
+Ready.
+
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"postdeploy","status":"ready","fix":false,"context":{"namePrefix":"avdlz","environment":"dev","wellArchitected":true},"counts":{"pass":53,"fail":0,"warn":10,"fixed":0,"skip":1},"failures":[],"warnings":[{"id":"waf-host-count","area":"WAF: Reliability","check":"At least two session hosts","detail":"1 session host(s). Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set sessionHostCount to 2 or more in the parameter file and deploy again: one host is a single point of failure.","data":{"pillar":"Reliability","accepted":true}},{"id":"waf-storage-redundancy","area":"WAF: Reliability","check":"Profile storage is zone-redundant","detail":"SKU Premium_LRS. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set profileStorageSku = Premium_ZRS where the region offers it.","data":{"pillar":"Reliability","accepted":true}},{"id":"waf-profile-backup","area":"WAF: Reliability","check":"Profile share backed up","detail":"No backup of the profile share. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set enableProfileBackup = true in the parameter file and deploy again.","data":{"pillar":"Reliability","accepted":true}},{"id":"waf-defender-plans","area":"WAF: Security","check":"Defender for Cloud plans for servers, storage and Key Vault","detail":"Not enabled: VirtualMachines, StorageAccounts, KeyVaults. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set enableDefenderForCloud = true in the parameter file and deploy again.","data":{"pillar":"Security","accepted":true}},{"id":"waf-budget","area":"WAF: Cost Optimization","check":"A cost budget with alerts","detail":"No budget on the subscription. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set AVD_MONTHLY_BUDGET (and alert emails) before deploy.sh, or create a budget in Cost Management.","data":{"pillar":"Cost Optimization","accepted":true}},{"id":"waf-log-retention","area":"WAF: Operational Excellence","check":"Log retention of 90 days or more","detail":"30 days. Expected in dev (parameters/dev.bicepparam); change it before production.","remediation":"Set logRetentionDays = 90 or more in the parameter file.","data":{"pillar":"Operational Excellence","accepted":true}},{"id":"waf-policy-compliance","area":"WAF: Operational Excellence","check":"Resources compliant with the assigned policies","detail":"2 non-compliant resource(s); assignments: securitycenterbuiltin","remediation":"Azure portal: Policy > Compliance, filtered to the landing zone resource groups.","data":{"pillar":"Operational Excellence","accepted":false}},{"id":"waf-psrule-reliability","area":"WAF: Reliability","check":"PSRule for Azure: reliability rules pass","detail":"1: Azure.Monitor.ServiceHealth on Azure subscription 1","remediation":"Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.","data":{"pillar":"Reliability","accepted":false}},{"id":"waf-psrule-security","area":"WAF: Security","check":"PSRule for Azure: security rules pass","detail":"5: Azure.PublicIP.IsAttached on pip-ng-vnet-avdlz-dev; Azure.Defender.SecurityContact on Azure subscription 1; Azure.DefenderCloud.Provisioning on Azure subscription 1; Azure.RBAC.PIM on Azure subscription 1; Azure.VM.ADE on avdlzdsh-001-disk-os-01","remediation":"Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.","data":{"pillar":"Security","accepted":false}},{"id":"waf-psrule-operational-excellence","area":"WAF: Operational Excellence","check":"PSRule for Azure: operational excellence rules pass","detail":"1: Azure.VM.AMA on avdlzdsh-001","remediation":"Each rule is explained at https://azure.github.io/PSRule.Rules.Azure/en/rules/<rule name>/. Fix it in the Bicep, or suppress it with a reason in .ps-rule/Suppressions.Rule.yaml.","data":{"pillar":"Operational Excellence","accepted":false}}]} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>

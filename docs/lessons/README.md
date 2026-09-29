@@ -26,6 +26,7 @@ Add a lesson whenever a real run fails for a reason the tests didn't catch. The 
 | 0018 | [PSRule for Azure specifics](0018-psrule.md) | CI | #3 | CI PSRule gate |
 | 0019 | [Bicep authoring traps](0019-bicep-authoring.md) | Bicep | #2 | CI Bicep lint |
 | 0020 | [The offline harness must not depend on the machine's tools](0020-hermetic-harness.md) | Tests | portal PR | Hermetic scenarios in CI |
+| 0021 | [ARM leaves out empty properties, and `@($null).Count` is 1](0021-arm-omits-empty-properties.md) | Preflight | after #19 | WellArchitected scenario (no-zones region) |
 
 ## Template
 

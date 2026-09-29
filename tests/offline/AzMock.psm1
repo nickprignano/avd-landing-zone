@@ -63,11 +63,23 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   # ---- Well-Architected review (Test-AvdWellArchitected). $global:St.waf.good: a production-grade
   # landing zone; otherwise the dev parameter file's trade-offs in a region without zones.
   $g = [bool]$global:St.waf.good
-  if ($Path -match '^/subscriptions/[^/]+/locations\?api-version') { return & $ok @{ value=@(@{ name='eastus2'; availabilityZoneMappings=@(if ($global:St.waf.regionZones) { @{logicalZone='1';physicalZone='eastus2-az1'} }) }) } }
+  # ARM leaves out empty properties: a region without zones has no availabilityZoneMappings and a
+  # regional VM has no zones property (real run, lesson 0021). Don't return empty arrays here.
+  if ($Path -match '^/subscriptions/[^/]+/locations\?api-version') {
+    $l = @{ name='eastus2'; displayName='East US 2' }
+    if ($global:St.waf.regionZones) { $l.availabilityZoneMappings = @(@{ logicalZone='1'; physicalZone='eastus2-az1' }) }
+    return & $ok @{ value=@($l) }
+  }
   if ($Path -match 'Microsoft.Compute/virtualMachines\?api-version') {
     $n = if ($g) { 2 } else { 1 }
-    return & $ok @{ value=@(1..$n | ForEach-Object { @{ name="avdlzdsh-00$_"; zones=@(if ($g) { "$_" }); properties=@{ securityProfile=@{ securityType='TrustedLaunch'; encryptionAtHost=$true } } } }) }
+    return & $ok @{ value=@(1..$n | ForEach-Object {
+          $vm = @{ name="avdlzdsh-00$_"; id="$S/resourceGroups/rg-avdlz-dev-hosts/providers/Microsoft.Compute/virtualMachines/avdlzdsh-00$_"; properties=@{ securityProfile=@{ securityType='TrustedLaunch'; encryptionAtHost=$true } } }
+          if ($g) { $vm.zones = @("$_") }
+          $vm }) }
   }
+  if ($Path -match 'virtualMachines/[^/]+/extensions\?') { return & $ok @{ value=@(
+        @{ name='AADLogin'; properties=@{ publisher='Microsoft.Azure.ActiveDirectory'; type='AADLoginForWindows'; provisioningState='Succeeded' } },
+        @{ name='AzureMonitorAgent'; properties=@{ publisher='Microsoft.Azure.Monitor'; type='AzureMonitorWindowsAgent'; provisioningState=$(if ($global:St.waf.amaFailed) { 'Failed' } else { 'Succeeded' }) } }) } }
   if ($Path -match 'Microsoft.Network/networkInterfaces\?') { return & $ok @{ value=@(@{ name='avdlzdsh-001-nic'; properties=@{ enableAcceleratedNetworking=$true } }) } }
   if ($Path -match "storageAccounts/$saName/fileServices/default\?") { return & $ok @{ properties=@{ shareDeleteRetentionPolicy=@{ enabled=$true; days=14 } } } }
   if ($Path -match "storageAccounts/$saName\?api-version") { return & $ok @{ sku=@{ name=$(if ($g) { 'Premium_ZRS' } else { 'Premium_LRS' }) }; properties=@{ minimumTlsVersion='TLS1_2'; supportsHttpsTrafficOnly=$true; allowSharedKeyAccess=$false } } }
@@ -168,12 +180,17 @@ function Remove-AzResourceLock { param($LockId,[switch]$Force) Log "unlock $Lock
 function Start-Sleep { param($Seconds) }
 # PSRule for Azure (Get-AvdPSRuleFinding). Record shape: RuleName, TargetName, Tag['Azure.WAF/pillar'].
 $global:St.waf = @{ good = $false; regionZones = $false }
-function Export-AzRuleData { param([string[]]$ResourceGroupName,$OutputPath,$ErrorAction) Log "psrule export $($ResourceGroupName -join ',')"; New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null }
+function Export-AzRuleData { [CmdletBinding()] param([string[]]$ResourceGroupName,$OutputPath)
+  Log "psrule export $($ResourceGroupName -join ',')"; New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
+  # As in a real run: optional lookups fail with warnings.
+  Write-Warning "Failed to get 'https://management.azure.com//subscriptions/x/providers/Microsoft.Authorization/classicAdministrators?api-version=2015-07-01': status=404" }
 function Invoke-PSRule { param($InputPath,$Module,$Outcome,$Path,$WarningAction,$ErrorAction)
   Log "psrule invoke outcome=$Outcome suppressions=$([bool]$Path)"
   if ($global:St.waf.good) { return }
-  [pscustomobject]@{ RuleName='Azure.VM.UseHybridUseBenefit'; TargetName='avdlzdsh-001'; Tag=@{ 'Azure.WAF/pillar'='Cost Optimization' } }
-  [pscustomobject]@{ RuleName='Azure.Storage.ContainerSoftDelete'; TargetName=$saName; Tag=@{ 'Azure.WAF/pillar'='Reliability' } }
+  [pscustomobject]@{ RuleName='Azure.VM.UseHybridUseBenefit'; TargetName='avdlzdsh-001'; Tag=@{ 'Azure.WAF/pillar'='Cost Optimization' }; Reason=@('The field ''properties.licenseType'' does not exist.') }
+  [pscustomobject]@{ RuleName='Azure.Storage.ContainerSoftDelete'; TargetName=$saName; Tag=@{ 'Azure.WAF/pillar'='Reliability' }; Reason=$null }
+  # Live run: PSRule's export doesn't attach VM extensions, so this fails although the agent is installed.
+  [pscustomobject]@{ RuleName='Azure.VM.AMA'; TargetName='avdlzdsh-001'; Tag=@{ 'Azure.WAF/pillar'='Operational Excellence' }; Reason=@('The virtual machine does not have Azure Monitor Agent installed.') }
 }
 
 # ---- Graph ----
