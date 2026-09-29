@@ -370,3 +370,12 @@ test('state: post-deployment check on locked hosts -> resume first, then sign in
   assert.match(last(r.actions[0].command), /Invoke-AvdPowerAction\.ps1 -Action Resume -NamePrefix avdlz -Environment dev$/);
   assert.ok(r.actions.some((a) => a.title === 'Sign in to the desktop'));
 });
+
+test('page: one slide per step, in order, and the latency check comes first', () => {
+  const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
+  const slides = [...html.matchAll(/<section class="slide"[^>]*data-step="([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(slides, P.STEPS.map((s) => s.id));
+  assert.equal(P.STEPS[0].id, 'region');
+  const region = html.slice(html.indexOf('data-step="region"'), html.indexOf('data-step="size"'));
+  assert.match(region, /id="run"/, 'the latency test is in the first step');
+});
