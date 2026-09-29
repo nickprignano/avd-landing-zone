@@ -52,14 +52,27 @@
   .status { font-size: .9rem; }
   .hidden { display: none !important; }
 
-  /* Progress tracker */
-  ol.steps { list-style: none; display: flex; gap: 6px; padding: 0; margin: 0 0 16px; flex-wrap: wrap; }
-  ol.steps li { flex: 1 1 140px; }
-  ol.steps button { width: 100%; text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--border); font-weight: 500; padding: 8px 10px; }
+  /* Progress tracker: one row, scrolls sideways on narrow screens. Steps not reached yet are locked. */
+  ol.steps { list-style: none; display: flex; gap: 6px; padding: 0 0 4px; margin: 0 0 12px; overflow-x: auto; scroll-snap-type: x proximity; }
+  ol.steps li { flex: 1 0 150px; scroll-snap-align: start; }
+  ol.steps button { width: 100%; height: 100%; text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--border); font-weight: 500; padding: 8px 10px; }
   ol.steps .n { display: inline-block; width: 1.5em; font-weight: 700; color: var(--muted); }
   ol.steps li.done button { border-color: var(--good); }
   ol.steps li.done .n { color: var(--good); }
   ol.steps li.current button { border-color: var(--accent); background: var(--row-sel); font-weight: 700; }
+  ol.steps li.locked button { color: var(--muted); border-style: dashed; background: transparent; opacity: 1; }
+
+  /* The steps sit side by side and scroll horizontally; the track takes the height of the step in view. */
+  .track { display: flex; align-items: flex-start; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scroll-behavior: smooth; gap: 16px; margin-bottom: 12px; transition: height .2s ease; }
+  .track > .slide { flex: 0 0 100%; min-width: 0; scroll-snap-align: start; margin-bottom: 0; }
+  .track > .slide.hidden { display: none !important; }
+  .slide > h2 .n { color: var(--muted); font-weight: 700; margin-right: 6px; }
+  .slot > section { border: 0; padding: 0; margin: 16px 0 0; background: none; }
+  .slot > section:first-child { margin-top: 0; }
+  .stepnav { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .stepnav .status { text-align: center; flex: 1; }
+  @media (max-width: 520px) { .stepnav .status { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .track { scroll-behavior: auto; transition: none; } }
 
   /* Actions */
   .action { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
@@ -111,8 +124,75 @@
 
   <ol class="steps" id="steps" aria-label="Deployment progress"></ol>
 
+  <div class="track" id="track">
+    <section class="slide" id="region-panel" data-step="region" aria-label="Choose a region">
+      <h2><span class="n"></span>Choose a region <span class="muted" style="font-weight:400">· <span id="region-summary"></span></span></h2>
+      <p class="status">Ranks Azure regions by round-trip time <strong>from this browser</strong>. Run it from where your users work, not from Cloud Shell or a VPN. Under 100&nbsp;ms is good for AVD, 100–150&nbsp;ms is usable, above 150&nbsp;ms feels sluggish.</p>
+      <div class="row" id="geos">
+        <label><input type="checkbox" value="Americas" checked> Americas</label>
+        <label><input type="checkbox" value="Europe" checked> Europe</label>
+        <label><input type="checkbox" value="Asia Pacific" checked> Asia Pacific</label>
+        <label><input type="checkbox" value="Middle East &amp; Africa" checked> Middle East &amp; Africa</label>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="run">Measure latency</button>
+        <span class="status" id="lat-status">About 20 seconds: each region gets a warm-up request and 5 timed ones.</span>
+        <button type="button" class="linkbtn" id="region-skip">Skip: I already know the region</button>
+      </div>
+      <progress id="progress" class="hidden" value="0" max="1"></progress>
+      <div id="results" class="hidden" style="margin-top:12px">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>#</th><th>Region</th><th>Geography</th><th class="num">Median</th><th class="barcell"></th><th>Rating</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <button type="button" class="linkbtn hidden" id="more" aria-controls="rows" aria-expanded="false"></button>
+      </div>
+    </section>
+    <section class="slide" id="size-panel" data-step="size" aria-label="Size and cost">
+      <h2><span class="n"></span>Size and cost <span class="muted" style="font-weight:400">· <span id="size-summary"></span></span></h2>
+      <p class="status">Sizes the session hosts from how many people use them and how they work (Microsoft's multi-session guidance: light 6, medium 4, heavy 2, power 1 user per vCPU). It suggests memory-optimised E-series sizes, because hosts shared by many users run out of memory before CPU, and every host gets a Premium SSD OS disk. Once you apply a sizing, the commands carry it: the pre-deployment preflight checks quota and availability for it and prices it in your region at Azure list prices, and <code>deploy.sh</code> deploys it.</p>
+      <div id="pools"></div>
+      <div class="row">
+        <button type="button" class="secondary" id="add-pool" disabled title="The landing zone deploys one host pool today">Add a host pool</button>
+        <span class="status">One pooled host pool for now; the sizing is kept per host pool so more can be added later.</span>
+      </div>
+      <div class="table-wrap" style="margin-top:12px"><table class="kv"><tbody id="size-result"></tbody></table></div>
+      <ul class="notes" id="size-notes"></ul>
+      <div class="row" style="margin-top:12px">
+        <button id="size-apply">Use this sizing</button>
+        <button class="secondary" id="size-clear">Use the parameter file's values</button>
+        <span class="status" id="size-status" role="status"></span>
+      </div>
+      <h3 style="margin-top:16px">Estimated monthly cost</h3>
+      <div id="estimate"></div>
+    </section>
+    <section class="slide" id="slide-predeploy" data-step="predeploy" aria-label="Pre-deployment preflight">
+      <h2><span class="n"></span>Pre-deployment preflight</h2>
+      <div class="slot"></div>
+    </section>
+    <section class="slide" id="slide-deploy" data-step="deploy" aria-label="Deploy the landing zone">
+      <h2><span class="n"></span>Deploy the landing zone</h2>
+      <div class="slot"></div>
+    </section>
+    <section class="slide" id="slide-postdeploy" data-step="postdeploy" aria-label="Post-deployment setup">
+      <h2><span class="n"></span>Post-deployment setup</h2>
+      <div class="slot"></div>
+    </section>
+    <section class="slide" id="slide-signin" data-step="signin" aria-label="Sign in">
+      <h2><span class="n"></span>Sign in</h2>
+      <div class="slot"></div>
+    </section>
+  </div>
+  <nav class="stepnav" aria-label="Step navigation">
+    <button type="button" class="secondary" id="prev-step">&larr; Back</button>
+    <span class="status" id="step-pos"></span>
+    <button type="button" class="secondary" id="next-step">Next &rarr;</button>
+  </nav>
+  <div id="shared" class="hidden">
   <section id="next" aria-live="polite">
-    <div class="headline"><h2 id="next-title" style="margin:0">Next step</h2><span id="next-chip" class="chip hidden"></span></div>
+    <div class="headline"><h3 id="next-title" style="margin:0">Next step</h3><span id="next-chip" class="chip hidden"></span></div>
     <p id="next-headline" class="status hidden"></p>
     <p id="estimate-line" class="status hidden"></p>
     <div id="findings" class="hidden"></div>
@@ -120,9 +200,8 @@
     <p class="status" style="margin-top:12px">Copy a block, paste it into <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Cloud Shell</a>, then paste the output below. Keep the Cloud Shell tab in front while it runs.
       Wrong advice, or stuck? <button type="button" class="linkbtn" id="report-open">Report a problem</button></p>
   </section>
-
-  <section>
-    <h2>Paste Cloud Shell output</h2>
+  <section id="paste-box">
+    <h3>Paste Cloud Shell output</h3>
     <textarea id="paste" spellcheck="false" placeholder="Paste everything from the command to the prompt that follows it. The scripts end with a line starting &lt;&lt;&lt;AVDLZ-STATE, which is what this page reads."></textarea>
     <div class="row" style="margin-top:10px">
       <button id="analyze">Analyse output</button>
@@ -130,6 +209,7 @@
       <span class="status" id="paste-status" role="status"></span>
     </div>
   </section>
+  </div>
 
   <details class="panel" id="report-panel">
     <summary>Report a problem</summary>
@@ -145,51 +225,6 @@
       <span class="status" id="report-status" role="status"></span>
     </div>
   </details>
-
-  <details class="panel" id="region-panel">
-    <summary>Region: <span id="region-summary"></span></summary>
-    <p class="status">Ranks Azure regions by round-trip time <strong>from this browser</strong>. Run it from where your users work, not from Cloud Shell or a VPN. Under 100&nbsp;ms is good for AVD, 100–150&nbsp;ms is usable, above 150&nbsp;ms feels sluggish.</p>
-    <div class="row" id="geos">
-      <label><input type="checkbox" value="Americas" checked> Americas</label>
-      <label><input type="checkbox" value="Europe" checked> Europe</label>
-      <label><input type="checkbox" value="Asia Pacific" checked> Asia Pacific</label>
-      <label><input type="checkbox" value="Middle East &amp; Africa" checked> Middle East &amp; Africa</label>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <button id="run">Measure latency</button>
-      <span class="status" id="lat-status">About 20 seconds: each region gets a warm-up request and 5 timed ones.</span>
-    </div>
-    <progress id="progress" class="hidden" value="0" max="1"></progress>
-    <div id="results" class="hidden" style="margin-top:12px">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th></th><th>#</th><th>Region</th><th>Geography</th><th class="num">Median</th><th class="barcell"></th><th>Rating</th></tr></thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-      <button type="button" class="linkbtn hidden" id="more" aria-controls="rows" aria-expanded="false"></button>
-    </div>
-  </details>
-
-  <details class="panel" id="size-panel">
-    <summary>Size and cost: <span id="size-summary"></span></summary>
-    <p class="status">Sizes the session hosts from how many people use them and how they work (Microsoft's multi-session guidance: light 6, medium 4, heavy 2, power 1 user per vCPU). It suggests memory-optimised E-series sizes, because hosts shared by many users run out of memory before CPU, and every host gets a Premium SSD OS disk. Once you apply a sizing, the commands carry it: the pre-deployment preflight checks quota and availability for it and prices it in your region at Azure list prices, and <code>deploy.sh</code> deploys it.</p>
-    <div id="pools"></div>
-    <div class="row">
-      <button type="button" class="secondary" id="add-pool" disabled title="The landing zone deploys one host pool today">Add a host pool</button>
-      <span class="status">One pooled host pool for now; the sizing is kept per host pool so more can be added later.</span>
-    </div>
-    <div class="table-wrap" style="margin-top:12px"><table class="kv"><tbody id="size-result"></tbody></table></div>
-    <ul class="notes" id="size-notes"></ul>
-    <div class="row" style="margin-top:12px">
-      <button id="size-apply">Use this sizing</button>
-      <button class="secondary" id="size-clear">Use the parameter file's values</button>
-      <span class="status" id="size-status" role="status"></span>
-    </div>
-    <h3 style="margin-top:16px">Estimated monthly cost</h3>
-    <div id="estimate"></div>
-  </details>
-
   <details class="panel" id="settings-panel">
     <summary>Deployment settings</summary>
     <p class="status">Used to build the commands. Values from pasted output fill these in automatically; they are kept only in this browser.</p>
@@ -237,6 +272,8 @@
 
   var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null) });
   var step = load('step', null);
+  // Furthest step reached: later steps stay hidden until the deployment gets there.
+  var reached = Math.max(load('reached', 0), stepIndex(step || 'region'));
   var ranked = load('ranked', null);
   var lastAnalysis = null;
 
@@ -248,29 +285,88 @@
     var keep = {}; FIELDS.forEach(function (k) { keep[k] = cfg[k]; }); save('config', keep);
     FIELDS.forEach(function (k) { var el = $(k); if (el && el.value !== cfg[k]) el.value = cfg[k] || ''; });
     $('region-summary').textContent = cfg.location + (ranked && ranked.length ? (ranked[0] === cfg.location ? ' (closest measured)' : '') : ' (not measured yet)');
+    $('region-skip').textContent = 'Skip: use ' + cfg.location + ' (change it under Deployment settings)';
   }
   FIELDS.forEach(function (k) {
     $(k).addEventListener('change', function () { var p = {}; p[k] = $(k).value.trim(); setConfig(p); lastAnalysis = null; render(); if (typeof renderSizeResult === 'function') renderSizeResult(); });
   });
 
-  // ---------------------------------------------------------------- progress tracker
+  // ---------------------------------------------------------------- progress tracker and steps
   function stepIndex(id) { for (var i = 0; i < P.STEPS.length; i++) if (P.STEPS[i].id === id) return i; return 0; }
+  function curIndex() { return stepIndex(step || 'region'); }
+  // Moves to a step (revealing it if it is the next one); scroll: false when the user scrolled there.
+  function goTo(id, opts) {
+    opts = opts || {};
+    var i = stepIndex(id);
+    if (i > reached) { reached = i; save('reached', reached); }
+    if (id !== (step || 'region')) lastAnalysis = null;
+    step = id; save('step', step);
+    render();
+    if (opts.scroll !== false) showStep(opts.page);
+  }
   function renderSteps() {
-    var cur = stepIndex(step || 'region'), ol = $('steps');
+    var cur = curIndex(), ol = $('steps');
     ol.textContent = '';
     P.STEPS.forEach(function (s, i) {
       var li = document.createElement('li');
-      if (i < cur) li.className = 'done';
-      if (i === cur) li.className = 'current';
+      li.className = i > reached ? 'locked' : i === cur ? 'current' : i < reached || i < cur ? 'done' : '';
       var b = document.createElement('button');
       b.type = 'button';
+      b.disabled = i > reached;
+      if (i > reached) b.title = 'Reached after the steps before it';
       b.setAttribute('aria-current', i === cur ? 'step' : 'false');
-      b.innerHTML = '<span class="n">' + (i < cur ? '✓' : (i + 1)) + '</span>';
+      b.innerHTML = '<span class="n">' + (li.className === 'done' ? '✓' : (i + 1)) + '</span>';
       b.appendChild(document.createTextNode(s.title));
-      b.addEventListener('click', function () { step = s.id; save('step', step); lastAnalysis = null; render(); if (s.id === 'region') $('region-panel').open = true; if (s.id === 'size') $('size-panel').open = true; });
+      b.addEventListener('click', function () { goTo(s.id); });
       li.appendChild(b); ol.appendChild(li);
     });
+    // Keep the current step in view when the tracker scrolls sideways (phones).
+    var li = ol.children[cur]; if (li) ol.scrollLeft = Math.max(0, li.offsetLeft - ol.offsetLeft - 16);
   }
+  function slides() { return Array.prototype.slice.call(document.querySelectorAll('#track > .slide')); }
+  function currentSlide() { return slides()[curIndex()]; }
+  // Only the steps reached so far are in the track; the command steps share one "next step" and paste box.
+  function renderSlides() {
+    var cur = curIndex();
+    slides().forEach(function (sl, i) {
+      sl.classList.toggle('hidden', i > reached);
+      sl.querySelector('h2 .n').textContent = (i + 1) + '.';
+      if (i === cur) sl.removeAttribute('inert'); else sl.setAttribute('inert', '');
+    });
+    var slot = currentSlide().querySelector('.slot'), shared = $('shared');
+    var home = slot || shared;
+    ['next', 'paste-box'].forEach(function (id) { if ($(id).parentNode !== home) home.appendChild($(id)); });
+    $('prev-step').disabled = cur === 0;
+    $('next-step').disabled = cur >= P.STEPS.length - 1;
+    $('next-step').innerHTML = (cur < reached ? 'Next' : 'Skip to next step') + ' &rarr;';
+    $('step-pos').textContent = 'Step ' + (cur + 1) + ' of ' + P.STEPS.length + ': ' + P.STEPS[cur].title;
+    fitTrack();
+  }
+  var track = $('track'), programmatic = 0;
+  // The track is as tall as the step in view, so a short step doesn't leave a gap under it.
+  function fitTrack() { var sl = currentSlide(); if (sl) track.style.height = sl.offsetHeight + 'px'; }
+  if (window.ResizeObserver) { var ro = new ResizeObserver(fitTrack); slides().forEach(function (sl) { ro.observe(sl); }); }
+  window.addEventListener('resize', function () { fitTrack(); showStep('instant'); });
+  function showStep(page) {
+    var sl = currentSlide(); if (!sl) return;
+    programmatic = Date.now();
+    track.scrollTo({ left: sl.offsetLeft - track.offsetLeft, behavior: page === 'instant' ? 'auto' : 'smooth' });
+    if (page !== 'instant' && track.getBoundingClientRect().top < 0) $('steps').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  // Scrolling the track sideways (swipe, trackpad, keyboard) changes the step in view.
+  var scrollTimer = null;
+  track.addEventListener('scroll', function () {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(function () {
+      if (Date.now() - programmatic < 800) return;
+      var visible = slides().filter(function (sl) { return !sl.classList.contains('hidden'); });
+      var best = visible.reduce(function (a, sl) { return Math.abs(sl.offsetLeft - track.offsetLeft - track.scrollLeft) < Math.abs(a.offsetLeft - track.offsetLeft - track.scrollLeft) ? sl : a; }, visible[0]);
+      if (best && best.getAttribute('data-step') !== (step || 'region')) goTo(best.getAttribute('data-step'), { scroll: false });
+    }, 120);
+  });
+  $('prev-step').addEventListener('click', function () { goTo(P.STEPS[Math.max(0, curIndex() - 1)].id); });
+  $('next-step').addEventListener('click', function () { goTo(P.STEPS[Math.min(P.STEPS.length - 1, curIndex() + 1)].id); });
+  $('region-skip').addEventListener('click', function () { goTo('size'); });
 
   // ---------------------------------------------------------------- next step
   function copy(text, btn) {
@@ -320,7 +416,7 @@
   }
 
   function render() {
-    renderSteps();
+    renderSteps(); renderSlides();
     var chip = $('next-chip'), head = $('next-headline');
     if (lastAnalysis) {
       var r = lastAnalysis;
@@ -349,20 +445,20 @@
     setConfig(r.config);
     if (r.estimate) { estimate = r.estimate; save('estimate', estimate); renderEstimate(); }
     renderSizeResult();
-    if (r.step) { step = r.step; save('step', step); }
+    if (r.step && r.step !== (step || 'region')) goTo(r.step);
     lastAnalysis = r;
     $('paste-status').textContent = r.recognised ? 'Analysed: ' + r.headline : 'Nothing recognisable in the pasted text.';
     render(); refreshReport(true);
-    $('next').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('next').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
   $('analyze').addEventListener('click', analyzePaste);
   $('paste').addEventListener('paste', function () { setTimeout(analyzePaste, 0); });
   $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); refreshReport(true); });
   $('reset').addEventListener('click', function () {
     try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
-    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null }); step = null; ranked = null; lastAnalysis = null; latency = [];
+    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
     pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)]; estimate = null; renderPools(); renderEstimate();
-    $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render();
+    $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render(); showStep();
   });
 
   // ---------------------------------------------------------------- issue report (redacted in this browser)
@@ -490,11 +586,13 @@
     var r = poolResult(0);
     applySizing(P.toSizing(r));
     estimate = null; save('estimate', null); renderEstimate(); renderSizeSummary();
-    if (!step || step === 'region' || step === 'size') { step = 'predeploy'; save('step', step); render(); }
     $('size-status').textContent = 'Applied: the commands now check and price ' + r.hosts + ' × ' + r.vmSize.replace('Standard_', '') + '.';
-    $('next').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (curIndex() <= stepIndex('size')) goTo('predeploy');
   });
-  $('size-clear').addEventListener('click', function () { applySizing(null); $('size-status').textContent = 'The commands use the parameter file\'s sizing.'; });
+  $('size-clear').addEventListener('click', function () {
+    applySizing(null); $('size-status').textContent = 'The commands use the parameter file\'s sizing.';
+    if (curIndex() <= stepIndex('size')) goTo('predeploy');
+  });
 
   // ---------------------------------------------------------------- region latency
   // Regions with a regional endpoint that resolves in-region (checked in DNS), grouped for the filters.
@@ -565,9 +663,9 @@
       expanded = false;
       bar.classList.add('hidden'); $('run').disabled = false; $('run').textContent = 'Measure again';
       if (ok.length) {
-        $('lat-status').textContent = 'Closest: ' + ok[0].display + ' (' + Math.round(ok[0].median) + ' ms). Selected for the deployment; click another row to change it.';
+        $('lat-status').textContent = 'Closest: ' + ok[0].display + ' (' + Math.round(ok[0].median) + ' ms). Selected for the deployment; click another row to change it, then select Next.';
         setConfig({ location: ok[0].name });
-        if (!step || step === 'region') { step = 'size'; save('step', step); $('size-panel').open = true; }
+        if (!step || step === 'region') { reached = Math.max(reached, stepIndex('size')); save('reached', reached); }
       }
       else $('lat-status').textContent = 'No region answered. A firewall or content blocker may be stopping the requests.';
       lastAnalysis = null;
@@ -607,11 +705,10 @@
   $('more').addEventListener('click', function () { expanded = !expanded; renderLatency(); });
 
   // ---------------------------------------------------------------- start
-  if (location.hash === '#region' || !step) $('region-panel').open = true;
-  if (location.hash === '#size' || step === 'size') $('size-panel').open = true;
+  if (/^#(region|size)$/.test(location.hash) && stepIndex(location.hash.slice(1)) <= reached) step = location.hash.slice(1);
   setConfig({});
   renderPools(); renderEstimate();
-  render();
+  render(); showStep('instant');
 })();
 </script>
 </body>

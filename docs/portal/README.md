@@ -9,6 +9,8 @@
 5. **Post-deployment setup.**
 6. **Sign in** (and optionally the demo host pool).
 
+The steps sit side by side and scroll horizontally (swipe, trackpad, or Back and Next); a step stays hidden until the deployment reaches it, so the page opens on the latency check. A pasted output moves to the step it leads to. Next skips a step without running it, for an operator who did it earlier or elsewhere.
+
 At each step it gives a self-contained Cloud Shell block (clone or update the repo, move into it, run the command). The operator pastes the output back and the portal works out what happened and what to run next. It keeps progress and settings in the browser's local storage. **Pasted output is never sent anywhere**: the only network requests are the latency test's.
 
 **Report a problem** opens a GitHub issue with the pasted output and the portal's analysis. [`report.js`](report.js) redacts it in the browser first (decision [0008](../decisions/0008-portal-issue-reports.md)). The reporter reviews it and submits it on GitHub.
