@@ -64,3 +64,41 @@ Describe 'Sizing overrides' {
     }
   }
 }
+
+Describe 'Auto shutdown' {
+  # decision 0011: a runbook started by a schedule and by the budget's action group.
+  It 'deploys the runbook, the dev schedule and the runbook identity''s roles' {
+    $t = Get-CompiledTemplate 'parameters/dev.bicepparam'
+    $auto = Find-Deployment $t 'avdlz-auto-shutdown'
+    $auto | Should -Not -BeNullOrEmpty
+    $inner = $auto['properties']['template']
+    $res = @($inner['resources'].Values) + @($inner['resources']) | Where-Object { $_ -is [System.Collections.IDictionary] }
+    ($res | Where-Object type -eq 'Microsoft.Automation/automationAccounts/runbooks')['properties']['runbookType'] | Should -Be 'PowerShell'
+    ($res | Where-Object type -eq 'Microsoft.Automation/automationAccounts')['properties']['disableLocalAuth'] | Should -BeTrue
+    $wf = @($res | Where-Object type -eq 'Microsoft.Logic/workflows')
+    $wf.Count | Should -Be 2
+    ($wf | ForEach-Object { $_['properties']['definition']['triggers'] | ConvertTo-Json -Depth 10 }) -join ' ' | Should -Match 'Recurrence'
+    # format() escapes the braces: '@{{guid()}}' becomes the Logic Apps expression '@{guid()}'.
+    ($inner['functions'] | ConvertTo-Json -Depth 20) | Should -Match 'jobs/@\{\{guid\(\)\}\}'
+    ($inner['functions'] | ConvertTo-Json -Depth 20) | Should -Match 'ManagedServiceIdentity'
+    $p = ((& $script:bicep build-params 'parameters/dev.bicepparam' --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters
+    $p.autoShutdownTime.value | Should -Be '20:00'
+    $p.autoShutdownRunbookUri.value | Should -Match '^https://raw\.githubusercontent\.com/.+/scripts/automation/Invoke-AvdPowerAction\.ps1$'
+    ($t['variables']['roleIds'] | ConvertTo-Json) | Should -Match '082f0a83-3be5-4ba1-904c-961cca79b387'
+    (Find-Deployment $t 'avdlz-auto-shutdown-rbac-hosts') | Should -Not -BeNullOrEmpty
+    (Find-Deployment $t 'avdlz-auto-shutdown-rbac-avd') | Should -Not -BeNullOrEmpty
+  }
+  It 'has the budget call the auto-shutdown action group' {
+    $t = Get-CompiledTemplate 'parameters/prod.bicepparam'
+    $gov = @($t['resources'].Values) + @($t['resources']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['name'] -match 'avdlz-governance' }
+    ($gov['properties']['parameters']['budgetActionGroupId'] | ConvertTo-Json) | Should -Match "budgetActionGroupId"
+    $budget = @($gov['properties']['template']['resources'].Values) + @($gov['properties']['template']['resources']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['type'] -eq 'Microsoft.Consumption/budgets' }
+    ($budget['properties']['notifications'] | ConvertTo-Json) | Should -Match 'contactGroups'
+  }
+  It 'takes an empty AVD_MONTHLY_BUDGET as no budget (docs/lessons/0004)' {
+    foreach ($file in 'parameters/dev.bicepparam', 'parameters/prod.bicepparam') {
+      $env:AVD_MONTHLY_BUDGET = ''
+      ((& $script:bicep build-params $file --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters.monthlyBudgetAmount.value | Should -Be 0
+    }
+  }
+}

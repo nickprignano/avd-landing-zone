@@ -18,6 +18,10 @@ param monthlyBudgetAmount int
 param budgetStartDate string
 param alertEmailAddresses string[]
 
+@description('Action group the budget calls at budgetActionPercent of actual cost (the auto-shutdown trigger). Empty = none.')
+param budgetActionGroupId string = ''
+param budgetActionPercent int = 100
+
 // Built-in policy definitions.
 resource allowedLocationsDefinition 'Microsoft.Authorization/policyDefinitions@2023-04-01' existing = {
   scope: tenant()
@@ -148,7 +152,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = if (deployBudget) {
     timePeriod: {
       startDate: budgetStartDate
     }
-    notifications: {
+    notifications: union({
       actual80: {
         enabled: true
         operator: 'GreaterThan'
@@ -163,7 +167,19 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = if (deployBudget) {
         thresholdType: 'Forecasted'
         contactEmails: alertEmailAddresses
       }
-    }
+    }, empty(budgetActionGroupId) ? {} : {
+      // Auto shutdown (decision 0011): at this share of actual cost the action group starts the runbook.
+      autoShutdown: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: budgetActionPercent
+        thresholdType: 'Actual'
+        contactEmails: alertEmailAddresses
+        contactGroups: [
+          budgetActionGroupId
+        ]
+      }
+    })
   }
 }
 

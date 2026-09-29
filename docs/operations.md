@@ -158,6 +158,37 @@ With `-IncludeLandingZone`, you must type the landing zone name to confirm (`-Fo
 
 The Key Vault stays soft-deleted under purge protection for 90 days.
 
+## Auto shutdown
+
+The landing zone deploys an Azure Automation runbook, [`scripts/automation/Invoke-AvdPowerAction.ps1`](../scripts/automation/Invoke-AvdPowerAction.ps1), with three actions (see [decision 0011](decisions/0011-auto-shutdown.md) for why it is built this way):
+
+| Action | What it does | Started by |
+|---|---|---|
+| **Stop** | Deallocates the session hosts that have no user sessions (`-Force $true` stops the rest too). The scaling plan and Start VM on Connect still start hosts when users come back. | The schedule (`autoShutdownTime`, `autoShutdownDays`, `autoShutdownTimeZone`; `autoShutdownScheduleAction`) |
+| **Lock** | Drains every host, adds the scaling plan's exclusion tag, turns off Start VM on Connect, sends signed-in users a message, and deallocates every host. The host pool is tagged `avdlz-power-lock` with the reason and time. Nothing starts again until Resume. | The budget: at `autoShutdownBudgetPercent` (default 100%) of actual monthly cost (`autoShutdownBudgetAction`) |
+| **Resume** | Undoes Lock. Hosts start on the next connection or the scaling plan's ramp-up. | You |
+
+- **Parameter file defaults:** `dev.bicepparam` stops idle hosts at 20:00 Central every day. Both files lock the hosts on a budget alert.
+- **The budget trigger needs a budget:** set `AVD_MONTHLY_BUDGET` and `AVD_ALERT_EMAIL` before `deploy.sh`. The budget covers the whole subscription. Budgets are evaluated a few times a day, so a lock follows the overspend by hours, not minutes.
+- **Checking:** the post-deployment preflight warns while the hosts are locked and gives the Resume command, and so does the portal.
+
+Run it by hand from Cloud Shell, with your own sign-in (`-WhatIf` shows what it would do):
+
+```powershell
+if (-not (Test-Path ~/avd-landing-zone)) { git clone https://github.com/nickprignano/avd-landing-zone.git ~/avd-landing-zone }
+Set-Location ~/avd-landing-zone; git checkout -q master; git pull -q --ff-only
+./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Resume -NamePrefix avdlz -Environment dev
+```
+
+**How it runs**
+- Two Logic Apps start the runbook job with their managed identities (Automation Operator on the Automation account): one on the schedule, one called by the budget's action group.
+- The runbook acts with the Automation account's managed identity:
+  - Desktop Virtualization Contributor on `rg-<prefix>-<env>-avd`;
+  - Desktop Virtualization Power On Off Contributor and Tag Contributor on `rg-<prefix>-<env>-hosts`.
+- The runbook runs in Windows PowerShell 5.1 with no modules, calling ARM with the identity's token.
+- Automation downloads it from GitHub at deployment time: `deploy.sh` pins it to the commit being deployed (`AVD_RUNBOOK_URI`), or uses `master` if that commit isn't on GitHub.
+- Job output is in the Automation account (Jobs) and in Log Analytics.
+
 ## Well-Architected review
 
 `-WellArchitected` adds a review of the **deployed** landing zone against the [Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/), grouped by pillar and ending with a scorecard. It needs only Reader; add `-SkipTenant -SkipNtfs` to leave out the tenant steps (no Graph sign-in). Findings are **warnings, never failures**: they are trade-offs to review, not deployment blockers. Why it is built this way: [decision 0009](decisions/0009-well-architected-review.md).

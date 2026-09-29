@@ -171,6 +171,50 @@ param monthlyBudgetAmount int = 0
 @description('Budget start date (first of a month, yyyy-MM-01). Required when monthlyBudgetAmount > 0. Keep it fixed across deployments.')
 param budgetStartDate string = ''
 
+// ---------- Auto shutdown (decision 0011) ----------
+@description('Deploy the auto-shutdown runbook: it stops the session hosts on a schedule and stops or locks them when the budget is exceeded.')
+param enableAutoShutdown bool = true
+
+@description('Time to stop the session hosts on the scheduled days (HH:mm, in autoShutdownTimeZone). Empty = no scheduled stop (the scaling plan still scales down).')
+param autoShutdownTime string = ''
+
+@description('Days the scheduled stop runs.')
+param autoShutdownDays string[] = [
+  'Monday'
+  'Tuesday'
+  'Wednesday'
+  'Thursday'
+  'Friday'
+  'Saturday'
+  'Sunday'
+]
+
+@description('Windows time zone name for autoShutdownTime.')
+param autoShutdownTimeZone string = scalingTimeZone
+
+@description('What the scheduled stop does: Stop deallocates idle hosts; Lock keeps every host off until Resume.')
+@allowed([
+  'Stop'
+  'Lock'
+])
+param autoShutdownScheduleAction string = 'Stop'
+
+@description('What a budget alert does: Lock keeps every host off until someone runs Resume; Stop deallocates idle hosts; None = no budget trigger. Needs the budget (monthlyBudgetAmount, budgetStartDate, alertEmailAddresses).')
+@allowed([
+  'Lock'
+  'Stop'
+  'None'
+])
+param autoShutdownBudgetAction string = 'Lock'
+
+@description('Percentage of the monthly budget (actual cost) that triggers autoShutdownBudgetAction.')
+@minValue(1)
+@maxValue(1000)
+param autoShutdownBudgetPercent int = 100
+
+@description('Where Automation downloads the runbook from. deploy.sh pins it to the commit being deployed (AVD_RUNBOOK_URI).')
+param autoShutdownRunbookUri string = 'https://raw.githubusercontent.com/nickprignano/avd-landing-zone/master/scripts/automation/Invoke-AvdPowerAction.ps1'
+
 @description('Enable Microsoft Defender for Cloud plans (Servers P2, Storage, Key Vault) on the subscription.')
 param enableDefenderForCloud bool = true
 
@@ -186,6 +230,15 @@ param allowedLocations string[] = [
 // Derived values
 // =====================================================================
 var cleanPrefix = toLower(replace(namePrefix, '-', ''))
+// The same condition as the budget in modules/governance.bicep.
+var deployBudget = monthlyBudgetAmount > 0 && !empty(budgetStartDate) && !empty(alertEmailAddresses)
+var autoShutdownOnBudget = enableAutoShutdown && deployBudget && autoShutdownBudgetAction != 'None'
+// Built-in roles for the runbook's identity (Microsoft's role definitions).
+var roleIds = {
+  desktopVirtualizationContributor: '082f0a83-3be5-4ba1-904c-961cca79b387'
+  desktopVirtualizationPowerOnOffContributor: '40c5ff49-9181-41f8-ae61-143b0e78555e'
+  tagContributor: '4a9ae827-6dc8-4573-8ac7-8239d42aa03f'
+}
 var baseName = '${cleanPrefix}-${environmentName}'
 var uniq = uniqueString(subscription().id, cleanPrefix, environmentName, location)
 
@@ -268,6 +321,8 @@ module governance 'modules/governance.bicep' = {
     monthlyBudgetAmount: monthlyBudgetAmount
     budgetStartDate: budgetStartDate
     alertEmailAddresses: alertEmailAddresses
+    budgetActionGroupId: autoShutdownOnBudget ? autoShutdown!.outputs.budgetActionGroupId : ''
+    budgetActionPercent: autoShutdownBudgetPercent
   }
 }
 
@@ -432,6 +487,52 @@ module sessionHosts 'modules/sessionHosts.bicep' = {
     usersGroupObjectId: avdUsersGroupObjectId
     adminsGroupObjectId: avdAdminsGroupObjectId
     avdServicePrincipalObjectId: avdServicePrincipalObjectId
+  }
+}
+
+// =====================================================================
+// 8. AUTO SHUTDOWN — runbook, schedule and budget triggers (decision 0011)
+// =====================================================================
+module autoShutdown 'modules/autoShutdown.bicep' = if (enableAutoShutdown) {
+  name: 'avdlz-auto-shutdown'
+  scope: rgManagement
+  params: {
+    location: location
+    tags: allTags
+    baseName: baseName
+    namePrefix: cleanPrefix
+    environmentName: environmentName
+    logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
+    runbookUri: autoShutdownRunbookUri
+    scheduleTime: autoShutdownTime
+    scheduleDays: autoShutdownDays
+    timeZone: autoShutdownTimeZone
+    scheduleAction: autoShutdownScheduleAction
+    budgetAction: autoShutdownOnBudget ? autoShutdownBudgetAction : 'None'
+  }
+}
+
+// The runbook drains and updates the host pool, and deallocates and tags the hosts.
+module autoShutdownRbacControlPlane 'modules/autoShutdownRbac.bicep' = if (enableAutoShutdown) {
+  name: 'avdlz-auto-shutdown-rbac-avd'
+  scope: rgControlPlane
+  params: {
+    principalId: autoShutdown!.outputs.principalId
+    roleDefinitionIds: [
+      roleIds.desktopVirtualizationContributor
+    ]
+  }
+}
+
+module autoShutdownRbacHosts 'modules/autoShutdownRbac.bicep' = if (enableAutoShutdown) {
+  name: 'avdlz-auto-shutdown-rbac-hosts'
+  scope: rgHosts
+  params: {
+    principalId: autoShutdown!.outputs.principalId
+    roleDefinitionIds: [
+      roleIds.desktopVirtualizationPowerOnOffContributor
+      roleIds.tagContributor
+    ]
   }
 }
 

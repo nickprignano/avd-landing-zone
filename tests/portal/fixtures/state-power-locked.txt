@@ -1,0 +1,10 @@
+PS /home/admin/avd-landing-zone> ./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Lock -NamePrefix avdlz -Environment dev -Reason budget
+Auto shutdown: Lock for vdpool-avdlz-dev (budget)
+  vdpool-avdlz-dev: Turn off Start VM on Connect and mark the host pool locked
+  avdlzdsh-001: drained, excluded from the scaling plan
+  avdlzdsh-001: deallocating (was running)
+  avdlzdsh-002: drained, excluded from the scaling plan
+  avdlzdsh-002: already deallocating
+Done: 1 deallocated, 0 skipped, 1 already stopped, 2 user(s) messaged.
+<<<AVDLZ-STATE {"v":1,"stage":"power","status":"locked","context":{"namePrefix":"avdlz","environment":"dev"},"power":{"action":"Lock","hostPool":"vdpool-avdlz-dev","reason":"budget","deallocated":["avdlzdsh-001"],"skipped":[],"alreadyStopped":["avdlzdsh-002"],"messaged":2,"changes":4}} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>

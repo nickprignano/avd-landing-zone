@@ -325,8 +325,9 @@
     if (lastAnalysis) {
       var r = lastAnalysis;
       $('next-title').textContent = r.recognised ? 'What to do next' : 'Not recognised';
-      chip.textContent = r.status ? (r.status === 'ready' || r.status === 'succeeded' || r.status === 'done' ? 'Done' : r.status === 'started' ? 'Running' : 'Action needed') : 'Action needed';
-      chip.className = 'chip ' + (/ready|succeeded|done/.test(r.status || '') ? 'good' : r.status === 'started' ? 'ok' : 'poor');
+      var good = /^(ready|succeeded|done|resumed|stopped)$/.test(r.status || '');
+      chip.textContent = r.status ? (good ? 'Done' : r.status === 'started' ? 'Running' : 'Action needed') : 'Action needed';
+      chip.className = 'chip ' + (good ? 'good' : r.status === 'started' ? 'ok' : 'poor');
       head.textContent = r.headline; head.classList.remove('hidden');
       var eline = $('estimate-line');
       if (r.estimate) { eline.textContent = 'Estimated cost: ' + money(r.estimate.total, r.estimate.currency) + ' per month at list prices (details under Size and cost).'; eline.classList.remove('hidden'); }

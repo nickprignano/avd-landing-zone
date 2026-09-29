@@ -1,0 +1,10 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -SkipTenant -SkipNtfs
+...
+  [WARN ] Session hosts not locked by auto shutdown
+          Locked (budget 2026-09-29T16:05:24Z): hosts are drained and deallocated, the scaling plan skips them and Start VM on Connect is off.
+          -> Resume when the cost is dealt with: ./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Resume -NamePrefix avdlz -Environment dev
+  [PASS ] AVD Private Link DNS zone
+          privatelink.wvd.microsoft.com
+...
+<<<AVDLZ-STATE {"v":1,"stage":"postdeploy","status":"ready","fix":false,"context":{"wellArchitected":false,"namePrefix":"avdlz","environment":"dev"},"counts":{"pass":37,"fail":0,"warn":1,"fixed":0,"skip":1},"failures":[],"warnings":[{"id":"power-locked","area":"Landing zone","check":"Session hosts not locked by auto shutdown","detail":"Locked (budget 2026-09-29T16:05:24Z): hosts are drained and deallocated, the scaling plan skips them and Start VM on Connect is off.","remediation":"Resume when the cost is dealt with: ./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Resume -NamePrefix avdlz -Environment dev","data":{"lock":"budget 2026-09-29T16:05:24Z"}}]} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>

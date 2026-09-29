@@ -32,7 +32,9 @@
     'e56962a6-4747-49cd-b67b-bf8b01975c4c',
     'e765b5de-1225-4ba3-bd56-1ac6695af988',
     'ea3f2387-9b95-492a-a190-fcdc54f7b070',
-    'fb879df8-f326-4884-b1cf-06f3ad86be52'
+    'fb879df8-f326-4884-b1cf-06f3ad86be52',
+    '082f0a83-3be5-4ba1-904c-961cca79b387', // Desktop Virtualization Contributor
+    'd3881f73-407a-4167-8283-e981cbba0404'  // Automation Operator
   ];
   // Values the repo ships with: not private, and keeping them keeps reports readable.
   var DEFAULT_VALUES = ['avdlz', 'avd users', 'avd admins', 'dev', 'test', 'prod', 'northcentralus'];

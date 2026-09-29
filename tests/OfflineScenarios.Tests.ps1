@@ -218,3 +218,34 @@ Describe 'Well-Architected review of the deployed landing zone' {
     $out.Substring($out.IndexOf('######## without-switch')) | Should -Not -Match 'Well-Architected'
   }
 }
+
+Describe 'Auto shutdown runbook' {
+  # decision 0011: scripts/automation/Invoke-AvdPowerAction.ps1, host 001 with two user sessions, 002 idle.
+  BeforeAll {
+    $script:out = Invoke-OfflineScenario 'AutoShutdown'
+    function Get-PowerLine([string] $Step) { [regex]::Match($out, "RESULT $Step-state (.*)").Groups[1].Value }
+  }
+
+  It 'Stop deallocates idle hosts and leaves hosts with users running' {
+    Get-StepExit $out 'stop' | Should -Be 0
+    Get-PowerLine 'stop' | Should -Match 'startVMOnConnect=True locked=False allowNew=True,True state=running,deallocating excluded=False,False deallocateCalls=1'
+  }
+  It 'changes nothing with -WhatIf' { Get-PowerLine 'lock-whatif' | Should -Match 'deallocateCalls=0 messages=0 changes=0$' }
+  It 'Lock drains, excludes from the scaling plan, turns off Start VM on Connect, warns users and deallocates' {
+    Get-PowerLine 'lock' | Should -Match 'startVMOnConnect=False locked=True allowNew=False,False state=deallocating,deallocating excluded=True,True deallocateCalls=1 messages=2'
+    $out | Should -Match 'RESULT lock-reason budget keptTags=True'   # other host pool tags survive
+  }
+  It 'the post-deployment check reports the lock with the resume command, and not after Resume' {
+    $s = Get-PortalState $out
+    $locked = ($s | Where-Object { $_.stage -eq 'postdeploy' })[0]
+    ($locked.warnings | Where-Object id -eq 'power-locked').remediation | Should -Match 'Invoke-AvdPowerAction\.ps1 -Action Resume -NamePrefix avdlz -Environment dev'
+    ($s | Where-Object { $_.stage -eq 'postdeploy' })[1].warnings | Where-Object id -eq 'power-locked' | Should -BeNullOrEmpty
+  }
+  It 'Resume (from Cloud Shell, with the operator''s token) undoes the lock without starting hosts' {
+    Get-PowerLine 'resume' | Should -Match 'startVMOnConnect=True locked=False allowNew=True,True state=deallocating,deallocating excluded=False,False deallocateCalls=0'
+  }
+  It 'reports what ARM returned when a call fails' { $out | Should -Match 'RESULT error ARM PATCH .*vdpool-avdlz-dev.* failed: .*AuthorizationFailed' }
+  It 'prints a portal state line for each action' {
+    ((Get-PortalState $out | Where-Object stage -eq 'power') | ForEach-Object status) -join ' ' | Should -Be 'stopped locked locked resumed'
+  }
+}

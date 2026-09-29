@@ -56,5 +56,13 @@ param enablePolicyGuardrails = true
 param alertEmailAddresses = empty(readEnvironmentVariable('AVD_ALERT_EMAIL', ''))
   ? []
   : [readEnvironmentVariable('AVD_ALERT_EMAIL', '')]
-param monthlyBudgetAmount = int(readEnvironmentVariable('AVD_MONTHLY_BUDGET', '0'))
+param monthlyBudgetAmount = empty(readEnvironmentVariable('AVD_MONTHLY_BUDGET', '')) ? 0 : int(readEnvironmentVariable('AVD_MONTHLY_BUDGET', ''))
 param budgetStartDate = '2026-10-01'
+
+// ---- Auto shutdown (decision 0011) ----
+// deploy.sh pins the runbook to the commit being deployed (AVD_RUNBOOK_URI).
+param autoShutdownRunbookUri = empty(readEnvironmentVariable('AVD_RUNBOOK_URI', ''))
+  ? 'https://raw.githubusercontent.com/nickprignano/avd-landing-zone/master/scripts/automation/Invoke-AvdPowerAction.ps1'
+  : readEnvironmentVariable('AVD_RUNBOOK_URI', '')
+// Prod relies on the scaling plan for daily scale-down; a budget alert locks the hosts
+// (autoShutdownBudgetAction = 'Lock', the default) until someone runs Resume.
