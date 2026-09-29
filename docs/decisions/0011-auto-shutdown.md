@@ -28,6 +28,8 @@ A plain deallocate isn't enough for the budget case. Start VM on Connect and the
 - **The runbook is pinned** to the commit being deployed when GitHub has it. Automation downloads it at deployment time.
 - **Visible state:** the post-deployment preflight and the portal warn while locked (`power-locked`) and give the Resume command. The runbook prints a state line (`stage: power`).
 
+- **Resume restores the deployed choice.** When the landing zone is deployed with Start VM on Connect off (the portal's Cost step), the host pool carries the tag `avdlz-start-vm-on-connect = false`, and Resume clears the lock without turning Start VM on Connect on.
+
 ## Consequences
 - A budget overspend stops compute within hours, and it stays stopped until someone decides to resume.
 - The budget is subscription-wide, so costs outside the landing zone can trigger the lock too. Its threshold and action are parameters.

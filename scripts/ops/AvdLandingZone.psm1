@@ -1445,7 +1445,8 @@ function Get-AvdDeploymentPlan {
     [string] $AvdServicePrincipalId,
     # Region override: the parameter files read it from AVD_LOCATION.
     [string] $Location,
-    # Sizing overrides (hosts, vmSize, maxSessions, profileQuotaGiB): the parameter files read AVD_SESSION_HOST_COUNT etc.
+    # Sizing overrides (hosts, vmSize, maxSessions, profileQuotaGiB, and the power settings autoShutdownTime
+    # and startVmOnConnect): the parameter files read AVD_SESSION_HOST_COUNT etc.
     [hashtable] $Sizing = @{}
   )
   $bicep = Get-Command bicep -ErrorAction SilentlyContinue
@@ -1459,7 +1460,8 @@ function Get-AvdDeploymentPlan {
     AVD_LOCAL_ADMIN_PASSWORD = 'Preflight-placeholder-only-1!'
   }
   if ($Location) { $vars.AVD_LOCATION = $Location }
-  $sizingVars = @{ hosts = 'AVD_SESSION_HOST_COUNT'; vmSize = 'AVD_SESSION_HOST_VM_SIZE'; maxSessions = 'AVD_MAX_SESSION_LIMIT'; profileQuotaGiB = 'AVD_PROFILE_QUOTA_GIB' }
+  $sizingVars = @{ hosts = 'AVD_SESSION_HOST_COUNT'; vmSize = 'AVD_SESSION_HOST_VM_SIZE'; maxSessions = 'AVD_MAX_SESSION_LIMIT'; profileQuotaGiB = 'AVD_PROFILE_QUOTA_GIB'
+    autoShutdownTime = 'AVD_AUTO_SHUTDOWN_TIME'; startVmOnConnect = 'AVD_START_VM_ON_CONNECT' }
   foreach ($k in $sizingVars.Keys) { $vars[$sizingVars[$k]] = $(if ($Sizing[$k]) { [string]$Sizing[$k] } else { '' }) }
   $saved = @{}
   foreach ($k in $vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $vars[$k]) }
@@ -1597,9 +1599,14 @@ function Get-AvdCostEstimate {
   $fileSku = ([string]$Plan.profileStorageSku) -replace '_', ' '
   $activeHours = [math]::Round($hosts * $ActiveHoursPerWeek * 52 / 12, 1)
   $pe = 2 + $(if ($Plan.enableAvdPrivateLink -ne $false) { 1 } else { 0 })   # storage, Key Vault, host pool
+  # What stops and starts the hosts, so the hours can be read against the plan.
+  $power = @(
+    $(if ($Plan.startVmOnConnect -ne $false) { 'Start VM on Connect starts hosts on demand' } else { 'no Start VM on Connect: hosts stay up through the working day' })
+    $(if ($Plan.enableAutoShutdown -ne $false -and $Plan.autoShutdownTime) { "stopped daily at $($Plan.autoShutdownTime)" } else { 'no scheduled stop' })
+  ) -join '; '
   $specs = @(
     @{ key = 'compute'; item = "Session hosts ($hosts x $size)"; quantity = $activeHours; unit = 'host-hours'
-      note = "$ActiveHoursPerWeek h/week each; the scaling plan and Start VM on Connect stop hosts outside use"
+      note = "$ActiveHoursPerWeek h/week each ($power)"
       filter = "serviceName eq 'Virtual Machines' and armRegionName eq '$loc' and armSkuName eq '$size' and priceType eq 'Consumption'"
       # Windows client multi-session is licensed per user (Microsoft 365 / Windows E3+), so hosts pay the base compute rate.
       pick = { $_.productName -notmatch 'Windows' -and $_.skuName -notmatch 'Spot|Low Priority' -and $_.unitOfMeasure -eq '1 Hour' } }

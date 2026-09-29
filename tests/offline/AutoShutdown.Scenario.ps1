@@ -34,6 +34,14 @@ Show-Power 'resume'
 Invoke-ScenarioStep 'check-resumed' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -SkipTenant -SkipNtfs }
 $global:Calls.Clear()
 
+# Deployed with Start VM on Connect off (the portal's Cost step): the template tags the host pool,
+# and Resume clears the lock without turning Start VM on Connect on.
+$pw.hpTags['avdlz-start-vm-on-connect'] = 'false'; $pw.startVMOnConnect = $false
+Invoke-ScenarioStep 'lock-svmoc-off' { & ./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Lock @p -Reason budget }
+Invoke-ScenarioStep 'resume-svmoc-off' { & ./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Resume @p }
+Show-Power 'resume-svmoc-off'
+$pw.hpTags.Remove('avdlz-start-vm-on-connect')
+
 # A failed call reports what ARM returned (docs/lessons/0012).
 $pw.failHostPoolPatch = $true
 try { & ./scripts/automation/Invoke-AvdPowerAction.ps1 -Action Lock @p -Reason budget; Write-Host 'RESULT error none' }

@@ -436,3 +436,56 @@ test('page: Deployment settings opens from a link in the header, above the steps
   assert.ok(html.indexOf('id="settings-panel"') < html.indexOf('id="steps"'), 'settings panel sits under the header');
   assert.ok(html.indexOf('id="settings-panel"') < html.indexOf('id="report-panel"'));
 });
+
+// ---------------------------------------------------------------- cost step: power settings (decision 0010, 0011)
+test('cost: hours per host from the hours people work and the two power settings', () => {
+  const on = { startVmOnConnect: true, autoShutdownTime: '20:00' };
+  assert.equal(P.hostHours(50, on).hoursPerWeek, 50);                                               // start on demand, stop at 20:00
+  assert.equal(P.hostHours(50, { ...on, startVmOnConnect: false }).hoursPerWeek, 65);              // 07:00-20:00 on weekdays
+  assert.equal(P.hostHours(70, { ...on, startVmOnConnect: false }).hoursPerWeek, 70);              // never below the hours people work
+  assert.equal(P.hostHours(50, { ...on, autoShutdownTime: 'none' }).hoursPerWeek, 168);            // nothing stops them
+  assert.match(P.hostHours(50, { startVmOnConnect: false, autoShutdownTime: '18:00' }).basis, /07:00 on weekdays .* 18:00 \(55 h a week\)/);
+});
+
+test('cost: power defaults follow the parameter file (dev stops at 20:00, prod has no scheduled stop)', () => {
+  assert.deepEqual(P.effectivePower({ parameterFile: 'parameters/dev.bicepparam' }), { startVmOnConnect: true, autoShutdownTime: '20:00', fromFile: true });
+  assert.deepEqual(P.effectivePower({ parameterFile: 'parameters/prod.bicepparam' }), { startVmOnConnect: true, autoShutdownTime: 'none', fromFile: true });
+  assert.equal(P.effectivePower({ parameterFile: 'parameters/dev.bicepparam', power: { startVmOnConnect: false, autoShutdownTime: '18:30' } }).fromFile, false);
+});
+
+test('cost: commands carry the power settings once chosen, and price the hours they imply', () => {
+  const plain = { ...P.DEFAULTS };
+  assert.doesNotMatch(P.commands.predeploy(plain, false), /AutoShutdownTime|ActiveHoursPerWeek/);
+  assert.doesNotMatch(P.commands.deploy(plain), /--auto-shutdown/);
+  const cfg = { ...P.DEFAULTS, power: { startVmOnConnect: false, autoShutdownTime: 'none' }, hoursWorkedPerWeek: 45 };
+  assert.match(last(P.commands.predeploy(cfg, false)), / -AutoShutdownTime none -StartVmOnConnect false -ActiveHoursPerWeek 168$/);
+  assert.match(last(P.commands.deploy(cfg)), / --auto-shutdown none --start-vm-on-connect false$/);
+  const back = { ...cfg, power: { startVmOnConnect: true, autoShutdownTime: '19:00' }, sizing: { hosts: 2, vmSize: 'Standard_E4as_v5', maxSessions: 16, profileQuotaGiB: 100, activeHoursPerWeek: 168 } };
+  // Turning the settings back on prices the hours people work again, not the 168 a pasted preflight reported.
+  assert.match(last(P.commands.predeploy(back, false)), / -SessionHostCount 2 .* -AutoShutdownTime 19:00 -StartVmOnConnect true -ActiveHoursPerWeek 45$/);
+});
+
+test('cost: a preflight estimate is repriced for the hours, hosts and profile share; not across sizes or regions', () => {
+  const est = analyze('state-predeploy-sized-ready.txt').estimate;   // 3 x D8as_v5, 60 h/week, northcentralus
+  const sizing = { hosts: 3, vmSize: 'Standard_D8as_v5', profileQuotaGiB: 600 };
+  const same = P.repriceEstimate(est, sizing, 60, 'northcentralus');
+  assert.deepEqual(same.stale, []);
+  assert.equal(same.total, est.total);                               // same inputs, same total
+  const always = P.repriceEstimate(est, sizing, 168, 'northcentralus');
+  assert.equal(always.total, same.alwaysOnTotal);
+  assert.ok(always.total > same.total);
+  const twoHosts = P.repriceEstimate(est, { ...sizing, hosts: 2 }, 60, 'northcentralus');
+  assert.match(twoHosts.lines.find((l) => l.key === 'osdisk').item, /\(2 x/);
+  assert.ok(twoHosts.total < same.total);
+  assert.deepEqual(P.repriceEstimate(est, { ...sizing, vmSize: 'Standard_E8as_v5' }, 60, 'northcentralus').stale, ['priced for D8as_v5, not E8as_v5']);
+  assert.match(P.repriceEstimate(est, sizing, 60, 'eastus2').stale[0], /priced in northcentralus, not eastus2/);
+  assert.equal(P.repriceEstimate(null, sizing, 60, 'x'), null);
+});
+
+test('state: a preflight priced with the power settings off -> the portal keeps them for the next commands', () => {
+  const r = analyze('state-predeploy-power-off.txt');
+  assert.deepEqual(r.power, { autoShutdownTime: 'none', startVmOnConnect: false });
+  assert.equal(r.step, 'deploy');
+  assert.match(last(r.actions[0].command), / --auto-shutdown none --start-vm-on-connect false$/);
+  assert.equal(r.estimate.lines.find((l) => l.key === 'compute').quantity, 728);
+});

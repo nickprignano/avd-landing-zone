@@ -52,7 +52,7 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 
 ## Sizing and cost
 
-The portal's **Size and cost** step starts from the **minimum viable kit**, the same as `parameters/dev.bicepparam`: one `Standard_E4as_v5` host and a 100 GiB profile share. You choose the number of hosts (1–50). The portal shows the sessions they carry, and warns when that is fewer than the people expected at the busiest time or when a single host leaves no redundancy.
+The portal's **Size the host pool** step starts from the **minimum viable kit**, the same as `parameters/dev.bicepparam`: one `Standard_E4as_v5` host and a 100 GiB profile share. You choose the number of hosts (1–50). The portal shows the sessions they carry, and warns when that is fewer than the people expected at the busiest time or when a single host leaves no redundancy.
 
 Choose **Automatic** to size the host pool from how many people use it, how many are signed in at the busiest time, and how they work instead. It uses Microsoft's multi-session guidance: light 6, medium 4, heavy 2 and power 1 user per vCPU. Only Automatic adds a spare host, and in prod it never goes below two hosts. A number you choose is kept as it is.
 
@@ -79,7 +79,17 @@ bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus -
 - private endpoints;
 - the NAT Gateway and its public IP.
 
-It also shows the cost if the hosts ran around the clock. Usage-based charges are listed as not included: Log Analytics, data processed, backup, Defender and licenses. Each line must match exactly one price meter. A line that matches none, or several, is reported with the meters the API returned instead of being guessed, and is left out of the total. The portal shows the estimate after you paste the output. Reservations, savings plans and agreements lower these prices.
+**The Cost step** comes after sizing. Two toggles decide most of the cost, because they decide how long the hosts run:
+
+| Start VM on Connect | Scheduled auto shutdown | Each host runs about |
+|---|---|---|
+| on | on | the hours people work (default 50 a week): hosts start on the first connection and stop at the scheduled time |
+| off | on | from the scaling plan's 07:00 weekday ramp-up to the stop time (65 hours for 20:00), whether or not anyone uses them |
+| either | off | around the clock (168 hours): nothing turns them off every day, and disconnected sessions keep hosts up |
+
+The toggles start at what the parameter file deploys: dev and test stop at 20:00, prod has no scheduled stop, and Start VM on Connect is on in all of them. Changing them adds the settings to the commands (`deploy.sh --auto-shutdown 20:00|none --start-vm-on-connect true|false`, preflight `-AutoShutdownTime -StartVmOnConnect`), and the preflight is priced for the hours they imply. Once a preflight has priced the plan, the Cost step reprices it in the page when you change a toggle, the hours, the host count or the profile share. A different VM size or region needs the preflight again. With Start VM on Connect off, the host pool is tagged `avdlz-start-vm-on-connect = false`, and the auto-shutdown Resume keeps it off.
+
+The estimate also shows the cost if the hosts ran around the clock. Usage-based charges are listed as not included: Log Analytics, data processed, backup, Defender and licenses. Each line must match exactly one price meter. A line that matches none, or several, is reported with the meters the API returned instead of being guessed, and is left out of the total. The portal shows the estimate after you paste the output. Reservations, savings plans and agreements lower these prices.
 
 The sizing covers one pooled host pool, which is what the landing zone deploys. The portal keeps it as a list of host pools, so more can be added later ([decision 0010](decisions/0010-sizing-and-cost.md)).
 
@@ -170,7 +180,7 @@ The landing zone deploys an Azure Automation runbook, [`scripts/automation/Invok
 | **Lock** | Drains every host, adds the scaling plan's exclusion tag, turns off Start VM on Connect, sends signed-in users a message, and deallocates every host. The host pool is tagged `avdlz-power-lock` with the reason and time. Nothing starts again until Resume. | The budget: at `autoShutdownBudgetPercent` (default 100%) of actual monthly cost (`autoShutdownBudgetAction`) |
 | **Resume** | Undoes Lock. Hosts start on the next connection or the scaling plan's ramp-up. | You |
 
-- **Parameter file defaults:** `dev.bicepparam` stops idle hosts at 20:00 Central every day. Both files lock the hosts on a budget alert.
+- **Parameter file defaults:** `dev.bicepparam` stops idle hosts at 20:00 Central every day. Both files lock the hosts on a budget alert. The portal's Cost step, or `deploy.sh --auto-shutdown HH:mm|none`, changes the scheduled stop (`AVD_AUTO_SHUTDOWN_TIME`).
 - **The budget trigger needs a budget:** set `AVD_MONTHLY_BUDGET` and `AVD_ALERT_EMAIL` before `deploy.sh`. The budget covers the whole subscription. Budgets are evaluated a few times a day, so a lock follows the overspend by hours, not minutes.
 - **Checking:** the post-deployment preflight warns while the hosts are locked and gives the Resume command, and so does the portal.
 

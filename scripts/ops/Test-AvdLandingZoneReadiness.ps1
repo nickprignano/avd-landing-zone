@@ -89,8 +89,13 @@ param(
   # checks and the cost estimate, the way deploy.sh --max-sessions / --profile-quota do for the deployment.
   [Parameter(ParameterSetName = 'PreDeployment')][ValidateRange(1, 1000)][int] $MaxSessionLimit,
   [Parameter(ParameterSetName = 'PreDeployment')][ValidateRange(100, 102400)][int] $ProfileShareQuotaGiB,
-  # Hours per week each host runs (the scaling plan stops hosts outside use), for the cost estimate.
+  # Hours per week each host runs, for the cost estimate. The deployment portal's Cost step works it out
+  # from the working hours and the two power settings below.
   [Parameter(ParameterSetName = 'PreDeployment')][ValidateRange(1, 168)][int] $ActiveHoursPerWeek = 50,
+  # Power settings (the portal's Cost step; deploy.sh --auto-shutdown / --start-vm-on-connect):
+  # the daily scheduled stop (HH:mm, or none) and Start VM on Connect. Empty = the parameter file's.
+  [Parameter(ParameterSetName = 'PreDeployment')][ValidatePattern('^(none|([01][0-9]|2[0-3]):[0-5][0-9])$')][string] $AutoShutdownTime,
+  [Parameter(ParameterSetName = 'PreDeployment')][ValidateSet('true', 'false')][string] $StartVmOnConnect,
 
   # ---- Post-deployment ----
   [Parameter(Mandatory, ParameterSetName = 'PostDeployment')][ValidateLength(2, 8)][string] $NamePrefix,
@@ -132,7 +137,8 @@ if ($PreDeployment) {
   Write-Host "AVD landing zone PRE-DEPLOYMENT preflight - $ParameterFile in '$($ctx.Subscription.Name)'$(if ($Fix) { ' (FIX mode)' })" -ForegroundColor White
   # Only the sizing values given on the command line override the parameter file.
   $sizing = @{}
-  foreach ($p in @(@('SessionHostCount', 'hosts'), @('SessionHostVmSize', 'vmSize'), @('MaxSessionLimit', 'maxSessions'), @('ProfileShareQuotaGiB', 'profileQuotaGiB'))) {
+  foreach ($p in @(@('SessionHostCount', 'hosts'), @('SessionHostVmSize', 'vmSize'), @('MaxSessionLimit', 'maxSessions'), @('ProfileShareQuotaGiB', 'profileQuotaGiB'),
+      @('AutoShutdownTime', 'autoShutdownTime'), @('StartVmOnConnect', 'startVmOnConnect'))) {
     if ($PSBoundParameters.ContainsKey($p[0])) { $sizing[$p[1]] = $PSBoundParameters[$p[0]] }
   }
   $pre = @{ ParameterFile = $ParameterFile; UsersGroup = $UsersGroup; AdminsGroup = $AdminsGroup; Location = $Location; Fix = $Fix; AddMeToGroups = $AddMeToGroups; SkipTenant = $SkipTenant; WhatIf = $WhatIfPreference; Sizing = $sizing; ActiveHoursPerWeek = $ActiveHoursPerWeek }
@@ -176,8 +182,12 @@ if ($PreDeployment) {
     environment   = $(if ($plan) { $plan.environmentName } else { $null })
   }
   # The sizing that was validated (when the command set it), and the estimate, for the portal.
-  if ($plan -and $sizing.Count) {
+  if ($plan -and @($sizing.Keys | Where-Object { $_ -notin 'autoShutdownTime', 'startVmOnConnect' }).Count) {
     $portalContext.sizing = [ordered]@{ hosts = [int]$plan.sessionHostCount; vmSize = $plan.sessionHostVmSize; maxSessions = [int]$plan.maxSessionLimit; profileQuotaGiB = [int]$plan.profileShareQuotaGiB; activeHoursPerWeek = $ActiveHoursPerWeek }
+  }
+  # The power settings that were priced (when the command set them).
+  if ($plan -and ($sizing.ContainsKey('autoShutdownTime') -or $sizing.ContainsKey('startVmOnConnect'))) {
+    $portalContext.power = [ordered]@{ autoShutdownTime = $(if ($plan.autoShutdownTime) { $plan.autoShutdownTime } else { 'none' }); startVmOnConnect = $plan.startVmOnConnect -ne $false }
   }
   if ($outcome -and $outcome.Estimate) { $portalContext.estimate = $outcome.Estimate }
   $portalState = Get-AvdPortalState -Stage predeploy -Fix:$Fix -Context $portalContext

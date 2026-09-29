@@ -37,6 +37,7 @@ The host pool is deployed in the same region, so the region must offer AVD host 
 | `AVD_LOCATION` | no | `deploy.sh -l`, or the preflight's `-Location`. Defaults to `northcentralus` |
 | `AVD_RUNBOOK_URI` | no | `deploy.sh`: the auto-shutdown runbook at the commit being deployed. Defaults to the repo's `master` |
 | `AVD_SESSION_HOST_COUNT`, `AVD_SESSION_HOST_VM_SIZE`, `AVD_MAX_SESSION_LIMIT`, `AVD_PROFILE_QUOTA_GIB` | no | `deploy.sh --hosts --vm-size --max-sessions --profile-quota`, or the preflight's `-SessionHostCount -SessionHostVmSize -MaxSessionLimit -ProfileShareQuotaGiB`; the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/)'s sizing step fills them in. Empty = the file's values |
+| `AVD_AUTO_SHUTDOWN_TIME`, `AVD_START_VM_ON_CONNECT` | no | `deploy.sh --auto-shutdown HH:mm\|none --start-vm-on-connect true\|false`, or the preflight's `-AutoShutdownTime -StartVmOnConnect`; the portal's Cost step fills them in. Empty = the file's values; `none` = no scheduled stop |
 
 Things you'll most likely change in the file: `namePrefix`, address ranges, `scalingTimeZone`, and for hub-peered mode the hub settings (examples are in `prod.bicepparam`).
 
@@ -59,7 +60,7 @@ az account set --subscription "<subscription-id>"
   --users-group "AVD Users" --admins-group "AVD Admins"
 ```
 
-To size the host pool from how many people use it, use the portal's **Size and cost** step. It adds the sizing flags to both commands, and the preflight checks quota for that size and prices it at Azure list prices for the region (see [operations.md](operations.md#sizing-and-cost)).
+To size the host pool, use the portal's **Size the host pool** step, then its **Cost** step for Start VM on Connect and the scheduled stop. They add their flags to both commands, and the preflight checks quota for that size and prices it at Azure list prices for the region (see [operations.md](operations.md#sizing-and-cost)).
 
 `deploy.sh` registers the resource providers and the `EncryptionAtHost` feature, resolves the group and service principal IDs, and runs `az deployment sub create`. A first deployment takes roughly 30–45 minutes. Session hosts are registered to the pool and FSLogix-configured as part of it. There are no post-deployment scripts.
 

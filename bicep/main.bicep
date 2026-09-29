@@ -155,6 +155,9 @@ param enableProfileBackup bool = true
 param profileBackupRetentionDays int = 30
 
 // ---------- Scaling ----------
+@description('Start a deallocated session host when a user connects (Start VM on Connect). Off: users can only connect while the scaling plan keeps hosts running, and hosts run longer (cost).')
+param startVmOnConnect bool = true
+
 @description('Time zone for the autoscale schedule (Windows time zone ID).')
 param scalingTimeZone string = 'UTC'
 
@@ -454,6 +457,7 @@ module controlPlane 'modules/controlPlane.bicep' = {
     privateEndpointSubnetResourceId: network.outputs.privateEndpointSubnetResourceId
     avdPrivateDnsZoneResourceId: dnsZoneIds.avd
     scalingTimeZone: scalingTimeZone
+    startVmOnConnect: startVmOnConnect
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
     usersGroupObjectId: avdUsersGroupObjectId
     avdServicePrincipalObjectId: avdServicePrincipalObjectId

@@ -17,7 +17,8 @@
 
   var STEPS = [
     { id: 'region', title: 'Choose a region' },
-    { id: 'size', title: 'Size and cost' },
+    { id: 'size', title: 'Size the host pool' },
+    { id: 'cost', title: 'Cost' },
     { id: 'predeploy', title: 'Pre-deployment preflight' },
     { id: 'deploy', title: 'Deploy the landing zone' },
     { id: 'postdeploy', title: 'Post-deployment setup' },
@@ -116,6 +117,69 @@
     };
   }
 
+  // ---------------------------------------------------------------- power and hours (the Cost step)
+  // What the parameter files deploy when the portal doesn't say otherwise: Start VM on Connect on, and a
+  // daily stop at 20:00 in dev and test (none in prod, which relies on the scaling plan).
+  function powerDefaults(environment) { return { startVmOnConnect: true, autoShutdownTime: environment === 'prod' ? 'none' : '20:00' }; }
+  function effectivePower(cfg) {
+    var d = powerDefaults(envFromFile(cfg.parameterFile) || cfg.environment), p = cfg.power || {};
+    return { startVmOnConnect: p.startVmOnConnect === undefined || p.startVmOnConnect === null ? d.startVmOnConnect : p.startVmOnConnect === true || p.startVmOnConnect === 'true',
+      autoShutdownTime: p.autoShutdownTime || d.autoShutdownTime, fromFile: !cfg.power };
+  }
+  // The scaling plan's weekday ramp-up (bicep/modules/controlPlane.bicep) starts hosts at 07:00.
+  var RAMP_UP_HOUR = 7;
+  // Hours each host runs per week, from the hours people work and the two power settings.
+  // Upper bounds where the schedule, not use, decides: the estimate should not flatter the settings.
+  function hostHours(workedPerWeek, power) {
+    var worked = Math.min(168, Math.max(1, Math.round(num(workedPerWeek, 50))));
+    var stop = /^\d{2}:\d{2}$/.test(power.autoShutdownTime || '') ? power.autoShutdownTime : null;
+    if (!stop)
+      return { hoursPerWeek: 168, basis: 'No scheduled stop: nothing turns the hosts off every day. The scaling plan only stops hosts nobody is signed in to, and disconnected sessions count, so this assumes they run around the clock.' };
+    if (power.startVmOnConnect)
+      return { hoursPerWeek: worked, basis: 'Start VM on Connect starts a host when the first person connects, and the scheduled stop turns them off at ' + stop + ', so hosts run about as long as people work.' };
+    var h = Number(stop.slice(0, 2)) + Number(stop.slice(3)) / 60, window = Math.round(5 * Math.max(0, h - RAMP_UP_HOUR));
+    return { hoursPerWeek: Math.max(worked, window), basis: 'Without Start VM on Connect, hosts must already be running when people arrive: the scaling plan starts them at 07:00 on weekdays and the scheduled stop turns them off at ' + stop + ' (' + window + ' h a week), whether or not anyone uses them.' };
+  }
+  function powerArgs(cfg, ps) {
+    if (!cfg.power) return '';
+    var p = effectivePower(cfg);
+    return ps ? ' -AutoShutdownTime ' + p.autoShutdownTime + ' -StartVmOnConnect ' + p.startVmOnConnect : ' --auto-shutdown ' + p.autoShutdownTime + ' --start-vm-on-connect ' + p.startVmOnConnect;
+  }
+  // Hours the preflight prices: from the hours people work (kept on the Cost step, apart from the priced
+  // hours a pasted preflight reports, so turning a setting back on lowers them again) and the power settings.
+  function pricedHours(cfg) {
+    var s = sized(cfg), worked = cfg.hoursWorkedPerWeek || (s && s.activeHoursPerWeek) || 50;
+    return hostHours(worked, effectivePower(cfg)).hoursPerWeek;
+  }
+
+  // Reprices a preflight estimate for the current sizing and hours: compute scales with hosts and hours,
+  // OS disks with hosts, the profile share with its size; the other lines don't change. Unit prices come
+  // from the preflight (Azure list prices from Cloud Shell), so a different size or region can't be repriced.
+  function repriceEstimate(estimate, sizing, hoursPerWeek, location) {
+    if (!estimate || !estimate.lines) return null;
+    var comp = null;
+    estimate.lines.forEach(function (l) { if (l.key === 'compute') comp = l; });
+    var m = comp && /\((\d+) x (Standard_[A-Za-z0-9_]+)\)/.exec(comp.item || '');
+    var pricedSize = m ? m[2] : null, pricedHosts = m ? Number(m[1]) : null;
+    var stale = [];
+    if (sizing && pricedSize && sizing.vmSize !== pricedSize) stale.push('priced for ' + pricedSize.replace('Standard_', '') + ', not ' + sizing.vmSize.replace('Standard_', ''));
+    if (location && estimate.location && estimate.location !== location) stale.push('priced in ' + estimate.location + ', not ' + location);
+    var hosts = sizing && !stale.length ? sizing.hosts : pricedHosts;
+    var round2 = function (n) { return Math.round(n * 100) / 100; };
+    var lines = estimate.lines.map(function (l) {
+      var o = merge(l, {}), q = l.quantity;
+      if (!stale.length && hosts && l.key === 'compute') { q = Math.round(hosts * hoursPerWeek * 52 / 12 * 10) / 10; o.item = 'Session hosts (' + hosts + ' x ' + pricedSize + ')'; o.note = hoursPerWeek + ' h/week each'; }
+      if (!stale.length && hosts && l.key === 'osdisk') { q = hosts; o.item = (l.item || '').replace(/\(\d+ x/, '(' + hosts + ' x'); }
+      if (!stale.length && sizing && sizing.profileQuotaGiB && l.key === 'profiles') { q = sizing.profileQuotaGiB; o.item = (l.item || '').replace(/\d+ GiB provisioned/, sizing.profileQuotaGiB + ' GiB provisioned'); }
+      o.quantity = q; o.monthly = round2(q * l.unitPrice);
+      return o;
+    });
+    var total = round2(lines.reduce(function (t, l) { return t + l.monthly; }, 0));
+    var alwaysOn = comp && hosts ? round2(total - lines.filter(function (l) { return l.key === 'compute'; })[0].monthly + hosts * 168 * 52 / 12 * comp.unitPrice) : null;
+    return { currency: estimate.currency, location: estimate.location, lines: lines, total: total, alwaysOnTotal: alwaysOn, hoursPerWeek: stale.length ? null : hoursPerWeek,
+      unpriced: estimate.unpriced || [], excluded: estimate.excluded || [], stale: stale };
+  }
+
   // What the commands pass: the sizing the portal computed, or the one a pasted preflight validated.
   function toSizing(r) { return { hosts: r.hosts, vmSize: r.vmSize, maxSessions: r.sessionsPerHost, profileQuotaGiB: r.profileQuotaGiB, activeHoursPerWeek: r.activeHoursPerWeek }; }
   function sized(cfg) { var s = cfg.sizing; return s && s.hosts && s.vmSize ? s : null; }
@@ -135,8 +199,13 @@
   // Sizing flags, only once a sizing is set: the preflight validates and prices it, deploy.sh deploys it,
   // and the post-deployment preflight checks quota for it.
   var sizeArgs = {
-    predeploy: function (cfg) { var s = sized(cfg); return s ? ' -SessionHostCount ' + s.hosts + ' -SessionHostVmSize ' + s.vmSize + ' -MaxSessionLimit ' + s.maxSessions + ' -ProfileShareQuotaGiB ' + s.profileQuotaGiB + (s.activeHoursPerWeek ? ' -ActiveHoursPerWeek ' + s.activeHoursPerWeek : '') : ''; },
-    deploy: function (cfg) { var s = sized(cfg); return s ? ' --hosts ' + s.hosts + ' --vm-size ' + s.vmSize + ' --max-sessions ' + s.maxSessions + ' --profile-quota ' + s.profileQuotaGiB : ''; },
+    // Hours are priced from the working hours and the power settings (the Cost step).
+    predeploy: function (cfg) {
+      var s = sized(cfg);
+      return (s ? ' -SessionHostCount ' + s.hosts + ' -SessionHostVmSize ' + s.vmSize + ' -MaxSessionLimit ' + s.maxSessions + ' -ProfileShareQuotaGiB ' + s.profileQuotaGiB : '') +
+        powerArgs(cfg, true) + (s || cfg.power ? ' -ActiveHoursPerWeek ' + pricedHours(cfg) : '');
+    },
+    deploy: function (cfg) { var s = sized(cfg); return (s ? ' --hosts ' + s.hosts + ' --vm-size ' + s.vmSize + ' --max-sessions ' + s.maxSessions + ' --profile-quota ' + s.profileQuotaGiB : '') + powerArgs(cfg, false); },
     postdeploy: function (cfg) { var s = sized(cfg); return s ? ' -SessionHostVmSize ' + s.vmSize + ' -SessionHostCount ' + s.hosts : ''; }
   };
 
@@ -465,7 +534,8 @@
     if (state && state.context && state.context.parameterFile && !state.context.environment) cfg.environment = envFromFile(state.context.parameterFile) || cfg.environment;
 
     var result = { recognized: !!state || problems.length > 0, source: source, problems: problems, config: cfg, failures: [], warnings: [], actions: [], stage: null, status: null, headline: '', step: options.currentStep || null,
-      estimate: (state && state.context && state.context.estimate) || null, sizing: (state && state.context && state.context.sizing) || null };
+      estimate: (state && state.context && state.context.estimate) || null, sizing: (state && state.context && state.context.sizing) || null,
+      power: (state && state.context && state.context.power) || null };
     if (state) {
       var d = decide(state, cfg, { text: text, rankedRegions: options.rankedRegions });
       result.stage = state.stage; result.status = state.stage === 'cleanup' && state.status === 'ready' ? 'done' : state.status;
@@ -513,7 +583,8 @@
     var cfg = merge(DEFAULTS, config);
     switch (step) {
       case 'region': return [{ title: 'Measure latency from where your users work', why: 'Run the test below from your users\' network (not over a VPN), then use the closest region. The preflight confirms the region offers AVD host pools.', command: '' }];
-      case 'size': return [{ title: 'Size the host pool', why: 'Enter how many people will use it and how they work, below. The commands then check quota and availability for that size, and the pre-deployment preflight prices it for ' + cfg.location + ' at Azure list prices.', command: '' },
+      case 'size': return [{ title: 'Size the host pool', why: 'Choose the number of hosts and their size, or let the portal size them from how many people use them and how they work. The commands then check quota and availability for that size.', command: '' }];
+      case 'cost': return [{ title: 'Choose how the hosts are powered', why: 'Start VM on Connect and the scheduled stop decide how many hours the hosts run, which is most of the cost. The pre-deployment preflight prices the plan for ' + cfg.location + ' at Azure list prices; after that, changing a setting here reprices it.', command: '' },
         firstStep(cfg)];
       case 'predeploy': return [firstStep(cfg)];
       case 'deploy': return [{ title: 'Deploy the landing zone', why: 'Run this once the pre-deployment preflight is Ready. It takes 30-45 minutes and keeps running in Azure if Cloud Shell disconnects.', command: cmd.deploy(cfg) },
@@ -526,5 +597,5 @@
     }
   }
 
-  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
+  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, powerDefaults: powerDefaults, effectivePower: effectivePower, hostHours: hostHours, repriceEstimate: repriceEstimate, pricedHours: pricedHours, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
 });
