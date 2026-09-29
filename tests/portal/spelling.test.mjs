@@ -24,7 +24,8 @@ test('American English everywhere (outside recorded output)', () => {
   const found = [];
   for (const f of walk(root).filter((x) => !x.endsWith('spelling.test.mjs'))) {
     readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
-      const m = BRITISH.exec(line);
+      // aria-labelledby is the HTML attribute's spelling.
+      const m = BRITISH.exec(line.replace(/aria-labelledby/g, ''));
       // "analyses" is also the plural noun; the verb is "analyzes".
       if (m && !/\banalyses\b/i.test(m[0])) found.push(`${relative(root, f)}:${i + 1}: ${m[0]}`);
     });
