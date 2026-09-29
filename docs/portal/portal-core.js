@@ -207,7 +207,7 @@
     { code: 'QuotaExceeded', what: 'Not enough vCPU quota.', fix: 'Run the pre-deployment preflight: it shows the quota and the portal builds the increase request.', action: 'predeploy' },
     { code: 'OperationNotAllowed', what: 'Usually a quota limit.', fix: 'Run the pre-deployment preflight: it checks quota and the portal builds the increase request.', action: 'predeploy' },
     { code: 'AuthorizationFailed', what: 'Your account lacks permission for part of the deployment.', fix: 'Deploy as Owner of the subscription (or Contributor + Role Based Access Control Administrator).', action: 'predeploy' },
-    { code: 'VaultAlreadyExists', what: 'The Key Vault name is taken (often by a soft-deleted vault from an earlier deployment).', fix: 'Change namePrefix in the parameter file, or recover the vault with Undo-AzKeyVaultRemoval.', action: 'predeploy' },
+    { code: 'VaultAlreadyExists', what: 'The Key Vault name is taken (often by a soft-deleted vault from an earlier deployment).', fix: 'Run the pre-deployment preflight with -Fix: it recovers a soft-deleted vault into its resource group so the name prefix can stay. Or change namePrefix in the parameter file.', action: 'predeploy-fix' },
     { code: 'InvalidTemplateDeployment', what: 'Azure rejected the template or parameters before deploying.', fix: 'Run the pre-deployment preflight; it compiles the parameter file and checks the region.', action: 'predeploy' },
     { code: 'ResourceGroupBeingDeleted', what: 'A landing zone resource group is still being deleted.', fix: 'Wait until the deletion finishes, then deploy again.', action: 'redeploy' },
     { code: 'RoleAssignmentExists', what: 'A role assignment already exists (usually harmless on a redeploy).', fix: 'Deploy again; the template is idempotent.', action: 'redeploy' }
@@ -301,10 +301,13 @@
       }
       var quota = byId(failures, 'quota'), kv = byId(failures, 'kv-softdeleted'), hp = byId(failures, 'hostpool-region'), lzr = byId(failures, 'lz-region');
       var others = failures.filter(function (f) { return ['quota', 'kv-softdeleted', 'hostpool-region', 'lz-region'].indexOf(f.id) < 0; });
-      var fixFirst = others.length > 0 && hasFixable(others) && !state.fix;
+      // -Fix recovers a soft-deleted vault into its resource group, so the name prefix can stay.
+      var kvFix = kv.length > 0 && !state.fix && kv.some(function (f) { return ((f.data && f.data.vaults) || []).length === 1; });
+      var fixFirst = ((others.length > 0 && hasFixable(others)) || kvFix) && !state.fix;
       var regionChange = false;
       if (fixFirst)
-        note('Run the preflight again with -Fix', 'It creates the missing groups and service principal and registers providers and features, waiting until they finish.', cmd.predeploy(cfg, true));
+        note('Run the preflight again with -Fix', [others.length > 0 && hasFixable(others) ? 'It creates the missing groups and service principal and registers providers and features, waiting until they finish.' : '',
+          kvFix ? 'It recovers the deleted Key Vault (' + kv[0].data.vaults[0] + ') into its resource group, so the deployment reuses it and keeps the name prefix.' : ''].filter(Boolean).join(' '), cmd.predeploy(cfg, true));
       if (hp.length) {
         var regions = (hp[0].data && hp[0].data.regions) || [];
         var pick = (ctx.rankedRegions || []).filter(function (r) { return regions.indexOf(r) >= 0; })[0] || regions[0];
@@ -320,8 +323,8 @@
       }
       if (quota.length)
         note('Request more vCPU quota', quota.map(function (q) { return q.check + ': ' + q.detail; }).join('; ') + '. Small increases are usually approved within minutes; if it goes to review, follow it in Portal > Quotas > My requests. Then run the preflight again.', cmd.quota(quota.map(function (q) { return q.data || {}; }).filter(function (d) { return d.quotaName; })));
-      if (kv.length)
-        note('Resolve the soft-deleted Key Vault', 'A deleted, purge-protected vault (' + ((kv[0].data && kv[0].data.vaults) || []).join(', ') + ') still holds the vault name for 90 days. Change namePrefix in ' + cfg.parameterFile + ', or recover it with Undo-AzKeyVaultRemoval.', '');
+      if (kv.length && !kvFix)
+        note('Resolve the soft-deleted Key Vault', 'A deleted, purge-protected vault (' + ((kv[0].data && kv[0].data.vaults) || []).join(', ') + ') still holds the vault name for 90 days. ' + [kv[0].detail, kv[0].remediation].filter(Boolean).join(' ') + ' (namePrefix is in ' + cfg.parameterFile + '.)', '');
       if (others.length && !fixFirst)
         others.forEach(function (f) { note('Fix: ' + f.check, [f.detail, f.remediation].filter(Boolean).join(' '), ''); });
       // Close with a rerun unless an action above already reruns it (with -Fix or in another region).
@@ -345,7 +348,7 @@
       }
       var known = armErrors(ctx.text), codes = armCodes(ctx.text);
       if (known.length) {
-        known.forEach(function (e) { note(e.code + ': ' + e.what, e.fix, e.action === 'redeploy' ? cmd.deploy(cfg) : cmd.predeploy(cfg, false)); });
+        known.forEach(function (e) { note(e.code + ': ' + e.what, e.fix, e.action === 'redeploy' ? cmd.deploy(cfg) : cmd.predeploy(cfg, e.action === 'predeploy-fix')); });
       }
       else {
         note('Find out what failed', 'The deployment failed' + (codes.length ? ' (' + codes.join(', ') + ')' : '') + '. This lists the failed resources and their error codes; paste the result here.', cmd.deployStatus(cfg, state.context && state.context.deploymentName));

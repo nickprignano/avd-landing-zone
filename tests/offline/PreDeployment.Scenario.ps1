@@ -12,7 +12,7 @@ Invoke-ScenarioStep 'fix' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pr
 Invoke-ScenarioStep 'recheck' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre }
 
 $global:St.skuZones = @('1', '2')
-$global:St.deletedVaults = @([pscustomobject]@{ VaultName = 'kvavdlzprodabc123'; Location = 'northcentralus' })
+$global:St.deletedVaults = @([pscustomobject]@{ VaultName = 'kvavdlzprodabc123'; Location = 'northcentralus'; ResourceGroup = 'rg-avdlz-prod-management' })
 Invoke-ScenarioStep 'prod-zone-and-vault' {
   & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/prod.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Location northcentralus
 }
@@ -37,3 +37,15 @@ $global:St.rgs = @()
 
 $global:St.pricesDown = $true
 Invoke-ScenarioStep 'prices-down' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre }
+
+# Redeploying with the same prefix after Remove-AvdDemo -IncludeLandingZone (as in the first real
+# cleanup): the vault is soft-deleted and its resource group gone. -Fix creates the group again and
+# recovers the vault into it; a vault of the same prefix in another region is left alone.
+$global:St.pricesDown = $false; $global:St.rgs = @()
+$global:St.deletedVaults = @(
+  [pscustomobject]@{ VaultName = 'kvavdlzdevs7abc123'; Location = 'northcentralus'; ResourceGroup = 'rg-avdlz-dev-management' },
+  [pscustomobject]@{ VaultName = 'kvavdlzdevq9xyz789'; Location = 'eastus2'; ResourceGroup = 'rg-avdlz-dev-management' })
+$global:Calls.Clear()
+Invoke-ScenarioStep 'vault-recover' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre -Fix -Force }
+Write-Host "RESULT vault-recover-calls $(@($global:Calls | Where-Object { $_ -match '^ARM PUT' }) -join ' | ')"
+Invoke-ScenarioStep 'vault-recovered' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre }

@@ -79,7 +79,7 @@ Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
   }
   It 'gives the portal the context and structured failures it needs' {
     $s = Get-PortalState $out
-    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' | Should -Be 'predeploy:notready predeploy:ready predeploy:ready predeploy:notready predeploy:notready predeploy:ready predeploy:ready predeploy:ready'
+    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' | Should -Be 'predeploy:notready predeploy:ready predeploy:ready predeploy:notready predeploy:notready predeploy:ready predeploy:ready predeploy:ready predeploy:ready predeploy:ready'
     $s[1].context.parameterFile | Should -Be 'parameters/dev.bicepparam'
     $s[1].context.location | Should -Be 'northcentralus'
     $s[1].context.usersGroup | Should -Be 'AVD Users'
@@ -87,6 +87,18 @@ Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
     $quota.data.quotaName | Should -Be 'standardEASv5Family'   # memory-optimised default (E4as_v5)
     $quota.data.needed | Should -Be 16
     ($s[3].failures | Where-Object id -eq 'kv-softdeleted').data.vaults | Should -Contain 'kvavdlzprodabc123'
+  }
+  It '-Fix recovers the soft-deleted vault into its resource group, created again first' {
+    Get-StepExit $out 'vault-recover' | Should -Be 0
+    $out | Should -Match '\[FIXED\] No soft-deleted Key Vault blocking the vault name'
+    $out | Should -Match 'Recovered kvavdlzdevs7abc123 into rg-avdlz-dev-management'
+    $calls = [regex]::Match($out, 'RESULT vault-recover-calls (.*)').Groups[1].Value
+    $calls | Should -Match 'PUT /subscriptions/[^/]+/resourcegroups/rg-avdlz-dev-management\?.*\| ARM PUT .*/vaults/kvavdlzdevs7abc123\?'
+    $calls | Should -Not -Match 'kvavdlzdevq9xyz789'   # same prefix, another region
+    Get-StepExit $out 'vault-recovered' | Should -Be 0
+  }
+  It 'check mode points at -Fix for the vault' {
+    ((Get-PortalState $out)[3].failures | Where-Object id -eq 'kv-softdeleted').remediation | Should -Match 'Rerun with -Fix to recover it into rg-avdlz-prod-management'
   }
 }
 

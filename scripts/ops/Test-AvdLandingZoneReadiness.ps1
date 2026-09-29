@@ -37,7 +37,8 @@
     -Fix           registers providers and the EncryptionAtHost feature and
                    waits for them (then re-registers Microsoft.Compute),
                    creates missing groups (by name) and the AVD service
-                   principal
+                   principal, recovers a soft-deleted Key Vault holding the
+                   name (into its resource group, created again if needed)
     -AddMeToGroups adds you to both groups
 
   POST-DEPLOYMENT (-NamePrefix -Environment)

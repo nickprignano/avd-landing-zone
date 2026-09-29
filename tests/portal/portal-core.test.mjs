@@ -108,8 +108,32 @@ test('state: quota and soft-deleted vault -> quota request with the right number
   // limit 10, used 4, 16 needed -> request 20
   assert.match(q.command, /value = 20 }; name = @\{ value = 'standardDASv5Family' \}/);
   assert.match(q.command, /Microsoft\.Compute\/locations\/northcentralus\/providers\/Microsoft\.Quota\/quotas\/standardDASv5Family\?api-version=2023-02-01/);
-  assert.ok(r.actions.some((a) => /soft-deleted Key Vault/.test(a.title)));
-  assert.match(last(r.actions.at(-1).command), /-ParameterFile parameters\/prod\.bicepparam/);
+  const fix = r.actions.find((a) => /with -Fix/.test(a.title));
+  assert.match(fix.why, /recovers the deleted Key Vault \(kvavdlzprodabc123\)/);
+  assert.match(last(fix.command), /-ParameterFile parameters\/prod\.bicepparam.* -Fix$/);
+  assert.ok(!r.actions.some((a) => /Resolve the soft-deleted/.test(a.title)));
+});
+
+test('state: soft-deleted vault in check mode -> -Fix recovers it (same prefix)', () => {
+  const r = analyze('state-predeploy-kv-fix.txt');
+  assert.equal(r.step, 'predeploy');
+  const fix = r.actions.find((a) => /with -Fix/.test(a.title));
+  assert.match(fix.why, /kvavdlzprodabc123/);
+  assert.match(last(fix.command), / -Fix$/);
+});
+
+test('state: -Fix recovered the vault -> deploy', () => {
+  const r = analyze('state-predeploy-kv-recovered.txt');
+  assert.equal(r.status, 'ready');
+  assert.equal(r.step, 'deploy');
+});
+
+test('state: recovery failed under -Fix -> the script\'s detail, no -Fix loop', () => {
+  const failed = { v: 1, stage: 'predeploy', status: 'notready', fix: true, context: { parameterFile: 'parameters/dev.bicepparam' }, counts: { fail: 1 },
+    failures: [{ id: 'kv-softdeleted', check: 'No soft-deleted Key Vault blocking the vault name', detail: 'Recovering kvavdlzdevx into rg-avdlz-dev-management failed: ARM PUT ... (403)', remediation: 'Recover it with Undo-AzKeyVaultRemoval, or change namePrefix.', data: { vaults: ['kvavdlzdevx'] } }], warnings: [] };
+  const r = P.analyze('<<<AVDLZ-STATE ' + JSON.stringify(failed) + ' AVDLZ-STATE>>>', {});
+  assert.ok(!r.actions.some((a) => /with -Fix/.test(a.title)));
+  assert.match(r.actions.find((a) => /Resolve the soft-deleted/.test(a.title)).why, /failed: ARM PUT .*Undo-AzKeyVaultRemoval/);
 });
 
 test('state: a line broken by the terminal copy still parses', () => {
