@@ -370,7 +370,8 @@ Describe 'Get-AvdRetailPrice' {
   It 'asks for the currency and escapes the filter' {
     Mock -ModuleName AvdLandingZone Invoke-RestMethod { [pscustomobject]@{ Items = @() } }
     Get-AvdRetailPrice -Filter "armRegionName eq 'westus2'" -Currency EUR | Out-Null
-    Should -Invoke -ModuleName AvdLandingZone Invoke-RestMethod -ParameterFilter { $Uri -like "*currencyCode='EUR'*" -and $Uri -like '*armRegionName%20eq%20%27westus2%27*' } -Times 1 -Exactly
+    # $Uri reaches the mock as a System.Uri, whose ToString() un-escapes: compare the string as sent.
+    Should -Invoke -ModuleName AvdLandingZone Invoke-RestMethod -ParameterFilter { "$($Uri.OriginalString)$(if ($Uri -is [string]) { $Uri })" -like "*currencyCode='EUR'*" -and "$($Uri.OriginalString)$(if ($Uri -is [string]) { $Uri })" -like '*armRegionName%20eq%20%27westus2%27*' } -Times 1 -Exactly
   }
 }
 
