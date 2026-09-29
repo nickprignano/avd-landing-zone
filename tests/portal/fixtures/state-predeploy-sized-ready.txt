@@ -1,0 +1,44 @@
+PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -SessionHostCount 3 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 60
+...
+== Sizing and cost
+  [PASS ] 3 session host(s) x Standard_D8as_v5, 32 sessions each
+          Up to 96 concurrent sessions; 24 vCPUs; profile share 600 GiB (Premium_LRS)
+  Pricing the plan in northcentralus from the Azure retail price API (list prices, pay-as-you-go) ...
+  [PASS ] Session hosts (3 x Standard_D8as_v5)
+          624.00 USD/month (780.0 host-hours x 0.8000 per 1 Hour); 60 h/week each; the scaling plan and Start VM on Connect stop hosts outside use
+  [PASS ] OS disks (3 x Premium SSD P10)
+          60.00 USD/month (3.0 disks x 20.0000 per 1/Month)
+  [PASS ] Profile share (Premium_LRS, 600 GiB provisioned)
+          120.00 USD/month (600.0 GiB x 0.2000 per 1 GiB/Month)
+  [PASS ] Private endpoints (3)
+          21.90 USD/month (2,190.0 endpoint-hours x 0.0100 per 1 Hour)
+  [PASS ] NAT Gateway
+          36.50 USD/month (730.0 hours x 0.0500 per 1 Hour)
+  [PASS ] NAT Gateway public IP
+          3.65 USD/month (730.0 hours x 0.0050 per 1 Hour)
+  [PASS ] Estimated monthly cost (list prices)
+          866.05 USD/month at 60 h/week per host; 1,994.05 if hosts run around the clock. Not included (usage-based): Log Analytics ingestion and retention (per GB); NAT Gateway and private endpoint data processed (per GB); Azure Backup of the profile share (when enabled); Defender for Cloud plans (when enabled); Windows / Microsoft 365 licences (per user).
+
+== Landing zone
+  [PASS ] Name 'avdlz-dev' is free in this subscription
+
+== Tenant (after deployment)
+  [PASS ] Intune licensing for host enrollment
+  [PASS ] You can grant the storage app admin consent (step 1)
+          Global Administrator
+  [PASS ] You can update Conditional Access (step 2)
+          Global Administrator
+  [PASS ] Conditional Access reviewed
+          After deployment the storage app must be excluded from: Require MFA for all users. The post-deployment -Fix does this.
+
+== Summary: 46 Pass
+Ready.
+
+Next, deploy the landing zone as a separate run:
+  bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins' --hosts 3 --vm-size Standard_D8as_v5 --max-sessions 32 --profile-quota 600
+Then run the post-deployment preflight:
+  ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -Fix
+
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"predeploy","status":"ready","fix":false,"context":{"namePrefix":"avdlz","adminsGroup":"AVD Admins","estimate":{"currency":"USD","location":"northcentralus","activeHoursPerWeek":60,"total":866.05,"alwaysOnTotal":1994.05,"lines":[{"key":"compute","item":"Session hosts (3 x Standard_D8as_v5)","quantity":780.0,"unit":"host-hours","unitPrice":0.8,"unitOfMeasure":"1 Hour","monthly":624.0,"meter":"Virtual Machines Dasv5 Series / D8as v5","note":"60 h/week each; the scaling plan and Start VM on Connect stop hosts outside use"},{"key":"osdisk","item":"OS disks (3 x Premium SSD P10)","quantity":3,"unit":"disks","unitPrice":20.0,"unitOfMeasure":"1/Month","monthly":60.0,"meter":"Premium SSD Managed Disks / P10 LRS Disk"},{"key":"profiles","item":"Profile share (Premium_LRS, 600 GiB provisioned)","quantity":600,"unit":"GiB","unitPrice":0.2,"unitOfMeasure":"1 GiB/Month","monthly":120.0,"meter":"Premium Files / LRS Provisioned"},{"key":"privateendpoints","item":"Private endpoints (3)","quantity":2190,"unit":"endpoint-hours","unitPrice":0.01,"unitOfMeasure":"1 Hour","monthly":21.9,"meter":"Virtual Network Private Link / Standard Private Endpoint"},{"key":"natgateway","item":"NAT Gateway","quantity":730,"unit":"hours","unitPrice":0.05,"unitOfMeasure":"1 Hour","monthly":36.5,"meter":"NAT Gateway / Standard Gateway"},{"key":"publicip","item":"NAT Gateway public IP","quantity":730,"unit":"hours","unitPrice":0.005,"unitOfMeasure":"1 Hour","monthly":3.65,"meter":"IP Addresses / Standard IPv4 Static Public IP"}],"unpriced":[],"excluded":["Log Analytics ingestion and retention (per GB)","NAT Gateway and private endpoint data processed (per GB)","Azure Backup of the profile share (when enabled)","Defender for Cloud plans (when enabled)","Windows / Microsoft 365 licences (per user)"]},"environment":"dev","parameterFile":"parameters/dev.bicepparam","usersGroup":"AVD Users","sizing":{"hosts":3,"vmSize":"Standard_D8as_v5","maxSessions":32,"profileQuotaGiB":600,"activeHoursPerWeek":60},"location":"northcentralus"},"counts":{"pass":46,"fail":0,"warn":0,"fixed":0,"skip":0},"failures":[],"warnings":[]} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>

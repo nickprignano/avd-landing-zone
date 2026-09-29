@@ -137,9 +137,11 @@ function Get-AzResourceProvider { param($ProviderNamespace,$ErrorAction) [pscust
 function Register-AzResourceProvider { param($ProviderNamespace) Log "register $ProviderNamespace"; $global:St.registered += $ProviderNamespace }
 function Get-AzProviderFeature { param($ProviderNamespace,$FeatureName,$ErrorAction) [pscustomobject]@{RegistrationState='Registered'} }
 function Register-AzProviderFeature { param($ProviderNamespace,$FeatureName) }
-function Get-AzComputeResourceSku { param($Location,$ErrorAction) [pscustomobject]@{ResourceType='virtualMachines';Name='Standard_D4as_v5';Family='standardDASv5Family';Restrictions=@();LocationInfo=@([pscustomobject]@{Location=$Location;Zones=$global:St.skuZones});Capabilities=@([pscustomobject]@{Name='vCPUs';Value='4'})} }
+function Get-AzComputeResourceSku { param($Location,$ErrorAction)
+  foreach ($v in 4, 8, 16) { [pscustomobject]@{ResourceType='virtualMachines';Name="Standard_D$($v)as_v5";Family='standardDASv5Family';Restrictions=@();LocationInfo=@([pscustomobject]@{Location=$Location;Zones=$global:St.skuZones});Capabilities=@([pscustomobject]@{Name='vCPUs';Value="$v"})} } }
 function Get-AzKeyVault { param([switch]$InRemovedState,$ErrorAction) $global:St.deletedVaults }
-function Get-AzVMUsage { param($Location) @([pscustomobject]@{Name=[pscustomobject]@{Value='standardDASv5Family'};Limit=10;CurrentValue=4},[pscustomobject]@{Name=[pscustomobject]@{Value='cores'};Limit=20;CurrentValue=4}) }
+$global:St.quotaLimit = $null   # set to raise both limits (a subscription after a quota increase)
+function Get-AzVMUsage { param($Location) $l = $global:St.quotaLimit; @([pscustomobject]@{Name=[pscustomobject]@{Value='standardDASv5Family'};Limit=$(if ($l) { $l } else { 10 });CurrentValue=4},[pscustomobject]@{Name=[pscustomobject]@{Value='cores'};Limit=$(if ($l) { $l } else { 20 });CurrentValue=4}) }
 function Get-AzVM { param($ResourceGroupName,$Name,[switch]$Status,$ErrorAction)
   $n = if ($ResourceGroupName -like '*demo') {'avdlzddemo-001'} else {'avdlzdsh-001'}
   $vm=[pscustomobject]@{Name=$n;Id="$S/resourceGroups/$ResourceGroupName/providers/Microsoft.Compute/virtualMachines/$n";Identity=[pscustomobject]@{PrincipalId="mi-$n"};PowerState='VM running';OSProfile=[pscustomobject]@{ComputerName=$n}}
@@ -191,6 +193,34 @@ function Invoke-PSRule { param($InputPath,$Module,$Outcome,$Path,$WarningAction,
   [pscustomobject]@{ RuleName='Azure.Storage.ContainerSoftDelete'; TargetName=$saName; Tag=@{ 'Azure.WAF/pillar'='Reliability' }; Reason=$null }
   # Live run: PSRule's export doesn't attach VM extensions, so this fails although the agent is installed.
   [pscustomobject]@{ RuleName='Azure.VM.AMA'; TargetName='avdlzdsh-001'; Tag=@{ 'Azure.WAF/pillar'='Operational Excellence' }; Reason=@('The virtual machine does not have Azure Monitor Agent installed.') }
+}
+
+# ---- Azure Retail Prices API (Get-AvdRetailPrice). Prices here are placeholders for tests, not real
+# list prices. Shapes follow the public API: Items, NextPageLink; one VM query spans two pages.
+$global:St.pricesDown = $false
+function Invoke-RestMethod { param($Uri,$Method,$ErrorAction)
+  if ($Uri -notmatch '^https://prices\.azure\.com/api/retail/prices') { throw "unmocked REST $Uri" }
+  Log "PRICE $Uri"
+  if ($global:St.pricesDown) { throw 'Response status code does not indicate success: 503 (Service Unavailable).' }
+  $f = [uri]::UnescapeDataString(($Uri -split '\$filter=')[1])
+  $it = { param($product,$sku,$meter,$unit,$price,$tier=0) [pscustomobject]@{currencyCode='USD';productName=$product;skuName=$sku;meterName=$meter;unitOfMeasure=$unit;retailPrice=$price;tierMinimumUnits=$tier;type='Consumption'} }
+  $items = switch -Regex ($f) {
+    "serviceName eq 'Virtual Machines'.*armSkuName eq '(Standard_D(\d+)as_v5)'" {
+      $v = [int]$Matches[2]; $n = $Matches[1] -replace 'Standard_' -replace '_', ' '
+      if ($Uri -notmatch 'page=2') {
+        return [pscustomobject]@{ Items=@((& $it "Virtual Machines Dasv5 Series Windows" $n $n '1 Hour' (0.2 * $v)), (& $it "Virtual Machines Dasv5 Series" "$n Spot" "$n Spot" '1 Hour' (0.01 * $v))); NextPageLink="$Uri&page=2" }
+      }
+      @((& $it "Virtual Machines Dasv5 Series" $n $n '1 Hour' (0.1 * $v)), (& $it "Virtual Machines Dasv5 Series" "$n Low Priority" "$n Low Priority" '1 Hour' (0.02 * $v)))
+    }
+    "skuName eq 'P10 LRS'" { @((& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk' '1/Month' 20), (& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk Mount' '1/Month' 1)) }
+    "productName eq 'Premium Files'" { @((& $it 'Premium Files' 'Premium LRS' 'LRS Provisioned' '1 GiB/Month' 0.2), (& $it 'Premium Files' 'Premium ZRS' 'ZRS Provisioned' '1 GiB/Month' 0.25), (& $it 'Premium Files' 'Premium LRS' 'LRS Snapshots' '1 GiB/Month' 0.1)) }
+    "productName eq 'Virtual Network Private Link'" { @((& $it 'Virtual Network Private Link' 'Standard' 'Standard Private Endpoint' '1 Hour' 0.01), (& $it 'Virtual Network Private Link' 'Standard' 'Standard Data Processed - Ingress' '1 GB' 0.01)) }
+    "productName eq 'NAT Gateway'" { @((& $it 'NAT Gateway' 'Standard' 'Standard Gateway' '1 Hour' 0.05), (& $it 'NAT Gateway' 'Standard' 'Standard Data Processed' '1 GB' 0.05)) }
+    # As if the API named the meter differently: the estimate must say so, not guess.
+    "productName eq 'IP Addresses'" { if ($global:St.ipMeterRenamed) { @((& $it 'IP Addresses' 'Standard' 'Standard IPv4 Public Address' '1 Hour' 0.005)) } else { @((& $it 'IP Addresses' 'Standard' 'Standard IPv4 Static Public IP' '1 Hour' 0.005)) } }
+    default { @() }
+  }
+  [pscustomobject]@{ Items=@($items); NextPageLink=$null }
 }
 
 # ---- Graph ----

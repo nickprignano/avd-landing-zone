@@ -586,6 +586,7 @@ function Test-AvdVmCapacity {
     if ($free -ge $need) { Add-AvdCheckResult $area $label 'Pass' -Detail "$free free, $need needed" -Id 'quota' -Data $quota }
     else { Add-AvdCheckResult $area $label 'Fail' -Detail "$free free, $need needed" -Remediation 'Request a quota increase (Portal > Quotas) or reduce host count/size.' -Id 'quota' -Data $quota }
   }
+  return $vcpu
 }
 
 function Test-AvdHostPoolRegion {
@@ -1329,7 +1330,7 @@ function Invoke-AvdReadinessCheck {
   Write-AvdSection 'Subscription'
   Test-AvdCallerPermission -SubscriptionId $Lz.SubscriptionId
   Test-AvdResourceProvider -Fix:$Fix
-  if ($Lz.Location) { Test-AvdVmCapacity -Location $Lz.Location -VmSize $VmSize -Count $VmCount }
+  if ($Lz.Location) { $null = Test-AvdVmCapacity -Location $Lz.Location -VmSize $VmSize -Count $VmCount }
 
   Write-AvdSection 'Landing zone'
   $present = @($Lz.RgExists.Keys | Where-Object { $_ -ne 'Demo' -and $Lz.RgExists[$_] })
@@ -1418,7 +1419,9 @@ function Get-AvdDeploymentPlan {
     [string] $AdminsGroupId,
     [string] $AvdServicePrincipalId,
     # Region override: the parameter files read it from AVD_LOCATION.
-    [string] $Location
+    [string] $Location,
+    # Sizing overrides (hosts, vmSize, maxSessions, profileQuotaGiB): the parameter files read AVD_SESSION_HOST_COUNT etc.
+    [hashtable] $Sizing = @{}
   )
   $bicep = Get-Command bicep -ErrorAction SilentlyContinue
   if (-not $bicep) { throw 'The Bicep CLI is required to read the parameter file.' }
@@ -1431,6 +1434,8 @@ function Get-AvdDeploymentPlan {
     AVD_LOCAL_ADMIN_PASSWORD = 'Preflight-placeholder-only-1!'
   }
   if ($Location) { $vars.AVD_LOCATION = $Location }
+  $sizingVars = @{ hosts = 'AVD_SESSION_HOST_COUNT'; vmSize = 'AVD_SESSION_HOST_VM_SIZE'; maxSessions = 'AVD_MAX_SESSION_LIMIT'; profileQuotaGiB = 'AVD_PROFILE_QUOTA_GIB' }
+  foreach ($k in $sizingVars.Keys) { $vars[$sizingVars[$k]] = $(if ($Sizing[$k]) { [string]$Sizing[$k] } else { '' }) }
   $saved = @{}
   foreach ($k in $vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $vars[$k]) }
   try {
@@ -1526,6 +1531,139 @@ function Add-AvdCallerToGroup {
   }
 }
 
+# =====================================================================
+# Sizing and cost (pre-deployment; decision 0010)
+# =====================================================================
+$script:RetailPriceApi = 'https://prices.azure.com/api/retail/prices'
+$script:HoursPerMonth = 730
+
+function Get-AvdRetailPrice {
+  <#
+    Azure retail (pay-as-you-go list) prices matching an OData filter, from the public Retail
+    Prices API (no sign-in). Paged; stops on an error, an empty page or MaxPages (lesson 0008).
+  #>
+  param([Parameter(Mandatory)][string] $Filter, [string] $Currency = 'USD', [int] $MaxPages = 5)
+  $uri = "$($script:RetailPriceApi)?currencyCode='$Currency'&`$filter=$([uri]::EscapeDataString($Filter))"
+  $page = 0
+  while ($uri -and $page -lt $MaxPages) {
+    $page++
+    $r = Invoke-RestMethod -Uri $uri -Method Get -ErrorAction Stop
+    if (-not $r -or -not $r.Items) { break }
+    $r.Items
+    $uri = $r.NextPageLink
+  }
+}
+
+function Get-AvdCostEstimate {
+  <#
+    Monthly cost of the fixed and per-host parts of the plan at list prices. Each line names the
+    meter it used; a line whose meter is not found says which meters the API returned instead
+    (lesson 0012). Usage-based charges are listed as excluded, not guessed.
+  #>
+  param(
+    [Parameter(Mandatory)][hashtable] $Plan,
+    [int] $ActiveHoursPerWeek = 50,
+    [string] $Currency = 'USD'
+  )
+  $loc = $Plan.location
+  $hosts = [int]$Plan.sessionHostCount
+  $size = $Plan.sessionHostVmSize
+  $quota = [int]$Plan.profileShareQuotaGiB
+  $fileSku = ([string]$Plan.profileStorageSku) -replace '_', ' '
+  $activeHours = [math]::Round($hosts * $ActiveHoursPerWeek * 52 / 12, 1)
+  $pe = 2 + $(if ($Plan.enableAvdPrivateLink -ne $false) { 1 } else { 0 })   # storage, Key Vault, host pool
+  $specs = @(
+    @{ key = 'compute'; item = "Session hosts ($hosts x $size)"; quantity = $activeHours; unit = 'host-hours'
+      note = "$ActiveHoursPerWeek h/week each; the scaling plan and Start VM on Connect stop hosts outside use"
+      filter = "serviceName eq 'Virtual Machines' and armRegionName eq '$loc' and armSkuName eq '$size' and priceType eq 'Consumption'"
+      # Windows client multi-session is licensed per user (Microsoft 365 / Windows E3+), so hosts pay the base compute rate.
+      pick = { $_.productName -notmatch 'Windows' -and $_.skuName -notmatch 'Spot|Low Priority' -and $_.unitOfMeasure -eq '1 Hour' } }
+    @{ key = 'osdisk'; item = "OS disks ($hosts x Premium SSD P10)"; quantity = $hosts; unit = 'disks'
+      filter = "serviceName eq 'Storage' and armRegionName eq '$loc' and skuName eq 'P10 LRS' and priceType eq 'Consumption'"
+      pick = { $_.meterName -eq 'P10 LRS Disk' -and $_.unitOfMeasure -match 'Month' } }
+    @{ key = 'profiles'; item = "Profile share ($($Plan.profileStorageSku), $quota GiB provisioned)"; quantity = $quota; unit = 'GiB'
+      filter = "serviceName eq 'Storage' and armRegionName eq '$loc' and productName eq 'Premium Files' and priceType eq 'Consumption'"
+      pick = { $_.skuName -eq $fileSku -and $_.meterName -match 'Provisioned' -and $_.unitOfMeasure -match 'GB/Month|GiB/Month' } }
+    @{ key = 'privateendpoints'; item = "Private endpoints ($pe)"; quantity = $pe * $script:HoursPerMonth; unit = 'endpoint-hours'
+      filter = "productName eq 'Virtual Network Private Link' and armRegionName eq '$loc' and priceType eq 'Consumption'"
+      pick = { $_.meterName -match 'Private Endpoint' -and $_.meterName -notmatch 'Data|Processed' -and $_.unitOfMeasure -eq '1 Hour' } }
+  )
+  if ($Plan.connectivityMode -ne 'HubPeered') {
+    $specs += @{ key = 'natgateway'; item = 'NAT Gateway'; quantity = $script:HoursPerMonth; unit = 'hours'
+      filter = "productName eq 'NAT Gateway' and armRegionName eq '$loc' and priceType eq 'Consumption'"
+      pick = { $_.unitOfMeasure -eq '1 Hour' -and $_.meterName -notmatch 'Data' } }
+    $specs += @{ key = 'publicip'; item = 'NAT Gateway public IP'; quantity = $script:HoursPerMonth; unit = 'hours'
+      filter = "productName eq 'IP Addresses' and armRegionName eq '$loc' and priceType eq 'Consumption'"
+      pick = { $_.skuName -eq 'Standard' -and $_.meterName -match 'Static Public IP' -and $_.meterName -notmatch 'IPv6' -and $_.unitOfMeasure -eq '1 Hour' } }
+  }
+
+  $lines = @(); $unpriced = @(); $alwaysOnCompute = $null
+  foreach ($s in $specs) {
+    $items = @(Get-AvdRetailPrice -Filter $s.filter -Currency $Currency)
+    # Exactly one meter must match (first price tier); several different ones means the pattern is too loose.
+    $matched = @($items | Where-Object $s.pick | Where-Object { -not $_.tierMinimumUnits })
+    $distinct = @($matched | ForEach-Object { "$($_.productName)|$($_.skuName)|$($_.meterName)|$($_.unitOfMeasure)" } | Select-Object -Unique)
+    $hit = if ($distinct.Count -eq 1) { $matched[0] } else { $null }
+    if (-not $hit) {
+      if ($distinct.Count -gt 1) { $items = $matched }
+      $seen = @($items | ForEach-Object { "$($_.skuName) / $($_.meterName) ($($_.unitOfMeasure))" } | Select-Object -Unique -First 6)
+      $unpriced += [ordered]@{ key = $s.key; item = $s.item; filter = $s.filter; seen = $seen }
+      continue
+    }
+    $price = [double]$hit.retailPrice
+    $line = [ordered]@{ key = $s.key; item = $s.item; quantity = $s.quantity; unit = $s.unit; unitPrice = $price; unitOfMeasure = $hit.unitOfMeasure
+      monthly = [math]::Round($price * $s.quantity, 2); meter = "$($hit.productName) / $($hit.meterName)" }
+    if ($s.note) { $line.note = $s.note }
+    if ($s.key -eq 'compute') { $alwaysOnCompute = [math]::Round($price * $hosts * $script:HoursPerMonth, 2) }
+    $lines += $line
+  }
+  $total = [math]::Round((($lines | ForEach-Object { $_.monthly }) | Measure-Object -Sum).Sum, 2)
+  $computeLine = $lines | Where-Object { $_.key -eq 'compute' }
+  [ordered]@{
+    currency           = $Currency
+    location           = $loc
+    activeHoursPerWeek = $ActiveHoursPerWeek
+    total              = $total
+    alwaysOnTotal      = $(if ($null -ne $alwaysOnCompute) { [math]::Round($total - $computeLine.monthly + $alwaysOnCompute, 2) } else { $null })
+    lines              = @($lines)
+    unpriced           = @($unpriced)
+    excluded           = @('Log Analytics ingestion and retention (per GB)', 'NAT Gateway and private endpoint data processed (per GB)',
+      'Azure Backup of the profile share (when enabled)', 'Defender for Cloud plans (when enabled)', 'Windows / Microsoft 365 licences (per user)')
+  }
+}
+
+function Test-AvdSizing {
+  <#
+    The capacity the plan deploys and what it costs at list prices. The vCPU quota and VM size
+    checks (Test-AvdVmCapacity) already run against the same plan.
+  #>
+  param([Parameter(Mandatory)][hashtable] $Plan, [int] $VcpuPerHost, [int] $ActiveHoursPerWeek = 50)
+  Write-AvdSection 'Sizing and cost'
+  $hosts = [int]$Plan.sessionHostCount; $max = [int]$Plan.maxSessionLimit
+  $detail = "Up to $($hosts * $max) concurrent sessions$(if ($VcpuPerHost) { "; $($hosts * $VcpuPerHost) vCPUs" }); profile share $($Plan.profileShareQuotaGiB) GiB ($($Plan.profileStorageSku))"
+  Add-AvdCheckResult 'Sizing' "$hosts session host(s) x $($Plan.sessionHostVmSize), $max sessions each" 'Pass' -Detail $detail
+  if ($VcpuPerHost -and $max -gt 6 * $VcpuPerHost) {
+    Add-AvdCheckResult 'Sizing' 'Sessions per vCPU within Microsoft''s multi-session guidance' 'Warn' -Detail "$max sessions on $VcpuPerHost vCPUs is $([math]::Round($max / $VcpuPerHost, 1)) per vCPU; light workloads are sized at 6 per vCPU, medium 4, heavy 2." -Remediation 'Lower maxSessionLimit (--max-sessions) or use a larger size.'
+  }
+
+  Write-Host "  Pricing the plan in $($Plan.location) from the Azure retail price API (list prices, pay-as-you-go) ..." -ForegroundColor DarkGray
+  try { $estimate = Get-AvdCostEstimate -Plan $Plan -ActiveHoursPerWeek $ActiveHoursPerWeek }
+  catch {
+    Add-AvdCheckResult 'Cost' 'Cost estimate' 'Warn' -Detail "Could not read the Azure retail price API: $($_.Exception.Message)" -Remediation 'Rerun later; sizing and quota checks do not depend on it.' -Id 'cost-unavailable'
+    return $null
+  }
+  foreach ($l in $estimate.lines) {
+    Add-AvdCheckResult 'Cost' $l.item 'Pass' -Detail ('{0:N2} {1}/month ({2:N1} {3} x {4:N4} per {5}){6}' -f $l.monthly, $estimate.currency, $l.quantity, $l.unit, $l.unitPrice, $l.unitOfMeasure, $(if ($l.note) { "; $($l.note)" }))
+  }
+  foreach ($u in $estimate.unpriced) {
+    Add-AvdCheckResult 'Cost' $u.item 'Warn' -Id 'cost-unpriced' -Detail "No matching price. Meters returned: $(if ($u.seen.Count) { $u.seen -join '; ' } else { 'none' })" -Remediation 'Not included in the total. Paste this output into the portal''s Report a problem so the meter can be added.'
+  }
+  $summary = '{0:N2} {1}/month at {2} h/week per host' -f $estimate.total, $estimate.currency, $ActiveHoursPerWeek
+  if ($null -ne $estimate.alwaysOnTotal) { $summary += ('; {0:N2} if hosts run around the clock' -f $estimate.alwaysOnTotal) }
+  Add-AvdCheckResult 'Cost' 'Estimated monthly cost (list prices)' 'Pass' -Id 'cost-estimate' -Detail "$summary. Not included (usage-based): $($estimate.excluded -join '; ')."
+  return $estimate
+}
+
 function Test-AvdPreDeployment {
   <# Everything the landing zone deployment needs, checked against the effective parameters. #>
   [CmdletBinding(SupportsShouldProcess)]
@@ -1537,7 +1675,11 @@ function Test-AvdPreDeployment {
     [switch] $Fix,
     # Add the signed-in user to both groups (gives you the desktop and admin rights on the hosts).
     [switch] $AddMeToGroups,
-    [switch] $SkipTenant
+    [switch] $SkipTenant,
+    # Desired sizing from the deployment portal (hosts, vmSize, maxSessions, profileQuotaGiB); validated and priced.
+    [hashtable] $Sizing = @{},
+    # Hours per week each host runs, for the cost estimate.
+    [int] $ActiveHoursPerWeek = 50
   )
   $avdAppId = '9cdead84-a844-4324-93f2-b2e6bb768d07'
 
@@ -1578,7 +1720,7 @@ function Test-AvdPreDeployment {
   # ---- Parameter file ----
   Write-AvdSection 'Parameter file'
   try {
-    $plan = Get-AvdDeploymentPlan -ParameterFile $ParameterFile -UsersGroupId $users.id -AdminsGroupId $admins.id -AvdServicePrincipalId $avdSp.id -Location $Location
+    $plan = Get-AvdDeploymentPlan -ParameterFile $ParameterFile -UsersGroupId $users.id -AdminsGroupId $admins.id -AvdServicePrincipalId $avdSp.id -Location $Location -Sizing $Sizing
   }
   catch {
     Add-AvdCheckResult 'Parameters' "Compile $ParameterFile" 'Fail' -Detail $_.Exception.Message -Remediation 'Fix the parameter file (az bicep build-params).'
@@ -1600,8 +1742,9 @@ function Test-AvdPreDeployment {
     'Microsoft.Insights', 'Microsoft.OperationalInsights', 'Microsoft.KeyVault', 'Microsoft.RecoveryServices', 'Microsoft.Security',
     'Microsoft.PolicyInsights', 'Microsoft.GuestConfiguration', 'Microsoft.Consumption')
   Test-AvdHostPoolRegion -Location $plan.location -SubscriptionId $lz.SubscriptionId
+  $vcpuPerHost = 0
   if ($plan.sessionHostCount -gt 0) {
-    Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones
+    $vcpuPerHost = [int](Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones | Select-Object -Last 1)
   }
   if (-not $plan.encryptionAtHost) { Add-AvdCheckResult 'Subscription' 'EncryptionAtHost not required (encryptionAtHost = false)' 'Pass' }
 
@@ -1624,6 +1767,9 @@ function Test-AvdPreDeployment {
   if ($plan.monthlyBudgetAmount -gt 0 -and (-not $plan.budgetStartDate -or -not @($plan.alertEmailAddresses).Count)) {
     Add-AvdCheckResult 'Parameters' 'Budget will be created' 'Warn' -Detail 'monthlyBudgetAmount is set but budgetStartDate or alertEmailAddresses (AVD_ALERT_EMAIL) is empty, so no budget is created.'
   }
+
+  # ---- Sizing and cost ----
+  $estimate = Test-AvdSizing -Plan $plan -VcpuPerHost $vcpuPerHost -ActiveHoursPerWeek $ActiveHoursPerWeek
 
   # ---- Connectivity ----
   if ($plan.connectivityMode -eq 'HubPeered') {
@@ -1680,7 +1826,7 @@ function Test-AvdPreDeployment {
     catch { Add-AvdCheckResult 'Entra ID' 'Conditional Access reviewed' 'Warn' -Detail "Could not read policies: $($_.Exception.Message)" }
   }
 
-  return [pscustomobject]@{ Plan = $plan; UsersGroup = $users; AdminsGroup = $admins }
+  return [pscustomobject]@{ Plan = $plan; UsersGroup = $users; AdminsGroup = $admins; Estimate = $estimate }
 }
 
 Export-ModuleMember -Function *-Avd*

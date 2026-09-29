@@ -3,10 +3,11 @@
 [`index.html`](index.html) is a static page (GitHub Pages: <https://nickprignano.github.io/avd-landing-zone/portal/>) that walks an operator through a deployment:
 
 1. **Choose a region.** Latency measured from the browser; the closest region is selected.
-2. **Pre-deployment preflight.**
-3. **Deploy the landing zone.**
-4. **Post-deployment setup.**
-5. **Sign in** (and optionally the demo host pool).
+2. **Size and cost.** Sessions, hosts and profile share from people and workload; the commands then carry the sizing, and the preflight prices it ([decision 0010](../decisions/0010-sizing-and-cost.md)).
+3. **Pre-deployment preflight.**
+4. **Deploy the landing zone.**
+5. **Post-deployment setup.**
+6. **Sign in** (and optionally the demo host pool).
 
 At each step it gives a self-contained Cloud Shell block (clone or update the repo, move into it, run the command). The operator pastes the output back and the portal works out what happened and what to run next. It keeps progress and settings in the browser's local storage. **Pasted output is never sent anywhere**: the only network requests are the latency test's.
 
@@ -30,7 +31,7 @@ Written by `Write-AvdPortalState` (PowerShell scripts) and `portal_state` (`depl
 | `stage` | `predeploy`, `deploy`, `postdeploy`, `demo` or `cleanup`. |
 | `status` | `ready` / `notready` (preflight, demo, cleanup); `started` / `succeeded` / `failed` / `whatif` (`deploy.sh`). A deployment prints `started` before it begins, so output cut off by a disconnect still says what is running. |
 | `fix` | Whether the run used `-Fix`. |
-| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected` (whichever apply). |
+| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`) (whichever apply). |
 | `counts` | `pass`, `fail`, `warn`, `fixed`, `skip`. |
 | `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognise the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
 
@@ -53,6 +54,10 @@ Add fields; don't rename or remove them without bumping `v` and keeping the old 
 The same value always gets the same placeholder. Reports carry `<!-- avdlz-portal-report v1 -->`, and `.github/workflows/portal-report.yml` labels them `portal-report`.
 
 **Triage:** a report whose analysis is wrong is a fixture waiting to happen. The retro routine applies. Check the output for anything private the patterns missed, then save it to `tests/portal/fixtures/`.
+
+## Sizing
+
+`portal-core.js` keeps sizing per host pool: `HOST_POOL_DEFAULTS` describes one entry (name, type, users, `concurrencyPercent`, workload, `vmSize`, `spareHost`, `profileGiBPerUser`, `activeHoursPerWeek`), `computePool()` sizes it, and `toSizing()` turns the result into the object the commands use. The page stores a list (`avdlz.portal.hostPools`) with one entry while `MAX_HOST_POOLS` is 1. To add host pools: raise the limit, give each entry its own commands, and extend the templates. The single-pool commands don't change.
 
 ## Changing it
 

@@ -22,7 +22,7 @@ Everything is built from pinned [Azure Verified Modules](https://aka.ms/avm).
 
 ## Quick start
 
-**Easiest path: the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/).** It picks the closest region by measuring latency from your browser, gives you each command to paste into Cloud Shell, and reads the output you paste back to tell you what to run next, all the way to signing in. Pasted output never leaves your browser. If you get stuck, **Report a problem** turns the output into a GitHub issue, with private details removed in your browser first.
+**Easiest path: the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/).** It picks the closest region by measuring latency from your browser, sizes the host pool from how many people use it (and the preflight prices that at Azure list prices for the region), gives you each command to paste into Cloud Shell, and reads the output you paste back to tell you what to run next, all the way to signing in. Pasted output never leaves your browser. If you get stuck, **Report a problem** turns the output into a GitHub issue, with private details removed in your browser first.
 
 Prerequisites (details in [`docs/deploy.md`](docs/deploy.md)):
 - A **dedicated subscription** where you are Owner, plus Azure CLI ≥ 2.65.

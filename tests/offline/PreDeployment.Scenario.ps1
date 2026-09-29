@@ -16,3 +16,18 @@ $global:St.deletedVaults = @([pscustomobject]@{ VaultName = 'kvavdlzprodabc123';
 Invoke-ScenarioStep 'prod-zone-and-vault' {
   & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/prod.bicepparam -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' -Location northcentralus
 }
+
+# Sized by the deployment portal: 3 x D8as_v5 with 60 sessions each (above 6 per vCPU), priced at
+# the mock's placeholder list prices; the public IP meter is not found, so it is reported, not guessed.
+$global:St.skuZones = @('1', '2', '3'); $global:St.deletedVaults = @(); $global:St.ipMeterRenamed = $true
+Invoke-ScenarioStep 'sized' {
+  & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre -SessionHostCount 3 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 60 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 60
+}
+# After a quota increase the same sizing passes, and the printed deploy command carries it.
+$global:St.quotaLimit = 100; $global:St.ipMeterRenamed = $false
+Invoke-ScenarioStep 'sized-ready' {
+  & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre -SessionHostCount 3 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 60
+}
+$global:St.quotaLimit = $null
+$global:St.pricesDown = $true
+Invoke-ScenarioStep 'prices-down' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @pre }

@@ -24,12 +24,16 @@ param connectivityMode = 'Standalone'
 // Regional hosts (no zones) work in every region, including those without
 // availability zones such as North Central US.
 param availabilityZones = []
-param sessionHostCount = 1
-param sessionHostVmSize = 'Standard_D4as_v5'
+// Sizing: the deployment portal's sizing step, deploy.sh (--hosts, --vm-size, --max-sessions,
+// --profile-quota) and the pre-deployment preflight override these through AVD_SESSION_HOST_COUNT,
+// AVD_SESSION_HOST_VM_SIZE, AVD_MAX_SESSION_LIMIT and AVD_PROFILE_QUOTA_GIB (empty = the value here).
+param sessionHostCount = empty(readEnvironmentVariable('AVD_SESSION_HOST_COUNT', '')) ? 1 : int(readEnvironmentVariable('AVD_SESSION_HOST_COUNT', ''))
+param sessionHostVmSize = empty(readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')) ? 'Standard_D4as_v5' : readEnvironmentVariable('AVD_SESSION_HOST_VM_SIZE', '')
+param maxSessionLimit = empty(readEnvironmentVariable('AVD_MAX_SESSION_LIMIT', '')) ? 8 : int(readEnvironmentVariable('AVD_MAX_SESSION_LIMIT', ''))
 
 // ---- Profiles ----
 param profileStorageSku = 'Premium_LRS'
-param profileShareQuotaGiB = 100
+param profileShareQuotaGiB = empty(readEnvironmentVariable('AVD_PROFILE_QUOTA_GIB', '')) ? 100 : int(readEnvironmentVariable('AVD_PROFILE_QUOTA_GIB', ''))
 param enableProfileBackup = false
 
 // ---- Operations & governance ----

@@ -354,3 +354,46 @@ Describe 'Well-Architected findings' {
     Get-AvdPSRulePillar ([pscustomobject]@{ Tag = $null }) | Should -Be ''
   }
 }
+
+Describe 'Get-AvdRetailPrice' {
+  It 'follows NextPageLink and stops at MaxPages' {
+    Mock -ModuleName AvdLandingZone Invoke-RestMethod { [pscustomobject]@{ Items = @([pscustomobject]@{ meterName = 'm' }); NextPageLink = 'https://prices.azure.com/api/retail/prices?next' } }
+    @(Get-AvdRetailPrice -Filter "serviceName eq 'X'" -MaxPages 3).Count | Should -Be 3
+    Should -Invoke -ModuleName AvdLandingZone Invoke-RestMethod -Times 3 -Exactly
+  }
+  It 'stops on an empty page and passes an error through' {
+    Mock -ModuleName AvdLandingZone Invoke-RestMethod { [pscustomobject]@{ Items = @(); NextPageLink = 'x' } }
+    @(Get-AvdRetailPrice -Filter "serviceName eq 'X'").Count | Should -Be 0
+    Mock -ModuleName AvdLandingZone Invoke-RestMethod { throw '503' }
+    { Get-AvdRetailPrice -Filter "serviceName eq 'X'" } | Should -Throw '*503*'
+  }
+  It 'asks for the currency and escapes the filter' {
+    Mock -ModuleName AvdLandingZone Invoke-RestMethod { [pscustomobject]@{ Items = @() } }
+    Get-AvdRetailPrice -Filter "armRegionName eq 'westus2'" -Currency EUR | Out-Null
+    Should -Invoke -ModuleName AvdLandingZone Invoke-RestMethod -ParameterFilter { $Uri -like "*currencyCode='EUR'*" -and $Uri -like '*armRegionName%20eq%20%27westus2%27*' } -Times 1 -Exactly
+  }
+}
+
+Describe 'Get-AvdCostEstimate' {
+  BeforeAll {
+    $script:plan = @{ location = 'westus2'; sessionHostCount = 2; sessionHostVmSize = 'Standard_D4as_v5'; profileShareQuotaGiB = 100; profileStorageSku = 'Premium_LRS'; connectivityMode = 'HubPeered'; enableAvdPrivateLink = $false }
+  }
+  It 'leaves a line unpriced when two different meters match, instead of picking one' {
+    Mock -ModuleName AvdLandingZone Get-AvdRetailPrice {
+      if ($Filter -like "*Virtual Machines*") { [pscustomobject]@{ productName = 'Virtual Machines Dasv5 Series'; skuName = 'D4as v5'; meterName = 'D4as v5'; unitOfMeasure = '1 Hour'; retailPrice = 0.2 } }
+      elseif ($Filter -like "*Premium Files*") {
+        [pscustomobject]@{ productName = 'Premium Files'; skuName = 'Premium LRS'; meterName = 'LRS Provisioned'; unitOfMeasure = '1 GiB/Month'; retailPrice = 0.16 }
+        [pscustomobject]@{ productName = 'Premium Files'; skuName = 'Premium LRS'; meterName = 'LRS Provisioned v2'; unitOfMeasure = '1 GiB/Month'; retailPrice = 0.1 }
+      }
+    }
+    $e = Get-AvdCostEstimate -Plan $plan -ActiveHoursPerWeek 40
+    $compute = $e.lines | Where-Object key -eq 'compute'
+    $compute.quantity | Should -Be ([math]::Round(2 * 40 * 52 / 12, 1))
+    $compute.monthly | Should -Be ([math]::Round(0.2 * $compute.quantity, 2))
+    ($e.unpriced | ForEach-Object key) | Should -Contain 'profiles'
+    (($e.unpriced | Where-Object key -eq 'profiles').seen -join ' ') | Should -Match 'v2'
+    ($e.lines + $e.unpriced | ForEach-Object key) | Should -Not -Contain 'natgateway'   # hub-peered: no NAT Gateway
+    ($e.lines | Where-Object key -eq 'privateendpoints') | Should -BeNullOrEmpty       # not priced by the mock
+    ($e.unpriced | ForEach-Object { $_.item }) | Should -Contain 'Private endpoints (2)'  # no AVD Private Link: storage + Key Vault
+  }
+}

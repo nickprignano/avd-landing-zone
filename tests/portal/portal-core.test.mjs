@@ -224,6 +224,9 @@ test('portal commands only use parameters the scripts define', () => {
     P.commands.predeploy(cfg, true), P.commands.predeploy(cfg, false), P.commands.postdeploy(cfg, true), P.commands.postdeploy(cfg, false),
     P.commands.demo(cfg), P.commands.removeDemo(cfg), P.commands.deploy(cfg), P.commands.wellArchitected(cfg)
   ];
+  // The same commands once a sizing is set.
+  const sizedCfg = { ...cfg, sizing: P.toSizing(P.computePool({ users: 120, workload: 'heavy' }, 'prod')) };
+  commands.push(P.commands.predeploy(sizedCfg, true), P.commands.deploy(sizedCfg), P.commands.postdeploy(sizedCfg, true));
   let checked = 0;
   for (const c of commands) {
     const line = last(c);
@@ -235,7 +238,7 @@ test('portal commands only use parameters the scripts define', () => {
       for (const [, f] of line.matchAll(/\s(-{1,2}[a-z-]+)\s/g)) { assert.ok(shFlags.has(f), `deploy.sh has no ${f}`); checked++; }
     }
   }
-  assert.ok(checked >= 15, `checked ${checked} parameters`);
+  assert.ok(checked >= 30, `checked ${checked} parameters`);
 });
 
 test('state: post-deployment ready -> offers the Well-Architected review', () => {
@@ -272,4 +275,67 @@ test('real: first live Well-Architected review (dev, northcentralus) -> sign-in,
   assert.equal(r.actions[0].title, 'Review the Well-Architected findings');
   assert.equal(r.actions[0].why.split('.')[0], 'To review: 1 Reliability, 1 Security, 2 Operational Excellence');
   assert.match(r.actions[0].why, /6 are trade-offs the dev parameter file makes on purpose/);
+});
+
+// ---------------------------------------------------------------- sizing and cost (decision 0010)
+test('sizing: users, concurrency and workload -> hosts, sessions per host, quota and profile share', () => {
+  const r = P.computePool({ users: 50, concurrencyPercent: 80, workload: 'medium' }, 'dev');
+  assert.equal(r.concurrentUsers, 40);
+  assert.equal(r.vmSize, 'Standard_D8as_v5');          // suggested for medium
+  assert.equal(r.sessionsPerHost, 32);                 // 8 vCPU x 4 per vCPU
+  assert.equal(r.hosts, 2);
+  assert.equal(r.vcpus, 16);
+  assert.equal(r.profileQuotaGiB, 600);                // 50 x 10 GiB + 20%, rounded up to 100s
+  assert.deepEqual(r.notes, []);                       // 1 GiB per session is Microsoft's own example
+});
+
+test('sizing: prod adds a spare host by default and never goes below two; small shares are 100 GiB', () => {
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5' }, 'prod').hosts, 2);   // 16 of 24 -> 1 + spare
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', spareHost: false }, 'prod').hosts, 2); // minimum two
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5' }, 'dev').hosts, 1);
+  assert.equal(P.computePool({ users: 20, workload: 'light', vmSize: 'Standard_D4as_v5', spareHost: true }, 'dev').hosts, 2);
+  assert.equal(P.computePool({ users: 5, profileGiBPerUser: 5 }, 'dev').profileQuotaGiB, 100);
+});
+
+test('sizing: flags too little memory per session and falls back from an unknown size', () => {
+  assert.match(P.computePool({ users: 30, workload: 'light', vmSize: 'Standard_D16as_v5' }, 'dev').notes.join(' '), /memory-optimised/);
+  const r = P.computePool({ users: 30, workload: 'heavy', vmSize: 'Standard_X99' }, 'dev');
+  assert.equal(r.vmSize, 'Standard_D8as_v5');
+  assert.match(r.notes[0], /Unknown size/);
+});
+
+test('sizing: every size and workload the portal offers is well formed; one host pool for now', () => {
+  for (const [k, v] of Object.entries(P.VM_SIZES)) { assert.match(k, /^Standard_[A-Za-z0-9_]+$/); assert.ok(v.vcpu > 0 && v.ramGiB > 0, k); }
+  for (const w of Object.values(P.WORKLOADS)) assert.ok(P.VM_SIZES[w.suggestedSize], w.suggestedSize);
+  assert.equal(P.MAX_HOST_POOLS, 1);
+});
+
+test('sizing: commands carry it only once it is set', () => {
+  const plain = { ...P.DEFAULTS };
+  assert.doesNotMatch(P.commands.predeploy(plain, false), /-SessionHostCount/);
+  const cfg = { ...P.DEFAULTS, sizing: P.toSizing(P.computePool({ users: 50 }, 'dev')) };
+  assert.match(last(P.commands.predeploy(cfg, true)), / -SessionHostCount 2 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 50 -Fix$/);
+  assert.match(last(P.commands.deploy(cfg)), / --hosts 2 --vm-size Standard_D8as_v5 --max-sessions 32 --profile-quota 600$/);
+  assert.match(last(P.commands.postdeploy(cfg, false)), / -SessionHostVmSize Standard_D8as_v5 -SessionHostCount 2$/);
+});
+
+test('state: sized preflight short of quota -> quota request for the sized hosts, rerun keeps the sizing, estimate shown', () => {
+  const r = analyze('state-predeploy-sized-quota.txt');
+  assert.equal(r.status, 'notready');
+  assert.equal(r.sizing.hosts, 3);
+  assert.equal(r.estimate.total, 862.4);
+  assert.equal(r.estimate.unpriced[0].key, 'publicip');
+  const quota = r.actions.find((a) => /quota/i.test(a.title));
+  assert.ok(quota, 'no quota action');
+  assert.match(quota.command, /needed 24/);
+  const rerun = r.actions.at(-1);
+  assert.match(last(rerun.command), / -SessionHostCount 3 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 60 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 60$/);
+});
+
+test('state: sized preflight ready -> deploy with the validated sizing', () => {
+  const r = analyze('state-predeploy-sized-ready.txt', { sizing: { hosts: 9, vmSize: 'Standard_D4as_v5', maxSessions: 4, profileQuotaGiB: 100 } });
+  assert.equal(r.step, 'deploy');
+  assert.equal(last(r.actions[0].command), "bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins' --hosts 3 --vm-size Standard_D8as_v5 --max-sessions 32 --profile-quota 600");
+  assert.equal(r.estimate.unpriced.length, 0);
+  assertSelfContained(r);
 });

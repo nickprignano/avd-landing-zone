@@ -50,6 +50,29 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 | Demo deploy | Owner, or Contributor + Role Based Access Control Administrator | Global Reader (Cloud Application Administrator with `-FixNtfs`) |
 | Cleanup | Owner | Intune Administrator + Cloud Device Administrator (to remove device objects) |
 
+## Sizing and cost
+
+The portal's **Size and cost** step sizes the host pool from how many people use it, how many are signed in at the busiest time, and how they work. It uses Microsoft's multi-session guidance: light 6, medium 4, heavy 2 and power 1 user per vCPU. It gives the host count, VM size, sessions per host, the vCPU quota needed and the profile share size. In prod it adds a spare host by default and never goes below two. Once applied, the commands carry the sizing:
+
+```powershell
+./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -PreDeployment -ParameterFile parameters/dev.bicepparam -Location northcentralus -UsersGroup 'AVD Users' -AdminsGroup 'AVD Admins' `
+  -SessionHostCount 3 -SessionHostVmSize Standard_D8as_v5 -MaxSessionLimit 32 -ProfileShareQuotaGiB 600 -ActiveHoursPerWeek 50
+bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins' --hosts 3 --vm-size Standard_D8as_v5 --max-sessions 32 --profile-quota 600
+```
+
+**The preflight validates that sizing, not the file's.** It checks the VM size in the region and zones, and family and regional vCPU quota for that many hosts. When quota is short, the portal builds the quota request. It warns above 6 sessions per vCPU.
+
+**It also prices the plan** from the public [Azure Retail Prices API](https://learn.microsoft.com/rest/api/cost-management/retail-prices/azure-retail-prices) for the region, at pay-as-you-go list prices in USD. The estimate covers:
+- session hosts, at the base compute rate for `-ActiveHoursPerWeek` (multi-session Windows is licensed per user);
+- their P10 OS disks;
+- the provisioned profile share;
+- private endpoints;
+- the NAT Gateway and its public IP.
+
+It also shows the cost if the hosts ran around the clock. Usage-based charges are listed as not included: Log Analytics, data processed, backup, Defender and licences. Each line must match exactly one price meter. A line that matches none, or several, is reported with the meters the API returned instead of being guessed, and is left out of the total. The portal shows the estimate after you paste the output. Reservations, savings plans and agreements lower these prices.
+
+The sizing covers one pooled host pool, which is what the landing zone deploys. The portal keeps it as a list of host pools, so more can be added later ([decision 0010](decisions/0010-sizing-and-cost.md)).
+
 ## Pre-deployment preflight
 
 `-PreDeployment` works before the landing zone exists. To choose the region, use the [deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/): it builds this command with `-Location` set to the region you pick, and reads the output to tell you the next step. It compiles your `.bicepparam` file with the real group and service principal IDs and checks the subscription and tenant against the **effective** values (file values, else template defaults). Once it comes back clean, it prints the `deploy.sh` command to run as a separate step.

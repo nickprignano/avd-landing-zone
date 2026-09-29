@@ -3,10 +3,12 @@
 #
 # Usage:
 #   ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
-#       --users-group "AVD Users" --admins-group "AVD Admins" [--what-if]
+#       --users-group "AVD Users" --admins-group "AVD Admins" [--what-if] \
+#       [--hosts 3 --vm-size Standard_D8as_v5 --max-sessions 16 --profile-quota 600]
 #
 # -l is the region the landing zone is deployed to (it sets AVD_LOCATION, which
-# the parameter files read).
+# the parameter files read). The sizing flags (from the deployment portal's sizing
+# step) override the parameter file's session hosts and profile share the same way.
 #
 # Environment variables (any flag above overrides):
 #   AVD_USERS_GROUP_ID, AVD_ADMINS_GROUP_ID   Entra group object IDs
@@ -20,10 +22,14 @@ LOCATION=""
 USERS_GROUP=""
 ADMINS_GROUP=""
 WHATIF=false
+HOSTS=""
+VM_SIZE=""
+MAX_SESSIONS=""
+PROFILE_QUOTA=""
 AVD_APP_ID="9cdead84-a844-4324-93f2-b2e6bb768d07"   # Azure Virtual Desktop first-party app
 
 usage() {
-  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -34,12 +40,20 @@ while [[ $# -gt 0 ]]; do
     --users-group) USERS_GROUP="$2"; shift 2 ;;
     --admins-group) ADMINS_GROUP="$2"; shift 2 ;;
     --what-if) WHATIF=true; shift ;;
+    --hosts) HOSTS="$2"; shift 2 ;;
+    --vm-size) VM_SIZE="$2"; shift 2 ;;
+    --max-sessions) MAX_SESSIONS="$2"; shift 2 ;;
+    --profile-quota) PROFILE_QUOTA="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
 
 [[ -z "$PARAM_FILE" || -z "$LOCATION" ]] && usage
 [[ ! -f "$PARAM_FILE" ]] && { echo "Parameter file not found: $PARAM_FILE"; exit 1; }
+for n in "$HOSTS" "$MAX_SESSIONS" "$PROFILE_QUOTA"; do
+  [[ -z "$n" || "$n" =~ ^[0-9]+$ ]] || { echo "Sizing flags take whole numbers: '$n'"; exit 1; }
+done
+[[ -z "$VM_SIZE" || "$VM_SIZE" =~ ^Standard_[A-Za-z0-9_]+$ ]] || { echo "Not a VM size: '$VM_SIZE'"; exit 1; }
 
 echo "==> Checking az and Bicep"
 az bicep version >/dev/null 2>&1 || az bicep install
@@ -100,6 +114,12 @@ fi
 
 AVD_LOCATION="$LOCATION"
 export AVD_USERS_GROUP_ID AVD_ADMINS_GROUP_ID AVD_SERVICE_PRINCIPAL_ID AVD_LOCAL_ADMIN_PASSWORD AVD_LOCATION
+# Sizing overrides (empty = the parameter file's values).
+AVD_SESSION_HOST_COUNT="$HOSTS" AVD_SESSION_HOST_VM_SIZE="$VM_SIZE" AVD_MAX_SESSION_LIMIT="$MAX_SESSIONS" AVD_PROFILE_QUOTA_GIB="$PROFILE_QUOTA"
+export AVD_SESSION_HOST_COUNT AVD_SESSION_HOST_VM_SIZE AVD_MAX_SESSION_LIMIT AVD_PROFILE_QUOTA_GIB
+if [[ -n "$HOSTS$VM_SIZE$MAX_SESSIONS$PROFILE_QUOTA" ]]; then
+  echo "    Sizing: ${HOSTS:-file} host(s) x ${VM_SIZE:-file size}, ${MAX_SESSIONS:-file} sessions per host, ${PROFILE_QUOTA:-file} GiB profile share"
+fi
 
 DEPLOY_NAME="avdlz-$(basename "$PARAM_FILE" .bicepparam)-$(date +%Y%m%d-%H%M%S)"
 
@@ -109,8 +129,12 @@ json_str() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }
 portal_state() {
   # $1 = status (started | succeeded | failed | whatif); $2 = extra context JSON members (optional)
   printf '\nDeployment portal: paste this output into %s for the next step.\n' "$PORTAL_URL"
-  printf '<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"%s","context":{"parameterFile":%s,"location":%s,"usersGroup":%s,"adminsGroup":%s,"deploymentName":%s%s}} AVDLZ-STATE>>>\n' \
-    "$1" "$(json_str "$PARAM_FILE")" "$(json_str "$LOCATION")" "$(json_str "$USERS_GROUP")" "$(json_str "$ADMINS_GROUP")" "$(json_str "$DEPLOY_NAME")" "${2:-}"
+  local sizing=""
+  if [[ -n "$HOSTS$VM_SIZE$MAX_SESSIONS$PROFILE_QUOTA" ]]; then
+    sizing=",\"sizing\":{\"hosts\":${HOSTS:-null},\"vmSize\":$( [[ -n "$VM_SIZE" ]] && json_str "$VM_SIZE" || printf null ),\"maxSessions\":${MAX_SESSIONS:-null},\"profileQuotaGiB\":${PROFILE_QUOTA:-null}}"
+  fi
+  printf '<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"%s","context":{"parameterFile":%s,"location":%s,"usersGroup":%s,"adminsGroup":%s,"deploymentName":%s%s%s}} AVDLZ-STATE>>>\n' \
+    "$1" "$(json_str "$PARAM_FILE")" "$(json_str "$LOCATION")" "$(json_str "$USERS_GROUP")" "$(json_str "$ADMINS_GROUP")" "$(json_str "$DEPLOY_NAME")" "$sizing" "${2:-}"
 }
 
 if $WHATIF; then

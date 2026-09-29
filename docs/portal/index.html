@@ -40,7 +40,7 @@
   label { display: inline-flex; gap: 6px; align-items: center; }
   .field { display: flex; flex-direction: column; align-items: stretch; gap: 4px; flex: 1 1 170px; }
   .field span { font-size: .85rem; color: var(--muted); }
-  input[type=text], select, textarea {
+  input[type=text], input[type=number], select, textarea {
     font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; width: 100%;
   }
   textarea { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 160px; resize: vertical; }
@@ -90,6 +90,13 @@
   .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; }
   .check input { margin-top: 4px; }
   #report-body { min-height: 220px; }
+  .pool { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .pool h3 { margin-bottom: 8px; }
+  table.kv td:first-child { color: var(--muted); white-space: normal; }
+  table.kv td { white-space: normal; }
+  td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; }
+  ul.notes { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
+  #estimate-line { margin-top: 4px; }
   progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
 </style>
 </head>
@@ -107,6 +114,7 @@
   <section id="next" aria-live="polite">
     <div class="headline"><h2 id="next-title" style="margin:0">Next step</h2><span id="next-chip" class="chip hidden"></span></div>
     <p id="next-headline" class="status hidden"></p>
+    <p id="estimate-line" class="status hidden"></p>
     <div id="findings" class="hidden"></div>
     <div id="actions"></div>
     <p class="status" style="margin-top:12px">Copy a block, paste it into <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Cloud Shell</a>, then paste the output below. Keep the Cloud Shell tab in front while it runs.
@@ -163,6 +171,25 @@
     </div>
   </details>
 
+  <details class="panel" id="size-panel">
+    <summary>Size and cost: <span id="size-summary"></span></summary>
+    <p class="status">Sizes the session hosts from how many people use them and how they work (Microsoft's multi-session guidance: light 6, medium 4, heavy 2, power 1 user per vCPU). Once you apply a sizing, the commands carry it: the pre-deployment preflight checks quota and availability for it and prices it in your region at Azure list prices, and <code>deploy.sh</code> deploys it.</p>
+    <div id="pools"></div>
+    <div class="row">
+      <button type="button" class="secondary" id="add-pool" disabled title="The landing zone deploys one host pool today">Add a host pool</button>
+      <span class="status">One pooled host pool for now; the sizing is kept per host pool so more can be added later.</span>
+    </div>
+    <div class="table-wrap" style="margin-top:12px"><table class="kv"><tbody id="size-result"></tbody></table></div>
+    <ul class="notes" id="size-notes"></ul>
+    <div class="row" style="margin-top:12px">
+      <button id="size-apply">Use this sizing</button>
+      <button class="secondary" id="size-clear">Use the parameter file's values</button>
+      <span class="status" id="size-status" role="status"></span>
+    </div>
+    <h3 style="margin-top:16px">Estimated monthly cost</h3>
+    <div id="estimate"></div>
+  </details>
+
   <details class="panel" id="settings-panel">
     <summary>Deployment settings</summary>
     <p class="status">Used to build the commands. Values from pasted output fill these in automatically; they are kept only in this browser.</p>
@@ -208,7 +235,7 @@
   $('repo-link').href = repoUrl;
   $('issues-link').href = repoUrl + '/issues';
 
-  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl });
+  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null) });
   var step = load('step', null);
   var ranked = load('ranked', null);
   var lastAnalysis = null;
@@ -216,12 +243,14 @@
   function config() { return cfg; }
   function setConfig(patch) {
     Object.keys(patch || {}).forEach(function (k) { if (FIELDS.indexOf(k) >= 0 && patch[k]) cfg[k] = patch[k]; });
+    // A pasted preflight says which sizing it validated; the next commands keep it.
+    if (patch && patch.sizing && patch.sizing.hosts) { cfg.sizing = patch.sizing; save('sizing', cfg.sizing); }
     var keep = {}; FIELDS.forEach(function (k) { keep[k] = cfg[k]; }); save('config', keep);
     FIELDS.forEach(function (k) { var el = $(k); if (el && el.value !== cfg[k]) el.value = cfg[k] || ''; });
     $('region-summary').textContent = cfg.location + (ranked && ranked.length ? (ranked[0] === cfg.location ? ' (closest measured)' : '') : ' (not measured yet)');
   }
   FIELDS.forEach(function (k) {
-    $(k).addEventListener('change', function () { var p = {}; p[k] = $(k).value.trim(); setConfig(p); lastAnalysis = null; render(); });
+    $(k).addEventListener('change', function () { var p = {}; p[k] = $(k).value.trim(); setConfig(p); lastAnalysis = null; render(); if (typeof renderSizeResult === 'function') renderSizeResult(); });
   });
 
   // ---------------------------------------------------------------- progress tracker
@@ -238,7 +267,7 @@
       b.setAttribute('aria-current', i === cur ? 'step' : 'false');
       b.innerHTML = '<span class="n">' + (i < cur ? '✓' : (i + 1)) + '</span>';
       b.appendChild(document.createTextNode(s.title));
-      b.addEventListener('click', function () { step = s.id; save('step', step); lastAnalysis = null; render(); if (s.id === 'region') $('region-panel').open = true; });
+      b.addEventListener('click', function () { step = s.id; save('step', step); lastAnalysis = null; render(); if (s.id === 'region') $('region-panel').open = true; if (s.id === 'size') $('size-panel').open = true; });
       li.appendChild(b); ol.appendChild(li);
     });
   }
@@ -299,12 +328,15 @@
       chip.textContent = r.status ? (r.status === 'ready' || r.status === 'succeeded' || r.status === 'done' ? 'Done' : r.status === 'started' ? 'Running' : 'Action needed') : 'Action needed';
       chip.className = 'chip ' + (/ready|succeeded|done/.test(r.status || '') ? 'good' : r.status === 'started' ? 'ok' : 'poor');
       head.textContent = r.headline; head.classList.remove('hidden');
+      var eline = $('estimate-line');
+      if (r.estimate) { eline.textContent = 'Estimated cost: ' + money(r.estimate.total, r.estimate.currency) + ' per month at list prices (details under Size and cost).'; eline.classList.remove('hidden'); }
+      else eline.classList.add('hidden');
       renderFindings(r);
       renderActions(r.actions);
     }
     else {
       $('next-title').textContent = 'Next step: ' + P.STEPS[stepIndex(step || 'region')].title;
-      chip.className = 'chip hidden'; head.classList.add('hidden'); $('findings').classList.add('hidden');
+      chip.className = 'chip hidden'; head.classList.add('hidden'); $('findings').classList.add('hidden'); $('estimate-line').classList.add('hidden');
       renderActions(P.actionsForStep(step || 'region', config()));
     }
   }
@@ -314,6 +346,8 @@
     if (!text.trim()) { $('paste-status').textContent = 'Paste some output first.'; return; }
     var r = P.analyze(text, config(), { rankedRegions: ranked, currentStep: step || 'predeploy' });
     setConfig(r.config);
+    if (r.estimate) { estimate = r.estimate; save('estimate', estimate); renderEstimate(); }
+    renderSizeResult();
     if (r.step) { step = r.step; save('step', step); }
     lastAnalysis = r;
     $('paste-status').textContent = r.recognised ? 'Analysed: ' + r.headline : 'Nothing recognisable in the pasted text.';
@@ -325,7 +359,8 @@
   $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); refreshReport(true); });
   $('reset').addEventListener('click', function () {
     try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
-    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl }); step = null; ranked = null; lastAnalysis = null; latency = [];
+    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null }); step = null; ranked = null; lastAnalysis = null; latency = [];
+    pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)]; estimate = null; renderPools(); renderEstimate();
     $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render();
   });
 
@@ -362,6 +397,102 @@
     else $('report-status').textContent = 'Opened GitHub in a new tab. Review it there and select Create.';
     window.open(link.url, '_blank', 'noopener');
   });
+
+  // ---------------------------------------------------------------- sizing and cost (decision 0010)
+  var pools = load('hostPools', null) || [Object.assign({}, P.HOST_POOL_DEFAULTS)];
+  var estimate = load('estimate', null);
+  var POOL_FIELDS = [
+    ['name', 'Name', 'text'], ['users', 'People who will use it', 'number'], ['concurrencyPercent', 'Signed in at the busiest time (%)', 'number'],
+    ['workload', 'How they work', 'workload'], ['vmSize', 'VM size', 'vmsize'], ['spareHost', 'Spare host', 'spare'],
+    ['profileGiBPerUser', 'Profile size per person (GiB)', 'number'], ['activeHoursPerWeek', 'Hours per week hosts run', 'number']
+  ];
+  function money(n, cur) { return (n === null || n === undefined) ? '–' : Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + (cur || ''); }
+  function poolResult(i) { return P.computePool(pools[i], cfg.environment); }
+  function renderPools() {
+    var box = $('pools'); box.textContent = '';
+    pools.forEach(function (pool, i) {
+      var card = el('div', 'pool'); card.appendChild(el('h3', '', 'Host pool ' + (i + 1) + ' (pooled)'));
+      var row = el('div', 'row');
+      POOL_FIELDS.forEach(function (f) {
+        var lab = el('label', 'field'); lab.appendChild(el('span', '', f[1]));
+        var input;
+        if (f[2] === 'workload' || f[2] === 'vmsize' || f[2] === 'spare') {
+          input = document.createElement('select');
+          var opts = f[2] === 'workload' ? Object.keys(P.WORKLOADS).map(function (k) { return [k, P.WORKLOADS[k].label + ' (' + P.WORKLOADS[k].usersPerVcpu + '/vCPU)']; })
+            : f[2] === 'vmsize' ? [['', 'Suggested for the workload']].concat(Object.keys(P.VM_SIZES).map(function (k) { return [k, k.replace('Standard_', '') + ' (' + P.VM_SIZES[k].vcpu + ' vCPU, ' + P.VM_SIZES[k].ramGiB + ' GiB)']; }))
+              : [['', 'Automatic (one in prod)'], ['true', 'Yes'], ['false', 'No']];
+          opts.forEach(function (o) { var op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; input.appendChild(op); });
+          input.value = pool[f[0]] === null || pool[f[0]] === undefined ? '' : String(pool[f[0]]);
+        }
+        else { input = document.createElement('input'); input.type = f[2]; if (f[2] === 'number') input.min = '1'; input.value = pool[f[0]]; input.autocomplete = 'off'; }
+        input.addEventListener('input', function () {
+          var v = input.value;
+          pools[i][f[0]] = f[2] === 'number' ? Number(v) : (f[2] === 'spare' ? (v === '' ? null : v === 'true') : v);
+          save('hostPools', pools); renderSizeResult();
+        });
+        lab.appendChild(input); row.appendChild(lab);
+      });
+      card.appendChild(row); box.appendChild(card);
+    });
+    $('add-pool').disabled = pools.length >= P.MAX_HOST_POOLS;
+    renderSizeResult();
+  }
+  function renderSizeResult() {
+    var r = poolResult(0), tb = $('size-result'); tb.textContent = '';
+    [['Concurrent sessions', r.concurrentUsers + ' of ' + r.users + ' people'],
+      ['Session hosts', r.hosts + ' × ' + r.vmSize.replace('Standard_', '') + ' (' + r.vcpuPerHost + ' vCPU each)'],
+      ['Sessions per host (max session limit)', String(r.sessionsPerHost)],
+      ['Capacity', r.capacity + ' sessions'],
+      ['vCPU quota needed', r.vcpus + ' vCPUs'],
+      ['Profile share', r.profileQuotaGiB + ' GiB provisioned (storage SKU from ' + cfg.parameterFile.replace(/^parameters\//, '') + ')'],
+      ['Hosts run', r.activeHoursPerWeek + ' hours per week (the scaling plan stops them outside use)']
+    ].forEach(function (kv) { var tr = el('tr'); tr.appendChild(el('td', '', kv[0])); tr.appendChild(el('td', '', kv[1])); tb.appendChild(tr); });
+    var ul = $('size-notes'); ul.textContent = ''; r.notes.forEach(function (n) { ul.appendChild(el('li', '', n)); });
+    var s = cfg.sizing, mine = P.toSizing(r);
+    if (s && (s.hosts !== mine.hosts || s.vmSize !== mine.vmSize || s.maxSessions !== mine.maxSessions || s.profileQuotaGiB !== mine.profileQuotaGiB))
+      ul.appendChild(el('li', '', 'The commands use ' + s.hosts + ' × ' + s.vmSize.replace('Standard_', '') + ' with ' + s.maxSessions + ' sessions each (the last sizing applied or checked by a pasted preflight). Select Use this sizing to switch to the one above.'));
+    renderSizeSummary();
+  }
+  function renderSizeSummary() {
+    var s = cfg.sizing;
+    $('size-summary').textContent = s ? s.hosts + ' × ' + s.vmSize.replace('Standard_', '') + ', ' + (s.hosts * s.maxSessions) + ' sessions' + (estimate && estimate.total !== undefined ? ', about ' + money(estimate.total, estimate.currency) + '/month' : '') : 'not set (the parameter file\'s values)';
+  }
+  function renderEstimate() {
+    var box = $('estimate'); box.textContent = '';
+    if (!estimate) {
+      box.appendChild(el('p', 'status', 'The pre-deployment preflight prices the sizing in ' + cfg.location + ' at Azure list prices (the public Retail Prices API, from Cloud Shell). Paste its output and the estimate appears here.'));
+      return;
+    }
+    var t = el('table'), tb = el('tbody');
+    var head = el('tr'); head.appendChild(el('th', '', 'Item')); var th = el('th', 'money', 'Per month'); head.appendChild(th); t.appendChild(head);
+    (estimate.lines || []).forEach(function (l) {
+      var tr = el('tr'), td = el('td', 'region'); td.appendChild(document.createTextNode(l.item));
+      td.appendChild(el('span', 'muted', l.quantity + ' ' + l.unit + ' × ' + l.unitPrice + ' per ' + l.unitOfMeasure + (l.note ? ' · ' + l.note : '')));
+      tr.appendChild(td); tr.appendChild(el('td', 'money', money(l.monthly, estimate.currency))); tb.appendChild(tr);
+    });
+    var tot = el('tr'); tot.appendChild(el('td', '', 'Total (list prices, ' + estimate.location + ')')); var tt = el('td', 'money'); tt.appendChild(el('strong', '', money(estimate.total, estimate.currency))); tot.appendChild(tt); tb.appendChild(tot);
+    t.appendChild(tb); var wrap = el('div', 'table-wrap'); wrap.appendChild(t); box.appendChild(wrap);
+    var notes = el('ul', 'notes');
+    if (estimate.alwaysOnTotal !== null && estimate.alwaysOnTotal !== undefined) notes.appendChild(el('li', '', 'If the hosts ran around the clock: ' + money(estimate.alwaysOnTotal, estimate.currency) + ' per month.'));
+    (estimate.unpriced || []).forEach(function (u) { notes.appendChild(el('li', '', 'Not priced: ' + u.item + ' (no matching meter; not in the total).')); });
+    notes.appendChild(el('li', '', 'Not included (usage-based): ' + (estimate.excluded || []).join('; ') + '.'));
+    notes.appendChild(el('li', '', 'Pay-as-you-go list prices; reservations, savings plans and agreements lower them.'));
+    box.appendChild(notes);
+  }
+  function applySizing(s) {
+    cfg.sizing = s; save('sizing', s);
+    if (!s) { estimate = null; save('estimate', null); }
+    renderSizeResult(); renderEstimate(); lastAnalysis = null; render();
+  }
+  $('size-apply').addEventListener('click', function () {
+    var r = poolResult(0);
+    applySizing(P.toSizing(r));
+    estimate = null; save('estimate', null); renderEstimate(); renderSizeSummary();
+    if (!step || step === 'region' || step === 'size') { step = 'predeploy'; save('step', step); render(); }
+    $('size-status').textContent = 'Applied: the commands now check and price ' + r.hosts + ' × ' + r.vmSize.replace('Standard_', '') + '.';
+    $('next').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('size-clear').addEventListener('click', function () { applySizing(null); $('size-status').textContent = 'The commands use the parameter file\'s sizing.'; });
 
   // ---------------------------------------------------------------- region latency
   // Regions with a regional endpoint that resolves in-region (checked in DNS), grouped for the filters.
@@ -434,7 +565,7 @@
       if (ok.length) {
         $('lat-status').textContent = 'Closest: ' + ok[0].display + ' (' + Math.round(ok[0].median) + ' ms). Selected for the deployment; click another row to change it.';
         setConfig({ location: ok[0].name });
-        if (!step || step === 'region') { step = 'predeploy'; save('step', step); }
+        if (!step || step === 'region') { step = 'size'; save('step', step); $('size-panel').open = true; }
       }
       else $('lat-status').textContent = 'No region answered. A firewall or content blocker may be stopping the requests.';
       lastAnalysis = null;
@@ -475,7 +606,9 @@
 
   // ---------------------------------------------------------------- start
   if (location.hash === '#region' || !step) $('region-panel').open = true;
+  if (location.hash === '#size' || step === 'size') $('size-panel').open = true;
   setConfig({});
+  renderPools(); renderEstimate();
   render();
 })();
 </script>
