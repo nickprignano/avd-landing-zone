@@ -290,9 +290,12 @@ function Invoke-RestMethod { param($Uri,$Method,$Headers,$Body,$ContentType,$Err
       if ($Uri -notmatch 'page=2') {
         return [pscustomobject]@{ Items=@((& $it "Virtual Machines Asv5 Series Windows" $n $n '1 Hour' (0.2 * $v)), (& $it "Virtual Machines Asv5 Series" "$n Spot" "$n Spot" '1 Hour' (0.01 * $v))); NextPageLink="$Uri&page=2" }
       }
-      @((& $it "Virtual Machines Asv5 Series" $n $n '1 Hour' (0.1 * $v)), (& $it "Virtual Machines Asv5 Series" "$n Low Priority" "$n Low Priority" '1 Hour' (0.02 * $v)))
+      # As the real API returns since 2026: a CloudServices product with the same SKU name at the Windows rate.
+      @((& $it "Virtual Machines Asv5 Series" $n $n '1 Hour' (0.1 * $v)), (& $it "Virtual Machines Asv5 Series" "$n Low Priority" "$n Low Priority" '1 Hour' (0.02 * $v)),
+        (& $it "Asv5 Series CloudServices" $n $n '1 Hour' (0.2 * $v)))
     }
-    "skuName eq 'P10 LRS'" { @((& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk' '1/Month' 20), (& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk Mount' '1/Month' 1)) }
+    # The real API also returns a 'Premium Page Blob' meter named 'P10 LRS Disk' (priced differently here to tell them apart).
+    "skuName eq 'P10 LRS'" { @((& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk' '1/Month' 20), (& $it 'Premium SSD Managed Disks' 'P10 LRS' 'P10 LRS Disk Mount' '1/Month' 1), (& $it 'Premium Page Blob' 'P10 LRS' 'P10 LRS Disk' '1/Month' 25)) }
     "productName eq 'Premium Files'" { @((& $it 'Premium Files' 'Premium LRS' 'LRS Provisioned' '1 GiB/Month' 0.2), (& $it 'Premium Files' 'Premium ZRS' 'ZRS Provisioned' '1 GiB/Month' 0.25), (& $it 'Premium Files' 'Premium LRS' 'LRS Snapshots' '1 GiB/Month' 0.1)) }
     "productName eq 'Virtual Network Private Link'" { @((& $it 'Virtual Network Private Link' 'Standard' 'Standard Private Endpoint' '1 Hour' 0.01), (& $it 'Virtual Network Private Link' 'Standard' 'Standard Data Processed - Ingress' '1 GB' 0.01)) }
     "productName eq 'NAT Gateway'" { @((& $it 'NAT Gateway' 'Standard' 'Standard Gateway' '1 Hour' 0.05), (& $it 'NAT Gateway' 'Standard' 'Standard Data Processed' '1 GB' 0.05)) }
