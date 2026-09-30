@@ -61,10 +61,11 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
   It 'ends every run with a portal state line (none under -WhatIf)' {
     $s = Get-PortalState $out
     ($s | ForEach-Object { "$($_.stage):$($_.status):$($_.fix)" }) -join ' ' |
-      Should -Be 'postdeploy:notready:False postdeploy:ready:True postdeploy:ready:False demo:ready:False cleanup:ready:False cleanup:ready:False'
+      Should -Be 'postdeploy:notready:False postdeploy:ready:True postdeploy:ready:False demo:ready:False cleanup:ready:False cleanup:ready:False cleanup:ready:False'
     $s[0].context.namePrefix | Should -Be 'avdlz'
     $s[0].failures.Count | Should -Be $s[0].counts.fail
     $s[5].context.includeLandingZone | Should -BeTrue
+    $s[6].context.environment | Should -Be 'test'   # remove-test-beside-dev
   }
 }
 
