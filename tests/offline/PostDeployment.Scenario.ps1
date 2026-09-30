@@ -15,7 +15,11 @@ $global:Calls.Clear()
 Invoke-ScenarioStep 'remove-lz-whatif' { & ./scripts/ops/Remove-AvdDemo.ps1 @lz -IncludeLandingZone -WhatIf }
 Write-Host "RESULT remove-lz-whatif changes=$(@($global:Calls | Where-Object { $_ -match 'del |unlock|backup|rsv|DELETE|RBAC -|PUT' }).Count)"
 
+$global:Calls.Clear()
 Invoke-ScenarioStep 'remove-lz' { & ./scripts/ops/Remove-AvdDemo.ps1 @lz -IncludeLandingZone -ResetDefender -Force }
+$lawDelete = @($global:Calls | Where-Object { $_ -match '^ARM DELETE .*/workspaces/log-avdlz-dev\?api-version=[0-9-]+&force=true$' }).Count
+$lawBeforeRg = @($global:Calls).IndexOf(@($global:Calls | Where-Object { $_ -match '^ARM DELETE .*/workspaces/log-avdlz-dev' })[0]) -lt @($global:Calls).IndexOf(@($global:Calls | Where-Object { $_ -match '^del rg rg-avdlz-dev-management' })[0])
+Write-Host "RESULT remove-lz-workspace forceDeletes=$lawDelete beforeResourceGroup=$lawBeforeRg"
 Write-Host "RESULT remove-lz remainingRgs=$(@($global:St.rgs | Where-Object { $_ -like 'rg-avdlz-dev-*' }).Count)"
 
 # Two landing zones in one subscription (test beside dev, docs/demo.md): removing test keeps

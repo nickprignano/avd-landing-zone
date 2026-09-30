@@ -163,7 +163,7 @@ It supports `-WhatIf`.
 
 With `-IncludeLandingZone`, you must type the landing zone name to confirm (`-Force` skips this). It then removes:
 1. **Profile backup.** It disables vault immutability and soft delete, which would otherwise block the delete. It stops protection, deletes the recovery points, and unregisters the storage account, which releases the backup delete lock.
-2. **The five landing zone resource groups**, in dependency order.
+2. **The five landing zone resource groups**, in dependency order. First it deletes the Log Analytics workspace permanently. Deleting its resource group would only soft-delete it for 14 days, and the next deployment under the same name would recover it and fail on the AVD Insights data collection rule ([lesson 0023](lessons/0023-log-analytics-soft-delete.md)).
 3. **Subscription-level resources:** `avdlz-*` policy assignments with their role assignments, the budget, the activity-log diagnostic setting, and deployment records.
 4. **The landing zone hosts' device objects.**
 5. **Defender plans**, set back to Free, only with `-ResetDefender`.

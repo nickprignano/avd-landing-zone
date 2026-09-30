@@ -28,6 +28,7 @@ Add a lesson whenever a real run fails for a reason the tests didn't catch. The 
 | 0020 | [The offline harness must not depend on the machine's tools](0020-hermetic-harness.md) | Tests | portal PR | Hermetic scenarios in CI |
 | 0021 | [ARM leaves out empty properties, and `@($null).Count` is 1](0021-arm-omits-empty-properties.md) | Preflight | after #19 | WellArchitected scenario (no-zones region) |
 | 0022 | [A purge-protected vault is recovered, not waited out, and recovery needs its resource group](0022-key-vault-recovery.md) | Preflight | after #23 | PreDeployment scenario (vault-recover) |
+| 0023 | [Deleting a resource group only soft-deletes its Log Analytics workspace](0023-log-analytics-soft-delete.md) | Cleanup | after #29 | PostDeployment scenario (remove-lz-workspace) + portal fixture |
 
 ## Template
 

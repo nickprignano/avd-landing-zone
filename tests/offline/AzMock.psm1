@@ -17,6 +17,7 @@ $saName='stavdlzdevabc123'; $saId="$S/resourceGroups/rg-avdlz-dev-storage/provid
 $hpId="$S/resourceGroups/rg-avdlz-dev-avd/providers/Microsoft.DesktopVirtualization/hostPools/vdpool-avdlz-dev"
 $agId="$S/resourceGroups/rg-avdlz-dev-avd/providers/Microsoft.DesktopVirtualization/applicationGroups/vdag-avdlz-dev-desktop"
 $vnetId="$S/resourceGroups/rg-avdlz-dev-network/providers/Microsoft.Network/virtualNetworks/vnet-avdlz-dev"
+$lawId="$S/resourceGroups/rg-avdlz-dev-management/providers/Microsoft.OperationalInsights/workspaces/log-avdlz-dev"
 
 function Get-AzContext { [pscustomobject]@{ Subscription=[pscustomobject]@{Id=$sub;Name='AVD LZ Dev'}; Tenant=[pscustomobject]@{Id='tenant-1'}; Environment=[pscustomobject]@{StorageEndpointSuffix='core.windows.net'} } }
 function Set-AzContext { param($SubscriptionId,$ErrorAction) Get-AzContext }
@@ -28,7 +29,7 @@ function Get-AzResource {
   $r = switch ($ResourceType) {
     'Microsoft.Network/virtualNetworks' { [pscustomobject]@{Name='vnet-avdlz-dev';ResourceId=$vnetId;Location='eastus2'} }
     'Microsoft.KeyVault/vaults' { [pscustomobject]@{Name='kvavdlzdevabc';ResourceId="$S/rg/kv";ResourceGroupName=$ResourceGroupName} }
-    'Microsoft.OperationalInsights/workspaces' { [pscustomobject]@{Name='log-avdlz-dev';ResourceId="$S/rg/law"} }
+    'Microsoft.OperationalInsights/workspaces' { [pscustomobject]@{Name='log-avdlz-dev';ResourceId=$lawId} }
     'Microsoft.Insights/dataCollectionRules' { [pscustomobject]@{Name='microsoft-avdi-avdlz-dev';ResourceId="$S/rg/dcr"} }
     'Microsoft.DesktopVirtualization/hostPools' { [pscustomobject]@{Name='vdpool-avdlz-dev';ResourceId=$hpId} }
     'Microsoft.DesktopVirtualization/applicationGroups' { [pscustomobject]@{Name='vdag';ResourceId=$agId} }
@@ -139,8 +140,8 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   if ($Path -match '/rg/kv\?api-version') { return & $ok @{ properties=@{ enablePurgeProtection=$true; enableRbacAuthorization=$true; publicNetworkAccess='Disabled' } } }
   if ($Path -match 'Microsoft.Consumption/budgets\?') { return & $ok @{ value=@(if ($g) { @{ name='budget-avdlz-prod' } }) } }
   if ($Path -match 'scalingPlans\?') { return & $ok @{ value=@(@{ name='vdscaling-avdlz-dev'; properties=@{ hostPoolReferences=@(@{ hostPoolArmPath=$hpId; scalingPlanEnabled=$true }) } }) } }
-  if ($Path -match 'hostPools/vdpool-avdlz-dev/providers/Microsoft.Insights/diagnosticSettings\?') { return & $ok @{ value=@(@{ name='diag-vdpool'; properties=@{ workspaceId="$S/rg/law" } }) } }
-  if ($Path -match '/rg/law\?api-version') { return & $ok @{ properties=@{ retentionInDays=$(if ($g) { 90 } else { 30 }) } } }
+  if ($Path -match 'hostPools/vdpool-avdlz-dev/providers/Microsoft.Insights/diagnosticSettings\?') { return & $ok @{ value=@(@{ name='diag-vdpool'; properties=@{ workspaceId=$lawId } }) } }
+  if ($Path -match 'workspaces/log-avdlz-dev\?api-version') { return & $ok @{ properties=@{ retentionInDays=$(if ($g) { 90 } else { 30 }) } } }
   if ($Path -match 'policyStates/latest/summarize') {
     $nc = if (-not $g -and $Path -match 'rg-avdlz-dev-hosts') { 1 } else { 0 }
     return & $ok @{ value=@(@{ results=@{ nonCompliantResources=$nc }; policyAssignments=@(@{ policyAssignmentId="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-guest-attestation"; results=@{ nonCompliantResources=$nc } }) }) }

@@ -54,6 +54,10 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     $out | Should -Match 'RESULT remove-test-beside-dev devRgs=5 testRgs=0 policyDeletes=0 activityLogDeleted=False records=avdlz-dev-20260929-101500,avdlz-governance-avdlz-dev-northcentralus'
     $out | Should -Match 'Kept: landing zone avdlz-dev still uses it'
   }
+  It 'deletes the Log Analytics workspace permanently before its resource group (lesson 0023)' {
+    $out | Should -Match 'RESULT remove-lz-workspace forceDeletes=1 beforeResourceGroup=True'
+    $out | Should -Match '\[FIXED\] Log Analytics workspace log-avdlz-dev'
+  }
   It 'removes every landing zone resource group' {
     Get-StepExit $out 'remove-lz' | Should -Be 0
     $out | Should -Match 'RESULT remove-lz remainingRgs=0'

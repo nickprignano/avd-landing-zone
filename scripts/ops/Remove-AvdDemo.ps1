@@ -25,6 +25,8 @@
     - Entra ID / Intune device objects of the landing zone hosts
     - -ResetDefender also sets the Defender plans the landing zone enabled back to Free
 
+  The Log Analytics workspace is deleted permanently first (a soft-deleted one is
+  recovered by the next deployment and breaks it; lesson 0023).
   Key Vault is left soft-deleted with purge protection (90 days). To redeploy with
   the same name prefix, run the pre-deployment preflight with -Fix: it recovers
   the vault. See docs/gotchas.md.
@@ -158,6 +160,17 @@ if ($lz.StorageAccount) {
       Remove-AzResourceLock -LockId $lock.LockId -Force | Out-Null
       Add-AvdCheckResult 'Backup' "Removed lock $($lock.Name) from the storage account" 'Fixed'
     }
+  }
+}
+
+# Deleting a resource group only soft-deletes its Log Analytics workspace (14 days). A redeploy
+# under the same name recovers it, and the AVD Insights data collection rule can then fail
+# before the recovered tables are back (InvalidOutputTable; lesson 0023). Delete it permanently.
+if ($lz.LogAnalyticsId) {
+  $lawName = ($lz.LogAnalyticsId -split '/')[-1]
+  if ($PSCmdlet.ShouldProcess($lawName, 'Delete the Log Analytics workspace permanently (skip the 14-day soft delete)')) {
+    Invoke-AvdArm -Method DELETE -Path "$($lz.LogAnalyticsId)?api-version=2023-09-01&force=true" | Out-Null
+    Add-AvdCheckResult 'Monitoring' "Log Analytics workspace $lawName" 'Fixed' -Detail 'Deleted permanently, so a redeploy creates a new one.'
   }
 }
 
