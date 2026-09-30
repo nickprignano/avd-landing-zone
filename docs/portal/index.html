@@ -114,6 +114,9 @@
   td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; }
   ul.notes { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
   #estimate-line { margin-top: 4px; }
+  @keyframes flash { from { background: var(--row-sel); } to { background: transparent; } }
+  #next.flash { animation: flash 1.6s ease-out; border-radius: 8px; }
+  @media (prefers-reduced-motion: reduce) { #next.flash { animation: none; } }
   label.switch { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
   label.switch > input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: 0 0 auto; width: 38px; height: 22px; border-radius: 11px; background: var(--border); position: relative; cursor: pointer; margin-top: 1px; transition: background .15s; }
   label.switch > input[type=checkbox]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--panel); transition: left .15s; }
@@ -500,7 +503,9 @@
     lastAnalysis = r;
     $('paste-status').textContent = r.recognized ? 'Analyzed: ' + r.headline : 'Nothing recognizable in the pasted text.';
     render(); refreshReport(true);
-    $('next').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Show the result: it replaces the box above the paste box, which may be out of view.
+    $('next').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('next').classList.remove('flash'); void $('next').offsetWidth; $('next').classList.add('flash');
   }
   $('analyze').addEventListener('click', analyzePaste);
   $('paste').addEventListener('paste', function () { setTimeout(analyzePaste, 0); });

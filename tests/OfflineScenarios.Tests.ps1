@@ -54,6 +54,10 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     $out | Should -Match 'RESULT remove-test-beside-dev devRgs=5 testRgs=0 policyDeletes=0 activityLogDeleted=False records=avdlz-dev-20260929-101500,avdlz-governance-avdlz-dev-northcentralus'
     $out | Should -Match 'Kept: landing zone avdlz-dev still uses it'
   }
+  It 'deletes the Log Analytics workspace permanently before its resource group (lesson 0023)' {
+    $out | Should -Match 'RESULT remove-lz-workspace forceDeletes=1 beforeResourceGroup=True'
+    $out | Should -Match '\[FIXED\] Log Analytics workspace log-avdlz-dev'
+  }
   It 'removes every landing zone resource group' {
     Get-StepExit $out 'remove-lz' | Should -Be 0
     $out | Should -Match 'RESULT remove-lz remainingRgs=0'
@@ -171,6 +175,22 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
   It 'still finishes (and is ready) when the price API is down' {
     Get-StepExit $out 'prices-down' | Should -Be 0
     ((Get-PortalState $out)[7].warnings | Where-Object id -eq 'cost-unavailable') | Should -Not -BeNullOrEmpty
+  }
+}
+
+Describe 'Post-deployment quota on a deployed landing zone (real run, 2026-09-30)' {
+  BeforeAll { $script:out = Invoke-OfflineScenario 'PostDeployQuota' }
+
+  It 'does not count the deployed host twice: 4 of 4 Easv5 vCPUs used by the host itself passes' {
+    Get-StepExit $out 'deployed-host' | Should -Be 0
+    $out | Should -Match '\[PASS \] standardEASv5Family vCPU quota\s+0 free, 4 needed \(4 already used by this landing zone''s hosts, so 0 more\)'
+  }
+  It 'still fails a scale-out beyond the quota, and asks only for the difference' {
+    Get-StepExit $out 'scale-out' | Should -Be 1
+    $q = (Get-PortalState $out)[1].failures | Where-Object id -eq 'quota'
+    $q.data.needed | Should -Be 4
+    $q.data.deployed | Should -Be 4
+    $q.detail | Should -Be '0 free, 8 needed (4 already used by this landing zone''s hosts, so 4 more)'
   }
 }
 

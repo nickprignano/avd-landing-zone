@@ -1,0 +1,23 @@
+PS /home/<user-1>/avd-landing-zone> if (-not (Test-Path ~/avd-landing-zone)) { git clone https://github.com/nickprignano/avd-landing-zone.git ~/avd-landing-zone }
+PS /home/<user-1>/avd-landing-zone> Set-Location ~/avd-landing-zone; git checkout -q master; git pull -q --ff-only
+PS /home/<user-1>/avd-landing-zone> bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus --users-group 'AVD Users' --admins-group 'AVD Admins' --hosts 1 --vm-size Standard_E4as_v5 --max-sessions 16 --profile-quota 100
+==> Checking az and Bicep
+Installing Bicep CLI v0.47.16...
+The configuration value of bicep.use_binary_from_path has been set to 'false'.
+Successfully installed Bicep CLI to "/home/<user-1>/.azure/bin/bicep".
+    Subscription: <subscription-1>
+==> Registering resource providers
+==> Ensuring the EncryptionAtHost feature is registered
+==> Looking up the Azure Virtual Desktop service principal
+    Generated a random break-glass password for new session hosts (stored in Key Vault as sessionhost-localadmin-password).
+    Sizing: 1 host(s) x Standard_E4as_v5, 16 sessions per host, 100 GiB profile share
+==> Deploying (avdlz-dev-20260930-142254). A first deployment takes 30-45 minutes.
+    If Cloud Shell disconnects, the deployment keeps running in Azure.
+
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"started","context":{"parameterFile":"parameters/dev.bicepparam","location":"northcentralus","usersGroup":"AVD Users","adminsGroup":"AVD Admins","deploymentName":"avdlz-dev-20260930-142254","sizing":{"hosts":1,"vmSize":"Standard_E4as_v5","maxSessions":16,"profileQuotaGiB":100}}} AVDLZ-STATE>>>
+{"status":"Failed","error":{"code":"DeploymentFailed","target":"/subscriptions/<id-1>/providers/Microsoft.Resources/deployments/avdlz-dev-20260930-142254","message":"At least one resource deployment operation failed. Please list deployment operations for details. Please see https://aka.ms/arm-deployment-operations for usage details.","details":[{"code":"ResourceDeploymentFailure","target":"/subscriptions/<id-1>/resourceGroups/rg-avdlz-dev-management/providers/Microsoft.Resources/deployments/avdlz-monitoring","message":"The resource write operation failed to complete successfully, because it reached terminal provisioning state 'Failed'.","details":[{"code":"DeploymentFailed","target":"/subscriptions/<id-1>/resourceGroups/rg-avdlz-dev-management/providers/Microsoft.Resources/deployments/avdlz-monitoring","message":"At least one resource deployment operation failed. Please list deployment operations for details. Please see https://aka.ms/arm-deployment-operations for usage details.","details":[{"code":"ResourceDeploymentFailure","target":"/subscriptions/<id-1>/resourceGroups/rg-avdlz-dev-management/providers/Microsoft.Resources/deployments/dcr-avd-insights","message":"The resource write operation failed to complete successfully, because it reached terminal provisioning state 'Failed'.","details":[{"code":"DeploymentFailed","target":"/subscriptions/<id-1>/resourceGroups/rg-avdlz-dev-management/providers/Microsoft.Resources/deployments/dcr-avd-insights","message":"At least one resource deployment operation failed. Please list deployment operations for details. Please see https://aka.ms/arm-deployment-operations for usage details.","details":[{"code":"InvalidPayload","message":"Data collection rule is invalid","details":[{"code":"InvalidOutputTable","target":"properties.dataFlows[0]","message":"Table for output stream 'Microsoft-Perf' is not available for destination 'law'. Please ensure that the table exists in Log Analytics Workspace before creating or updating the rule."},{"code":"InvalidOutputTable","target":"properties.dataFlows[0]","message":"Table for output stream 'Microsoft-Event' is not available for destination 'law'. Please ensure that the table exists in Log Analytics Workspace before creating or updating the rule."}]}]}]}]}]}]}}
+
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"failed","context":{"parameterFile":"parameters/dev.bicepparam","location":"northcentralus","usersGroup":"AVD Users","adminsGroup":"AVD Admins","deploymentName":"avdlz-dev-20260930-142254","sizing":{"hosts":1,"vmSize":"Standard_E4as_v5","maxSessions":16,"profileQuotaGiB":100}}} AVDLZ-STATE>>>
+PS /home/<user-1>/avd-landing-zone>

@@ -294,6 +294,8 @@
     { code: 'AuthorizationFailed', what: 'Your account lacks permission for part of the deployment.', fix: 'Deploy as Owner of the subscription (or Contributor + Role Based Access Control Administrator).', action: 'predeploy' },
     { code: 'VaultAlreadyExists', what: 'The Key Vault name is taken (often by a soft-deleted vault from an earlier deployment).', fix: 'Run the pre-deployment preflight with -Fix: it recovers a soft-deleted vault into its resource group so the name prefix can stay. Or change namePrefix in the parameter file.', action: 'predeploy-fix' },
     { code: 'InvalidTemplateDeployment', what: 'Azure rejected the template or parameters before deploying.', fix: 'Run the pre-deployment preflight; it compiles the parameter file and checks the region.', action: 'predeploy' },
+    { code: 'InvalidOutputTable', what: 'The AVD Insights data collection rule was created before the Log Analytics workspace had its Perf and Event tables. This happens when the workspace was only just created, or recovered from a soft delete left by an earlier cleanup.',
+      fix: 'Deploy again: the deployment is idempotent and the workspace tables should now be ready. If it fails the same way, paste both outputs into Report a problem.', action: 'redeploy' },
     { code: 'ResourceGroupBeingDeleted', what: 'A landing zone resource group is still being deleted.', fix: 'Wait until the deletion finishes, then deploy again.', action: 'redeploy' },
     { code: 'RoleAssignmentExists', what: 'A role assignment already exists (usually harmless on a redeploy).', fix: 'Deploy again; the template is idempotent.', action: 'redeploy' }
   ];

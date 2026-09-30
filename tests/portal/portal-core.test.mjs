@@ -497,3 +497,13 @@ test('page and engine: parameters/test.bicepparam is offered, and powers like de
   assert.equal(P.effectivePower({ parameterFile: 'parameters/test.bicepparam' }).autoShutdownTime, '20:00');
   assert.match(P.commands.postdeploy({ ...P.DEFAULTS, environment: 'test' }, true), /-Environment test -Fix/);
 });
+
+test('real: deployment failed on the data collection rule (workspace tables not ready) -> known cause, deploy again with the same sizing', () => {
+  const r = analyze('real-deploy-dcr-tables.txt');
+  assert.equal(r.status, 'failed');
+  assert.equal(r.step, 'deploy');
+  assert.equal(r.actions.length, 1);
+  assert.match(r.actions[0].title, /^InvalidOutputTable: /);
+  assert.match(last(r.actions[0].command), /deploy\.sh -p parameters\/dev\.bicepparam -l northcentralus .* --hosts 1 --vm-size Standard_E4as_v5 --max-sessions 16 --profile-quota 100$/);
+  assertSelfContained(r);
+});
