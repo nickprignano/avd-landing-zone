@@ -125,6 +125,8 @@
   label.switch > input[type=checkbox]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   input[type=time] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; margin-left: 6px; }
   input[type=time]:disabled { opacity: .5; }
+  .disclaimer { font-size: .85em; color: var(--muted); border-left: 3px solid var(--ok); padding-left: 10px; }
+  footer.disclaimer { margin-top: 24px; }
   progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
 </style>
 </head>
@@ -139,6 +141,7 @@
     Run each command in <a href="https://shell.azure.com/powershell" target="_blank" rel="noopener">Azure Cloud Shell (PowerShell)</a>,
     paste the output back here, and the portal tells you what to run next. Everything happens in your browser: pasted output is never sent anywhere.
   </p>
+  <p class="disclaimer" id="disclaimer"><strong>Personal project, not for production.</strong> Provided as is, without warranty of any kind (<a href="https://github.com/nickprignano/avd-landing-zone/blob/master/LICENSE">MIT License</a>). Not affiliated with, endorsed by or supported by the author's employer, and not an official Microsoft product. Use a lab subscription.</p>
 
   <section id="settings-panel" class="hidden" aria-labelledby="settings-title">
     <div class="headline"><h2 id="settings-title" style="margin:0">Deployment settings</h2><button type="button" class="linkbtn" id="settings-close" style="margin-left:auto">Close</button></div>
@@ -283,6 +286,7 @@
       <span class="status" id="report-status" role="status"></span>
     </div>
   </details>
+  <footer class="disclaimer">A personal project, provided as is, without warranty. Not affiliated with the author's employer or with Microsoft. Not for production use.</footer>
 </main>
 
 <script src="portal-core.js"></script>

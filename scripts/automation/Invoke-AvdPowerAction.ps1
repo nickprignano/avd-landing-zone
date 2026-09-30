@@ -1,3 +1,4 @@
+# Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
 <#
 .SYNOPSIS
   Stops, locks or resumes the landing zone's session hosts (auto shutdown, decision 0011).

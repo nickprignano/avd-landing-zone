@@ -154,7 +154,9 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
   }
   It 'prices each line from one meter, at the base compute rate, across pages' {
     $e = $sized.context.estimate
-    ($e.lines | Where-Object key -eq 'compute').unitPrice | Should -Be 0.8      # Linux/base rate, not Windows, Spot or Low Priority (page 2)
+    ($e.lines | Where-Object key -eq 'compute').unitPrice | Should -Be 0.8      # Linux/base rate, not Windows, CloudServices, Spot or Low Priority (page 2)
+    ($e.lines | Where-Object key -eq 'compute').meter | Should -Match '^Virtual Machines '
+    ($e.lines | Where-Object key -eq 'osdisk').meter | Should -Be 'Premium SSD Managed Disks / P10 LRS Disk'   # not 'Premium Page Blob'
     ($e.lines | Where-Object key -eq 'compute').quantity | Should -Be 780        # 3 hosts x 60 h/week x 52 / 12
     ($e.lines | Where-Object key -eq 'osdisk').unitPrice | Should -Be 20         # 'P10 LRS Disk', not 'P10 LRS Disk Mount'
     ($e.lines | Where-Object key -eq 'profiles').monthly | Should -Be 120
@@ -164,7 +166,7 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
   It 'reports a line it cannot price, with the meters it saw, instead of guessing' {
     $u = @($sized.context.estimate.unpriced)
     $u.key | Should -Be 'publicip'
-    $u.seen | Should -Match 'Standard IPv4 Public Address'
+    $u.seen | Should -Match 'IP Addresses: Standard / Standard IPv4 Public Address'   # the product is named too
     ($sized.warnings | Where-Object id -eq 'cost-unpriced') | Should -Not -BeNullOrEmpty
   }
   It 'prints the deploy command with the validated sizing once it passes' {

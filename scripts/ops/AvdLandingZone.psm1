@@ -1,4 +1,5 @@
 #requires -Version 7.2
+# Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
 <#
   Shared functions for the landing-zone operations scripts:
     Test-AvdLandingZoneReadiness.ps1  preflight (check / -Fix)
@@ -1629,10 +1630,12 @@ function Get-AvdCostEstimate {
       note = "$ActiveHoursPerWeek h/week each ($power)"
       filter = "serviceName eq 'Virtual Machines' and armRegionName eq '$loc' and armSkuName eq '$size' and priceType eq 'Consumption'"
       # Windows client multi-session is licensed per user (Microsoft 365 / Windows E3+), so hosts pay the base compute rate.
-      pick = { $_.productName -notmatch 'Windows' -and $_.skuName -notmatch 'Spot|Low Priority' -and $_.unitOfMeasure -eq '1 Hour' } }
+      # Only 'Virtual Machines ...' products: '<series> CloudServices' shares the SKU name at the Windows rate (lesson 0025).
+      pick = { $_.productName -match '^Virtual Machines ' -and $_.productName -notmatch 'Windows' -and $_.skuName -notmatch 'Spot|Low Priority' -and $_.unitOfMeasure -eq '1 Hour' } }
     @{ key = 'osdisk'; item = "OS disks ($hosts x Premium SSD P10)"; quantity = $hosts; unit = 'disks'
       filter = "serviceName eq 'Storage' and armRegionName eq '$loc' and skuName eq 'P10 LRS' and priceType eq 'Consumption'"
-      pick = { $_.meterName -eq 'P10 LRS Disk' -and $_.unitOfMeasure -match 'Month' } }
+      # 'Premium Page Blob' has a 'P10 LRS Disk' meter too (lesson 0025).
+      pick = { $_.productName -eq 'Premium SSD Managed Disks' -and $_.meterName -eq 'P10 LRS Disk' -and $_.unitOfMeasure -match 'Month' } }
     @{ key = 'profiles'; item = "Profile share ($($Plan.profileStorageSku), $quota GiB provisioned)"; quantity = $quota; unit = 'GiB'
       filter = "serviceName eq 'Storage' and armRegionName eq '$loc' and productName eq 'Premium Files' and priceType eq 'Consumption'"
       pick = { $_.skuName -eq $fileSku -and $_.meterName -match 'Provisioned' -and $_.unitOfMeasure -match 'GB/Month|GiB/Month' } }
@@ -1658,7 +1661,8 @@ function Get-AvdCostEstimate {
     $hit = if ($distinct.Count -eq 1) { $matched[0] } else { $null }
     if (-not $hit) {
       if ($distinct.Count -gt 1) { $items = $matched }
-      $seen = @($items | ForEach-Object { "$($_.skuName) / $($_.meterName) ($($_.unitOfMeasure))" } | Select-Object -Unique -First 6)
+      # Name the product too: lookalike meters differ only by product (lesson 0025).
+      $seen = @($items | ForEach-Object { "$($_.productName): $($_.skuName) / $($_.meterName) ($($_.unitOfMeasure))" } | Select-Object -Unique -First 6)
       $unpriced += [ordered]@{ key = $s.key; item = $s.item; filter = $s.filter; seen = $seen }
       continue
     }

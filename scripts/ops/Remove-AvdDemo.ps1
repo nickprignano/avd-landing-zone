@@ -1,4 +1,5 @@
 #requires -Version 7.2
+# Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
 <#
 .SYNOPSIS
   Removes the demo host pool deployed by Deploy-AvdDemo.ps1, and optionally the
