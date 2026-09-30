@@ -204,7 +204,7 @@ $global:St.quotaLimit = $null   # set to raise both limits (a subscription after
 # The deployed dev host is a D4as_v5 (as in the first real deployment); the Easv5 family is unused.
 function Get-AzVMUsage { param($Location) $l = $global:St.quotaLimit; @(
     [pscustomobject]@{Name=[pscustomobject]@{Value='standardDASv5Family'};Limit=$(if ($l) { $l } else { 10 });CurrentValue=4},
-    [pscustomobject]@{Name=[pscustomobject]@{Value='standardEASv5Family'};Limit=$(if ($l) { $l } else { 10 });CurrentValue=0},
+    [pscustomobject]@{Name=[pscustomobject]@{Value='standardEASv5Family'};Limit=$(if ($global:St.eLimit) { $global:St.eLimit } elseif ($l) { $l } else { 10 });CurrentValue=$(if ($global:St.eUsed) { $global:St.eUsed } else { 0 })},
     [pscustomobject]@{Name=[pscustomobject]@{Value='cores'};Limit=$(if ($l) { $l } else { 20 });CurrentValue=4}) }
 function Get-AzVM { param($ResourceGroupName,$Name,[switch]$Status,$ErrorAction)
   $n = if ($ResourceGroupName -like '*demo') {'avdlzddemo-001'} else {'avdlzdsh-001'}

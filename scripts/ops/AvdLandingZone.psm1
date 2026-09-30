@@ -563,11 +563,24 @@ function Get-AvdHostVmSize {
   return $null
 }
 
+function Get-AvdDeployedHostSize {
+  <# The size of each session host the landing zone already runs (one item per VM). #>
+  param([Parameter(Mandatory)] $Lz)
+  if (-not $Lz.RgExists.Hosts) { return }
+  @(Get-AzVM -ResourceGroupName $Lz.ResourceGroups.Hosts -ErrorAction SilentlyContinue) |
+    Where-Object { $_ -and $_.HardwareProfile } | ForEach-Object { [string]$_.HardwareProfile.VmSize }
+}
+
 function Test-AvdVmCapacity {
-  param([Parameter(Mandatory)][string] $Location, [Parameter(Mandatory)][string] $VmSize, [int] $Count = 1, [int[]] $Zones = @())
+  param(
+    [Parameter(Mandatory)][string] $Location, [Parameter(Mandatory)][string] $VmSize, [int] $Count = 1, [int[]] $Zones = @(),
+    # Sizes of the landing zone's own hosts. Their vCPUs already count as used, and a redeploy keeps
+    # them, so only the difference is needed (a deployed host would otherwise be counted twice).
+    [string[]] $DeployedSizes = @()
+  )
   $area = 'Subscription'
-  $sku = Get-AzComputeResourceSku -Location $Location -ErrorAction SilentlyContinue |
-    Where-Object { $_.ResourceType -eq 'virtualMachines' -and $_.Name -eq $VmSize } | Select-Object -First 1
+  $skus = @(Get-AzComputeResourceSku -Location $Location -ErrorAction SilentlyContinue | Where-Object { $_.ResourceType -eq 'virtualMachines' })
+  $sku = $skus | Where-Object { $_.Name -eq $VmSize } | Select-Object -First 1
   if (-not $sku) { Add-AvdCheckResult $area "VM size $VmSize offered in $Location" 'Fail' -Remediation 'Choose a size available in the region.'; return }
   $blocked = @($sku.Restrictions | Where-Object { $_.ReasonCode -eq 'NotAvailableForSubscription' })
   if ($blocked | Where-Object Type -eq 'Location') {
@@ -594,10 +607,17 @@ function Test-AvdVmCapacity {
     $u = $usage | Where-Object { $_.Name.Value -eq $name } | Select-Object -First 1
     if (-not $u) { continue }
     $free = $u.Limit - $u.CurrentValue
+    $mine = 0
+    foreach ($s in $DeployedSizes) {
+      $d = $skus | Where-Object { $_.Name -eq $s } | Select-Object -First 1
+      if ($d -and ($name -eq 'cores' -or $d.Family -eq $name)) { $mine += [int](($d.Capabilities | Where-Object Name -eq 'vCPUs').Value) }
+    }
+    $extra = [math]::Max(0, $need - $mine)
     $label = if ($name -eq 'cores') { 'Regional vCPU quota' } else { "$name vCPU quota" }
-    $quota = @{ location = $Location; quotaName = $name; limit = [int]$u.Limit; used = [int]$u.CurrentValue; needed = $need }
-    if ($free -ge $need) { Add-AvdCheckResult $area $label 'Pass' -Detail "$free free, $need needed" -Id 'quota' -Data $quota }
-    else { Add-AvdCheckResult $area $label 'Fail' -Detail "$free free, $need needed" -Remediation 'Request a quota increase (Portal > Quotas) or reduce host count/size.' -Id 'quota' -Data $quota }
+    $detail = "$free free, $need needed" + $(if ($mine) { " ($mine already used by this landing zone's hosts, so $extra more)" } else { '' })
+    $quota = @{ location = $Location; quotaName = $name; limit = [int]$u.Limit; used = [int]$u.CurrentValue; needed = $extra; deployed = $mine }
+    if ($free -ge $extra) { Add-AvdCheckResult $area $label 'Pass' -Detail $detail -Id 'quota' -Data $quota }
+    else { Add-AvdCheckResult $area $label 'Fail' -Detail $detail -Remediation 'Request a quota increase (Portal > Quotas) or reduce host count/size.' -Id 'quota' -Data $quota }
   }
   return [pscustomobject]@{ Vcpu = $vcpu; MemoryGiB = $memoryGiB }
 }
@@ -1355,7 +1375,7 @@ function Invoke-AvdReadinessCheck {
   Test-AvdCallerPermission -SubscriptionId $Lz.SubscriptionId
   Test-AvdResourceProvider -Fix:$Fix
   if (-not $VmSize) { $VmSize = Get-AvdHostVmSize -Lz $Lz; if (-not $VmSize) { $VmSize = $script:DefaultVmSize } }
-  if ($Lz.Location) { $null = Test-AvdVmCapacity -Location $Lz.Location -VmSize $VmSize -Count $VmCount }
+  if ($Lz.Location) { $null = Test-AvdVmCapacity -Location $Lz.Location -VmSize $VmSize -Count $VmCount -DeployedSizes @(Get-AvdDeployedHostSize -Lz $Lz) }
 
   Write-AvdSection 'Landing zone'
   $present = @($Lz.RgExists.Keys | Where-Object { $_ -ne 'Demo' -and $Lz.RgExists[$_] })
@@ -1841,7 +1861,7 @@ function Test-AvdPreDeployment {
   Test-AvdHostPoolRegion -Location $plan.location -SubscriptionId $lz.SubscriptionId
   $capacity = $null
   if ($plan.sessionHostCount -gt 0) {
-    $capacity = Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones | Select-Object -Last 1
+    $capacity = Test-AvdVmCapacity -Location $plan.location -VmSize $plan.sessionHostVmSize -Count $plan.sessionHostCount -Zones $zones -DeployedSizes @(Get-AvdDeployedHostSize -Lz $lz) | Select-Object -Last 1
   }
   if (-not $plan.encryptionAtHost) { Add-AvdCheckResult 'Subscription' 'EncryptionAtHost not required (encryptionAtHost = false)' 'Pass' }
 

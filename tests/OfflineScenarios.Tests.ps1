@@ -178,6 +178,22 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
   }
 }
 
+Describe 'Post-deployment quota on a deployed landing zone (real run, 2026-09-30)' {
+  BeforeAll { $script:out = Invoke-OfflineScenario 'PostDeployQuota' }
+
+  It 'does not count the deployed host twice: 4 of 4 Easv5 vCPUs used by the host itself passes' {
+    Get-StepExit $out 'deployed-host' | Should -Be 0
+    $out | Should -Match '\[PASS \] standardEASv5Family vCPU quota\s+0 free, 4 needed \(4 already used by this landing zone''s hosts, so 0 more\)'
+  }
+  It 'still fails a scale-out beyond the quota, and asks only for the difference' {
+    Get-StepExit $out 'scale-out' | Should -Be 1
+    $q = (Get-PortalState $out)[1].failures | Where-Object id -eq 'quota'
+    $q.data.needed | Should -Be 4
+    $q.data.deployed | Should -Be 4
+    $q.detail | Should -Be '0 free, 8 needed (4 already used by this landing zone''s hosts, so 4 more)'
+  }
+}
+
 Describe 'No landing zone in the subscription' {
   BeforeAll { $script:out = Invoke-OfflineScenario 'NoLandingZone' }
 
