@@ -1,5 +1,6 @@
 // =====================================================================
 // Demo host pool — deployed INTO an existing landing zone.
+// Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
 //
 // Creates rg-<prefix>-<env>-demo holding a pooled host pool, desktop app
 // group, workspace and session host(s), wired to the landing zone's spoke,

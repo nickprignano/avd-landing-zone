@@ -1,5 +1,6 @@
 /*
  * Deployment portal issue reports: redaction and the prefilled GitHub issue.
+ * Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
  *
  * Runs in the browser (window.PortalReport) and in Node (module.exports) so the redaction is
  * tested against real Cloud Shell output (tests/portal/report.test.mjs). Nothing here touches

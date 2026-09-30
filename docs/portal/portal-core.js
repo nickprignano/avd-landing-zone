@@ -1,5 +1,6 @@
 /*
  * Deployment portal engine: reads pasted Cloud Shell output and decides the next step.
+ * Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
  *
  * Runs in the browser (window.PortalCore) and in Node (module.exports) so it can be tested
  * against real outputs (tests/portal). Nothing here touches the network.

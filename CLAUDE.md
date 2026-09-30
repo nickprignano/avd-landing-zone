@@ -48,6 +48,8 @@ Without Pester, run an offline scenario directly: `pwsh -File tests/offline/Post
 
 - **Auto shutdown (`scripts/automation/Invoke-AvdPowerAction.ps1`) is an Automation runbook: Windows PowerShell 5.1, no modules, ARM REST with the managed identity's token.** Lock must survive the next sign-in (drain, scaling plan exclusion tag, Start VM on Connect off); a new action or call gets a mock path in `AzMock.psm1` and an assertion in the AutoShutdown scenario. New role GUIDs come from Microsoft's built-in role reference and go into `PUBLIC_IDS`. (decision 0011)
 
+- **Personal project, not for production, as is, not affiliated with the author's employer.** The MIT `LICENSE`, the README warning, the portal's notice and footer, and the one-line notice at the top of entry-point code stay in place; a new entry-point script or template gets the notice (`tests/portal/disclaimer.test.mjs`).
+
 - **American English** in docs, script output, the portal and comments (a portal test fails on British spellings; recorded fixtures are exempt).
 
 ## Git and PRs

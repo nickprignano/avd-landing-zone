@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Deploy the cloud-native AVD landing zone at subscription scope.
+# Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
 #
 # Usage:
 #   ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \

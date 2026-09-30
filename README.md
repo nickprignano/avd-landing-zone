@@ -2,6 +2,13 @@
 
 An **enterprise-ready Azure Virtual Desktop landing zone for greenfield, cloud-native organizations** — Entra ID-joined, Intune-managed, private by default, and deployed end to end from one Bicep template.
 
+> [!WARNING]
+> **Personal project. Not for production. No warranty.**
+>
+> - This is my own personal project, built on my own time. It is **not affiliated with, endorsed by or supported by my employer**, and it does not represent my employer's views, products or guidance. It is also not an official Microsoft product.
+> - It is a reference and learning project. **Do not run it in production** or against subscriptions and tenants that matter. Use a dedicated lab subscription and tenant.
+> - It is provided **"as is", without warranty of any kind**, under the [MIT License](LICENSE). You are responsible for what it deploys, for the Azure charges it incurs, and for reviewing the code before you run it.
+
 It is deliberately *not* a general-purpose accelerator. Microsoft's [AVD Landing Zone Accelerator](https://github.com/Azure/avdaccelerator) (LZA) covers every identity model and brownfield scenario through a wide option surface. This repo makes the opposite trade: **one opinionated path — no domain controllers, no line of sight to on-premises, no post-deployment scripts** — and hardens that path fully. See [`docs/design-decisions.md`](docs/design-decisions.md) for the side-by-side.
 
 ## What you get
@@ -108,6 +115,8 @@ avd-landing-zone/
 - [`docs/out-of-scope.md`](docs/out-of-scope.md): what this repo does not do
 - [`docs/setup-azure-account.md`](docs/setup-azure-account.md): starting from zero on a personal card (lab use)
 
-## License
+## License and disclaimer
 
-MIT — see [`LICENSE`](LICENSE).
+[MIT](LICENSE). The software is provided "as is", without warranty of any kind, and the authors are not liable for any claim, damages or other liability arising from its use, including Azure charges and changes it makes to your subscription or tenant.
+
+This is a personal project. It is not affiliated with, endorsed by or supported by my employer, and it is not an official Microsoft product. Azure, Microsoft Entra, Intune and FSLogix are trademarks of Microsoft. It is not intended for production use.

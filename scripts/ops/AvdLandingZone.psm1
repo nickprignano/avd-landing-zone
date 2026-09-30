@@ -1,4 +1,5 @@
 #requires -Version 7.2
+# Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
 <#
   Shared functions for the landing-zone operations scripts:
     Test-AvdLandingZoneReadiness.ps1  preflight (check / -Fix)

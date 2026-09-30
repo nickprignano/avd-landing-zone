@@ -1,5 +1,6 @@
 // =====================================================================
 // Cloud-native AVD Landing Zone — orchestration
+// Personal project, not for production use. Provided as is, without warranty of any kind (MIT License, see LICENSE). Not affiliated with the author's employer or with Microsoft.
 //
 // One opinionated path: Entra ID-joined, Intune-enrolled session hosts,
 // Entra Kerberos for FSLogix, private-by-default PaaS, and everything —
