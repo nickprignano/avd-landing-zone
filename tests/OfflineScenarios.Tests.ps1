@@ -47,7 +47,12 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     $real | Should -Match 'Key Vault kvavdlzdevabc is soft-deleted with purge protection'
   }
   It 'reports each deployment record it deletes' {
-    $out.Substring($out.IndexOf('######## remove-lz'+"`n")) | Should -Match '\[FIXED\] Deployment record avdlz-governance-x'
+    $out.Substring($out.IndexOf('######## remove-lz'+"`n")) | Should -Match '\[FIXED\] Deployment record avdlz-governance-avdlz-dev-eastus2'
+  }
+  It 'removing a landing zone beside another keeps what the other one uses' {
+    Get-StepExit $out 'remove-test-beside-dev' | Should -Be 0
+    $out | Should -Match 'RESULT remove-test-beside-dev devRgs=5 testRgs=0 policyDeletes=0 activityLogDeleted=False records=avdlz-dev-20260929-101500,avdlz-governance-avdlz-dev-northcentralus'
+    $out | Should -Match 'Kept: landing zone avdlz-dev still uses it'
   }
   It 'removes every landing zone resource group' {
     Get-StepExit $out 'remove-lz' | Should -Be 0
@@ -56,10 +61,11 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
   It 'ends every run with a portal state line (none under -WhatIf)' {
     $s = Get-PortalState $out
     ($s | ForEach-Object { "$($_.stage):$($_.status):$($_.fix)" }) -join ' ' |
-      Should -Be 'postdeploy:notready:False postdeploy:ready:True postdeploy:ready:False demo:ready:False cleanup:ready:False cleanup:ready:False'
+      Should -Be 'postdeploy:notready:False postdeploy:ready:True postdeploy:ready:False demo:ready:False cleanup:ready:False cleanup:ready:False cleanup:ready:False'
     $s[0].context.namePrefix | Should -Be 'avdlz'
     $s[0].failures.Count | Should -Be $s[0].counts.fail
     $s[5].context.includeLandingZone | Should -BeTrue
+    $s[6].context.environment | Should -Be 'test'   # remove-test-beside-dev
   }
 }
 

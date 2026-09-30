@@ -110,7 +110,7 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   if ($Path -match '/runCommands/') { return & $ok @{ properties=@{ instanceView=@{executionState='Succeeded';exitCode=0} } } }
   if ($Path -match 'policyAssignments\?') { return & $ok @{ value=@(@{name='avdlz-allowed-locations';id="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-allowed-locations"},@{name='avdlz-inherit-rg-tag-workload';id="$S/pa2";identity=@{principalId='44444444-0000-0000-0000-000000000000'}},@{name='someone-else';id='x'}) } }
   if ($Path -match 'budgets/' -and $Method -eq 'GET') { return [pscustomobject]@{StatusCode=404;Content=''} }
-  if ($Path -match 'diagnosticSettings/' -and $Method -eq 'GET') { return & $ok @{ name='avdlz-activity-log' } }
+  if ($Path -match 'diagnosticSettings/' -and $Method -eq 'GET') { return & $ok @{ name='avdlz-activity-log'; properties=@{ workspaceId=$(if ($global:St.activityLogWorkspace) { $global:St.activityLogWorkspace } else { "$S/resourceGroups/rg-avdlz-dev-management/providers/Microsoft.OperationalInsights/workspaces/log-avdlz-dev" }) } } }
   # ---- Well-Architected review (Test-AvdWellArchitected). $global:St.waf.good: a production-grade
   # landing zone; otherwise the dev parameter file's trade-offs in a region without zones.
   $g = [bool]$global:St.waf.good
@@ -230,8 +230,11 @@ function New-AzSubscriptionDeployment { param($Name,$Location,$TemplateFile,$Tem
   $v = { param($x) [pscustomobject]@{Value=$x} }
   [pscustomobject]@{ProvisioningState='Succeeded';Outputs=@{resourceGroupName=(& $v 'rg-avdlz-dev-demo');hostPoolResourceId=(& $v "$S/resourceGroups/rg-avdlz-dev-demo/providers/Microsoft.DesktopVirtualization/hostPools/vdpool-avdlz-dev-demo");hostPoolName=(& $v 'vdpool-avdlz-dev-demo');appGroupResourceId=(& $v "$S/resourceGroups/rg-avdlz-dev-demo/providers/Microsoft.DesktopVirtualization/applicationGroups/vdag-avdlz-dev-demo-desktop");workspaceResourceId=(& $v 'ws');sessionHostNames=(& $v @('avdlzddemo-001'))}}
 }
-function Get-AzDeployment { param($Name,$ErrorAction) if ($Name) { [pscustomobject]@{DeploymentName=$Name} } else { @([pscustomobject]@{DeploymentName='avdlz-governance-x'}) } }
-function Remove-AzDeployment { param($Name) Log "del deployment $Name" }
+# Subscription deployment records ($global:St.deployments; default: one landing zone's).
+function Get-AzDeployment { param($Name,$ErrorAction)
+  $names = if ($null -ne $global:St.deployments) { $global:St.deployments } else { @('avdlz-governance-avdlz-dev-eastus2', 'avdlz-dev-20260929-101500') }
+  if ($Name) { [pscustomobject]@{DeploymentName=$Name} } else { @($names | ForEach-Object { [pscustomobject]@{DeploymentName=$_} }) } }
+function Remove-AzDeployment { param($Name) Log "del deployment $Name"; if ($null -ne $global:St.deployments) { $global:St.deployments = @($global:St.deployments | Where-Object { $_ -ne $Name }) } }
 function Remove-AzResourceGroup { param($Name,[switch]$Force) Log "del rg $Name"; $global:St.rgs = @($global:St.rgs | ? { $_ -ne $Name }) }
 function Get-AzRecoveryServicesVault { param($ResourceGroupName,$Name) [pscustomobject]@{Name=$Name;ResourceGroupName=$ResourceGroupName;ID="$S/rsv"} }
 function Update-AzRecoveryServicesVault { param($ResourceGroupName,$Name,$ImmutabilityState) Log "rsv immutability $ImmutabilityState" }

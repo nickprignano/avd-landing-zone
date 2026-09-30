@@ -17,3 +17,17 @@ Write-Host "RESULT remove-lz-whatif changes=$(@($global:Calls | Where-Object { $
 
 Invoke-ScenarioStep 'remove-lz' { & ./scripts/ops/Remove-AvdDemo.ps1 @lz -IncludeLandingZone -ResetDefender -Force }
 Write-Host "RESULT remove-lz remainingRgs=$(@($global:St.rgs | Where-Object { $_ -like 'rg-avdlz-dev-*' }).Count)"
+
+# Two landing zones in one subscription (test beside dev, docs/demo.md): removing test keeps
+# what dev still uses (policy assignments, the activity log export to dev's workspace, dev's
+# deployment records) and removes only test's resource groups.
+$dev = 'network', 'management', 'storage', 'avd', 'hosts' | ForEach-Object { "rg-avdlz-dev-$_" }
+$test = 'network', 'management', 'storage', 'avd', 'hosts' | ForEach-Object { "rg-avdlz-test-$_" }
+$global:St.rgs = @($dev) + @($test)
+$global:St.deployments = @('avdlz-dev-20260929-101500', 'avdlz-governance-avdlz-dev-northcentralus', 'avdlz-test-20260930-091500', 'avdlz-governance-avdlz-test-northcentralus')
+$global:Calls.Clear()
+Invoke-ScenarioStep 'remove-test-beside-dev' { & ./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix avdlz -Environment test -IncludeLandingZone -Force }
+Write-Host ("RESULT remove-test-beside-dev devRgs={0} testRgs={1} policyDeletes={2} activityLogDeleted={3} records={4}" -f `
+    @($global:St.rgs | Where-Object { $_ -like 'rg-avdlz-dev-*' }).Count, @($global:St.rgs | Where-Object { $_ -like 'rg-avdlz-test-*' }).Count,
+    @($global:Calls | Where-Object { $_ -match 'DELETE .*policyAssignments' }).Count, [bool]@($global:Calls | Where-Object { $_ -match 'DELETE .*avdlz-activity-log' }).Count,
+    ($global:St.deployments -join ','))

@@ -50,7 +50,7 @@ Describe 'Sizing overrides' {
   # The deployment portal's sizing step passes these through deploy.sh and the preflight.
   # Set-but-empty must fall back to the file's value (docs/lessons/0004).
   It 'takes host count, size, sessions and profile quota from the environment, and defaults when empty' {
-    foreach ($file in 'parameters/dev.bicepparam', 'parameters/prod.bicepparam') {
+    foreach ($file in 'parameters/dev.bicepparam', 'parameters/test.bicepparam', 'parameters/prod.bicepparam') {
       $env:AVD_SESSION_HOST_COUNT = '3'; $env:AVD_SESSION_HOST_VM_SIZE = 'Standard_D8as_v5'; $env:AVD_MAX_SESSION_LIMIT = '16'; $env:AVD_PROFILE_QUOTA_GIB = '600'
       try { $p = ((& $script:bicep build-params $file --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters }
       finally { $env:AVD_SESSION_HOST_COUNT = ''; $env:AVD_SESSION_HOST_VM_SIZE = ''; $env:AVD_MAX_SESSION_LIMIT = ''; $env:AVD_PROFILE_QUOTA_GIB = '' }
@@ -117,3 +117,23 @@ Describe 'Auto shutdown' {
     }
   }
 }
+
+Describe 'A second landing zone beside dev (parameters/test.bicepparam, docs/demo.md)' {
+  It 'is dev''s footprint under its own names, and leaves the subscription-wide pieces to dev' {
+    $read = { param($file) ((& $script:bicep build-params $file --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters }
+    $dev = & $read 'parameters/dev.bicepparam'; $test = & $read 'parameters/test.bicepparam'
+    $test.environmentName.value | Should -Be 'test'
+    $test.deploySubscriptionSettings.value | Should -BeFalse
+    $dev.PSObject.Properties.Name | Should -Not -Contain 'deploySubscriptionSettings'   # dev owns them (default true)
+    foreach ($p in 'namePrefix', 'sessionHostCount', 'sessionHostVmSize', 'profileShareQuotaGiB', 'enableProfileBackup', 'enableDefenderForCloud', 'autoShutdownTime') {
+      ($test.$p.value | ConvertTo-Json -Compress) | Should -Be ($dev.$p.value | ConvertTo-Json -Compress) -Because $p
+    }
+  }
+  It 'turns off the policy guardrails and the activity log export when deploySubscriptionSettings is false' {
+    $t = Get-CompiledTemplate 'parameters/test.bicepparam'
+    $gov = Find-Deployment $t "[take(format('avdlz-governance-{0}-{1}', variables('baseName'), parameters('location')), 64)]"
+    $gov.properties.parameters.enablePolicyGuardrails.value | Should -Be "[and(parameters('enablePolicyGuardrails'), parameters('deploySubscriptionSettings'))]"
+    $gov.properties.parameters.deployActivityLog.value | Should -Be "[parameters('deploySubscriptionSettings')]"
+  }
+}
+

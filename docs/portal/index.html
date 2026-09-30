@@ -142,7 +142,7 @@
     <p class="status">Used to build the commands. Values from pasted output fill these in automatically; they are kept only in this browser.</p>
     <div class="row">
       <label class="field"><span>Parameter file</span>
-        <select id="parameterFile"><option value="parameters/dev.bicepparam">parameters/dev.bicepparam</option><option value="parameters/prod.bicepparam">parameters/prod.bicepparam</option></select>
+        <select id="parameterFile"><option value="parameters/dev.bicepparam">parameters/dev.bicepparam</option><option value="parameters/test.bicepparam">parameters/test.bicepparam (a second landing zone beside dev)</option><option value="parameters/prod.bicepparam">parameters/prod.bicepparam</option></select>
       </label>
       <label class="field"><span>Region</span><input type="text" id="location" autocomplete="off"></label>
       <label class="field"><span>AVD users group</span><input type="text" id="usersGroup" autocomplete="off"></label>
@@ -313,6 +313,9 @@
 
   function config() { return cfg; }
   function setConfig(patch) {
+    // The parameter file decides the environment (parameters/test.bicepparam deploys avdlz-test).
+    var fe = patch && patch.parameterFile && !patch.environment && /parameters\/(dev|test|prod)\.bicepparam$/.exec(patch.parameterFile);
+    if (fe) patch = Object.assign({}, patch, { environment: fe[1] });
     Object.keys(patch || {}).forEach(function (k) { if (FIELDS.indexOf(k) >= 0 && patch[k]) cfg[k] = patch[k]; });
     // A pasted preflight says which sizing it validated; the next commands keep it.
     if (patch && patch.sizing && patch.sizing.hosts) { cfg.sizing = patch.sizing; save('sizing', cfg.sizing); }

@@ -489,3 +489,11 @@ test('state: a preflight priced with the power settings off -> the portal keeps 
   assert.match(last(r.actions[0].command), / --auto-shutdown none --start-vm-on-connect false$/);
   assert.equal(r.estimate.lines.find((l) => l.key === 'compute').quantity, 728);
 });
+
+test('page and engine: parameters/test.bicepparam is offered, and powers like dev', () => {
+  const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<option value="parameters\/test\.bicepparam">/);
+  readFileSync(new URL('../../parameters/test.bicepparam', import.meta.url), 'utf8');
+  assert.equal(P.effectivePower({ parameterFile: 'parameters/test.bicepparam' }).autoShutdownTime, '20:00');
+  assert.match(P.commands.postdeploy({ ...P.DEFAULTS, environment: 'test' }, true), /-Environment test -Fix/);
+});

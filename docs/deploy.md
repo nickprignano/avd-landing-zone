@@ -1,5 +1,7 @@
 # Deploy
 
+> Presenting it live? [demo.md](demo.md) fits a working desktop into a 30-minute slot.
+
 ## 1. Prerequisites
 
 **Azure**
@@ -24,7 +26,7 @@ The host pool is deployed in the same region, so the region must offer AVD host 
 
 ## 3. Parameters
 
-`parameters/dev.bicepparam` and `parameters/prod.bicepparam` are committed. They hold no tenant data: identity values and secrets come from environment variables.
+`parameters/dev.bicepparam` and `parameters/prod.bicepparam` are committed, and so is `parameters/test.bicepparam`. The test file is dev's footprint as a second landing zone beside dev; it leaves the subscription-wide policy guardrails and activity log export to dev (`deploySubscriptionSettings = false`). They hold no tenant data: identity values and secrets come from environment variables.
 
 | Variable | Required | Set by |
 |---|---|---|
