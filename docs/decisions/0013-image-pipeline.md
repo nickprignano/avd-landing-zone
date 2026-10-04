@@ -13,11 +13,15 @@ As specified in [image-pipeline-spec.md](../image-pipeline-spec.md):
   - A version stays excluded from `latest` until a canary in `test` passes the preflight, the readiness checks and a real sign-in.
   - Promotion runs through the target GitHub Environment's approval.
   - Hosts pin a version ID (`AVD_SESSION_HOST_IMAGE_ID`, guarded with `empty(...)`); the marketplace image stays the default.
+- **WDOT on every build:** pinned by version and SHA-256, with a reviewed profile in Git. Services the landing zone needs (Intune push, Defender, Windows Update, search, the RDP stack) are protected by a test and by a build-time check. Appx removal and WDOT's advanced optimizations are off by default.
+- **Hosts don't update themselves:** Windows and Microsoft 365 Apps automatic updates are off, per Microsoft's golden image guidance. Patches come through the monthly image. Defender signatures and the AVD agent keep updating.
+- **A one-host QA pool in every landing zone** (`AVD_QA_POOL`, on by default). It is a validation environment with an earlier agent update window, the canary for each new image in each environment, and the place for maintenance work. It is a production twin, so it doesn't update itself either.
 - **Blue/green rotation** through alternating name generations, by a resumable Cloud Shell script. Its state lives in a host pool tag. It never logs users off unless the operator opts in, and it removes old VMs, session host objects and device objects.
 - **Builds run in the build environment's spoke,** reusing its egress, with no public IP. Customizer scripts are pinned by commit and SHA-256.
 
 ## Consequences
 - Every host's software traces to a commit, a source image version and a build run. Patching becomes a monthly, reviewable promotion.
+- One more host per landing zone for the QA pool, counted by the quota and price checks. It only helps if a couple of people sign in to it every day, so the preflight warns when nobody has.
 - Rotation needs vCPU quota for a second set of hosts while it runs. Without it, rotation stops at its first check instead of shrinking capacity.
 - A gallery, replicas and a build VM per month to pay for, priced at deploy (decision 0010).
 - Not verified against a real deployment yet; the spec lists what to confirm at build.
