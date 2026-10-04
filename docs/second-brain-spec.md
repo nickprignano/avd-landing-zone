@@ -342,6 +342,7 @@ The owner approved self-healing as a category. A playbook enters EX-0003 only by
 
 Not eligible:
 - `re-register-host`: it creates a registration token;
+- `replace-host`: it changes capacity while it runs;
 - anything that changes capacity, sizing, configuration or code;
 - Resume after a Lock.
 
@@ -657,6 +658,7 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 | `budget-lock-review` | Budget Lock active (0011) | 2 | Resume after approval | `power-locked` cleared |
 | `drift-detected` | A Resource Graph change not made by the deploy identity | 3 | PR to codify, or a plan to revert | No unexplained changes on the next pass; what-if clean on the PR |
 | `quota-pressure` | vCPU quota near the limit (lesson 0013, 0024) | 1 | Issue with the request command | Preflight quota check passes |
+| `replace-host` | A host still unhealthy after `recycle-empty-host` | 2 | Drain, deploy a fresh host from the current gallery image (phase 0b), remove the old one | The new host is Available and passes the AVD health checks |
 
 ## 9. Security and privacy
 
@@ -780,6 +782,7 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 | Phase | Delivers | Max level | Exit criterion |
 |---|---|---|---|
 | **0 (done)** | Lessons and guards, state line, portal reports, WAF review, budget runbook | — | — |
+| **0b Image pipeline** (before phase 1; Q6) | A golden image built with Azure Image Builder or Packer into an Azure Compute Gallery, and host rotation onto new image versions. Specified separately, outside the brain | — | A host pool rebuilt from a gallery image passes the post-deployment preflight and a real sign-in |
 | **1 Notice (Tier 1)** | Container Apps job, detections, episode issues, pseudonymization, the diagnosis workflow, digest, brain budget, kill switch and watchdog | 1 | A real incident appears as an issue with pseudonymized evidence, the changes before it and a cited diagnosis; a kill-switch drill passes; **a ranked list of signatures from at least 30 days of real data** (red-team S2) |
 | **2 Approved fixes (Tier 2)** | Plans, `brain-execute.yml`, per-playbook identities and custom roles, hash-pinned scripts; the first playbooks taken **from the top of the ranked list**, not from §8 | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback, which is EX-0003's entry criterion |
 | **3 Memory and agents (Tier 3)** | Cosmos DB episodes and vector search, Foundry agents, orchestrator, eval harness with the offline mock | 2 | Diagnoses cite the right lesson or episode in ≥ 80% of eval cases |
@@ -808,6 +811,6 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 - **Q3** ~~Retrieval?~~ **Decided:** the Git checkout at Tiers 1–2, Cosmos DB vector search at Tier 3, Azure AI Search only for large estates (red-team H9).
 - **Q4** One brain per landing zone, or one per organization over several landing zones (the episode schema allows `environment` and `scope` to span them)?
 - **Q5** Microsoft Entra Agent ID availability and roles in the target tenants, versus plain user-assigned managed identities.
-- **Q6** Image pipeline: host replacement is far stronger with a golden image (listed in [out-of-scope.md](out-of-scope.md) as a next layer). Build it before or alongside phase 3?
+- **Q6** ~~Image pipeline before or alongside phase 3?~~ **Decided 2026-10-04:** build the image pipeline **first**, before phase 1 (phase 0b). Replacing a host from a known image is the strongest fix the brain can offer, and a predictable fleet makes detections and baselines meaningful.
 - **Q7** ~~Does the budget Lock wait for approval?~~ **Decided 2026-10-04:** no; it stays a pre-approved exception (EX-0001). More exceptions will follow through §4.5.1. EX-0002 (scheduled Stop) confirmed the same day, and self-healing became EX-0003.
 - **Q8** ~~Who is the second approver?~~ **Decided 2026-10-04:** there may never be one for the project. Solo mode (§9.3) replaces the second person with a 72-hour time-lock and evidence; adopters with two or more approvers run team mode.
