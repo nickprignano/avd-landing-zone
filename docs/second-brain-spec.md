@@ -18,7 +18,7 @@ The **second brain** runs that same loop all the time, against the running estat
    └──────────────── guards, detections, playbooks ◄──────────────┘
 ```
 
-- **Self-healing, with a person in the loop:** known failures are detected and diagnosed, and the brain prepares the fix as a **plan** from a **playbook** that lives in the repo and is tested offline. **Nothing runs until a person approves that exact plan.**
+- **Self-healing, with a person in the loop:** known failures are detected and diagnosed, and the brain prepares the fix as a **plan** from a **playbook** that lives in the repo and is tested offline. **By default, nothing runs until a person approves that exact plan.** The exception is the self-healing playbooks people list in exception EX-0003 (§4.5.1). Each one runs without approving each run, but only after it has earned a record of approved, verified runs.
 - **Self-learning:** every incident becomes an **episode** with its evidence, diagnosis, action and outcome. Patterns that repeat become lessons, guards, detections and playbooks, through the retro routine that exists today.
 - **Self-evolving:** drift, sizing, cost and Well-Architected findings become **pull requests** against the IaC. CI validates them, they are tried in `test` first, and a person merges them.
 
@@ -29,7 +29,7 @@ The rules that hold it all together: **the LLM reasons and proposes. A person ap
 ### Goals
 
 1. Detect AVD failures before users report them, and diagnose them with evidence (lesson 0012: report what the API returned before guessing).
-2. Turn known failures into a ready-to-approve plan, so that a person decides in under a minute and the fix runs and verifies itself after approval.
+2. Turn known failures into a ready-to-approve plan, so that a person decides in under a minute and the fix runs and verifies itself after approval. Once a playbook has proven itself, it heals on its own under EX-0003, inside the same guardrails.
 3. Never pay twice for the same lesson. A repeated incident signature after a guard exists is a defect of the brain.
 4. Keep the estate and its code in agreement: detect drift, then either codify it or revert it, by pull request.
 5. Answer operators' questions ("why is host 3 draining?", "what changed before Monday's errors?") from the estate's own memory, with citations.
@@ -212,6 +212,7 @@ Playbooks are actions in `scripts/automation/Invoke-AvdPlaybook.ps1`. Like decis
 | 0 Observe | Record only | New unknown signature |
 | 1 Recommend | Issue with the diagnosis and a self-contained Cloud Shell block for a person to run (lesson 0015) | Storage near quota; Defender high-severity finding |
 | 2 Approve and run | Plan → a person approves → the executor runs it → verify | Restart the AVD agent on one host; recycle an empty host; re-register a host; Resume after a budget Lock |
+| 2S Self-heal (EX-0003) | Same plan and guardrails; the approval is the standing exception, and every run is reported | The playbooks listed in EX-0003, once they have met its entry criteria |
 | 3 Change code | PR; a person merges; a person starts the deployment | Sizing, new alerts, drift fixes, anything in Bicep |
 
 **Guardrails.** They hold even after an approval. The orchestrator checks them before it asks, and the executor checks them again before it acts.
@@ -246,7 +247,7 @@ There are two kinds:
 1. **Only people create one.** People write and merge exceptions; CODEOWNERS on `brain/exceptions/` requires the approvers it names. A PR written by the brain that touches the folder fails CI (red-team C4). The brain may only point out candidates in the weekly digest, such as "approved 20 of 20 times, never rejected".
 2. **The trigger is deterministic:** a detection, a schedule or a budget threshold. It is never a model's output or an agent's judgment. No agent can invoke an exception.
 3. **Narrow:**
-   - one playbook action;
+   - one playbook action, or a fixed list of named playbooks, each with its own scope and limits (EX-0003); suspension applies per playbook;
    - named environments and resource groups;
    - parameters bound by the orchestrator;
    - limits on how many runs and how many hosts.
@@ -264,9 +265,41 @@ There are two kinds:
 | ID | Kind | Action | Trigger | Scope | Approved | Review |
 |---|---|---|---|---|---|---|
 | EX-0001 | External | Budget **Lock**: drain, scaling plan exclusion tag, Start VM on Connect off, deallocate (decision 0011) | Budget actual cost reaches `autoShutdownBudgetPercent` | The landing zone's hosts | Owner, 2026-10-04 | With the budget parameters |
-| EX-0002 | External | Scheduled **Stop**: deallocate idle hosts (decision 0011) | The auto-shutdown schedule (`AVD_AUTO_SHUTDOWN_TIME`) | The landing zone's hosts | Proposed: same runbook as EX-0001, confirm with the owner | With the schedule parameters |
+| EX-0002 | External | Scheduled **Stop**: deallocate idle hosts (decision 0011) | The auto-shutdown schedule (`AVD_AUTO_SHUTDOWN_TIME`) | The landing zone's hosts | Owner, 2026-10-04 | With the schedule parameters |
+| EX-0003 | Standing | **Self-healing**: the playbooks in the table below, each on one host at a time | Each playbook's own detection signature, computed by the detection, never by an agent | Per playbook | Owner, 2026-10-04 (as a category; each playbook enters by PR) | Every 180 days, and on any change to a listed playbook |
 
 Resume after a Lock is **not** an exception. It stays an approved plan (`budget-lock-review`, §8).
+
+**EX-0003 Self-healing**
+
+The owner approved self-healing as a category. A playbook enters EX-0003 only by a PR a person merges, and only when it meets all of these:
+
+- **Reversible and single-host:** it touches one session host and leaves nothing a restart can't undo. No identity, network, storage or control-plane changes.
+- **Deterministic trigger:** one detection signature, computed by the detection (red-team C1). Episodes the Diagnose agent classified are not eligible.
+- **Proven:** at least 10 approved, verified runs without a rollback in `test` (fault-injection drills allowed). For prod, at least 3 more approved, verified runs in prod, and the PR approved by two people.
+- **Positive verification and a listed rollback**, as for every plan.
+- **Tested:** an offline scenario covering success, failed verification and every precondition that blocks it.
+
+| Playbook | Environments | Limits | Entry status |
+|---|---|---|---|
+| `restart-avd-agent` | dev, test, prod | 1 host per pool at a time; 3 per hour; 2 per host per day | Candidate: needs its run record |
+| `recycle-empty-host` | dev, test, prod | 1 host per pool at a time; 2 per hour; 1 per host per day | Candidate: needs its run record |
+
+Not eligible:
+- `re-register-host`: it creates a registration token;
+- anything that changes capacity, sizing, configuration or code;
+- Resume after a Lock.
+
+What still holds under EX-0003:
+- every guardrail in §4.5: kill switch, blast radius, the other actors' locks and drain states, unknown counts as occupied, positive verification;
+- the scope is checked with the plan rebuilt just before acting;
+- each run is posted to its episode's issue as it happens, not only in the digest;
+- a failed verification or a rollback suspends **that playbook** in EX-0003 and sends it back to approving each run, until a person re-enables it by PR.
+
+Because no person approves each run, these red-team fixes become **required** before any playbook is active in EX-0003:
+- C1: signatures come only from detections;
+- H6: the Run Command script is fixed text, pinned by content hash, under a custom role scoped to the hosts resource group;
+- M5: the first rollback suspends the playbook.
 
 ### 4.6 Learn
 
@@ -486,6 +519,8 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 | Time from detection to a plan ready for approval, known signatures | < 10 minutes |
 | Time from approval to verified fix | < 20 minutes |
 | Plans approved as proposed (not rejected or replaced) | ≥ 80%, with every rejection reason recorded |
+| Known-signature incidents healed under EX-0003 | Reported per playbook; no target until two playbooks are active |
+| Suspensions of EX-0003 playbooks | Each one has a lesson or a fix within 7 days |
 | Rollbacks after an approved run | < 2% of runs |
 | Changes made without an approval record (per-run approval or a registered exception) | 0, checked against the Activity Log |
 | Exceptions past their review date | 0 |
@@ -502,8 +537,8 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 | **0 (done)** | Lessons and guards, state line, portal reports, WAF review, budget runbook | — | — |
 | **1 Sense and remember** | `brain.bicep` (Cosmos, Blob, AI Search, Event Grid, Functions), scheduled preflight, detection catalog, episodes, indexing of the repo, weekly digest issue | 0 | A real incident appears as an episode with its evidence and the changes before it |
 | **2 Diagnose** | Triage and Diagnose agents, Concierge, AVD-LZ MCP, eval harness with offline mock | 1 | Diagnoses cite the right lesson or episode in ≥ 80% of eval cases |
-| **3 Heal, approved** | Plan and approval flow, `brain-execute.yml`, `Invoke-AvdPlaybook.ps1`, first three playbooks, kill switch | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback |
-| **4 Learn** | Retro agent PRs, playbook statistics, rejection reasons, demotion, baselines | 2 | A new signature reaches a lesson and guard drafted by the brain and merged by a person |
+| **3 Heal, approved** | Plan and approval flow, `brain-execute.yml`, `Invoke-AvdPlaybook.ps1`, first three playbooks, kill switch | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback, which is EX-0003's entry criterion |
+| **4 Learn and self-heal** | Retro agent PRs, playbook statistics, rejection reasons, demotion, baselines; the first playbooks enter EX-0003 (test first, then prod) | 2S | A new signature reaches a lesson and guard drafted by the brain and merged by a person |
 | **5 Evolve** | Drift, right-sizing and posture PRs, test-then-prod rollout with soak, each deployment started by a person | 3 (PR) | One drift and one sizing PR merged and deployed through test |
 
 ## 12. Risks
@@ -528,4 +563,4 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 - **Q4** One brain per landing zone, or one per organization over several landing zones (the episode schema allows `environment` and `scope` to span them)?
 - **Q5** Microsoft Entra Agent ID availability and roles in the target tenants, versus plain user-assigned managed identities.
 - **Q6** Image pipeline: host replacement is far stronger with a golden image (listed in [out-of-scope.md](out-of-scope.md) as a next layer). Build it before or alongside phase 3?
-- **Q7** ~~Does the budget Lock wait for approval?~~ **Decided 2026-10-04:** no; it stays a pre-approved exception (EX-0001). More exceptions will follow through §4.5.1. Open: confirm EX-0002 (scheduled Stop).
+- **Q7** ~~Does the budget Lock wait for approval?~~ **Decided 2026-10-04:** no; it stays a pre-approved exception (EX-0001). More exceptions will follow through §4.5.1. EX-0002 (scheduled Stop) confirmed the same day, and self-healing became EX-0003.

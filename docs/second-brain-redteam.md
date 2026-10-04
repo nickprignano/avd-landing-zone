@@ -151,7 +151,7 @@ The owner set a requirement: a person approves every change before it is made. T
 
 | Finding | Status | How |
 |---|---|---|
-| C1 Model picks the playbook | **Reduced, still open** | A wrong signature now reaches a person instead of an action, but it still shapes the plan they see. Signatures must still come only from detections |
+| C1 Model picks the playbook | **Open, required for EX-0003** | Under per-run approval a wrong signature reaches a person; under self-healing (EX-0003) it would reach an action again. The spec now requires signatures from detections only before any playbook is active in EX-0003 |
 | C2 Agents supply parameters | **Resolved in spec** | `propose_playbook_run(episodeId, playbookId)`; the orchestrator binds and scope-checks the targets; the approved plan hash is re-checked before running |
 | C3 Public issues reach a code-writing agent | Open | Approval covers merges, not what the agent reads; still needs separation and no credentials on issue-triggered workflows |
 | C4 Brain loosens its own guardrails | **Reduced, still open** | Guardrail changes now need a person to merge, but the person reviews the brain's own argument. CODEOWNERS and the CI path check are still needed |
@@ -159,16 +159,16 @@ The owner set a requirement: a person approves every change before it is made. T
 | H3 Fights the scaling plan and Lock | **Resolved in spec** | Preconditions: not locked, not excluded, drain state restored |
 | H4 Session count from the broken agent | **Resolved in spec** | Unknown counts as occupied |
 | H5 Missing data reads as success | **Resolved in spec** | Positive verification |
-| H6 Executor is SYSTEM on hosts | **Reduced, still open** | No standing credential, and two approvers for Run Command and prod; a content-hash-pinned script and a custom role are still needed |
+| H6 Executor is SYSTEM on hosts | **Open, required for EX-0003** | Per-run approval reduced it; EX-0003 gives a standing identity Run Command rights again. A fixed, content-hash-pinned script and a custom role are required before `restart-avd-agent` is active |
 | M1 Prod level contradiction | **Resolved in spec** | One ladder, level 2 means approved |
 | M2 Policy outside Git | **Resolved in spec** | App Configuration can only lower; unreadable means 0 |
 | M3 Phase 3 exit can't be met | **Resolved in spec** | Exit in `test` with two or more hosts and drills |
 | M4 Blast radius has no headroom | **Resolved in spec** | Demand plus one host, or the scaling plan's minimum |
-| M5 Thin promotion evidence | **Moot** | No promotion to autonomy exists |
+| M5 Thin promotion evidence | **Resolved in spec** | Entering EX-0003 needs 10 test runs plus 3 prod runs; the first rollback suspends the playbook |
 | M6 Targets vs. timings | **Resolved in spec** | Split into time to plan and time from approval to verified fix |
 | H2, H7, H8, H9, M7-M10, S1, S2 | Open | Not affected by the rule |
 
-New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. The owner then decided that the budget Lock stays a **pre-approved exception**, and that more exceptions will follow (spec §4.5.1). That reopens C4 for a new path: exceptions are the one way around approval, so the CI rule that agents can't touch `brain/exceptions/`, together with CODEOWNERS, is now required, not optional.
+New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. The owner then decided that the budget Lock stays a **pre-approved exception**, and that more exceptions will follow (spec §4.5.1). That reopens C4 for a new path: exceptions are the one way around approval, so the CI rule that agents can't touch `brain/exceptions/`, together with CODEOWNERS, is now required, not optional. Self-healing then became exception EX-0003 (spec §4.5.1), which brings C1 and H6 back to full weight for the playbooks it lists.
 
 ## Next step
 
