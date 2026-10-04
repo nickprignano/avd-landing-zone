@@ -155,23 +155,29 @@ The owner set a requirement: a person approves every change before it is made. T
 | C2 Agents supply parameters | **Resolved in spec** | `propose_playbook_run(episodeId, playbookId)`; the orchestrator binds and scope-checks the targets; the approved plan hash is re-checked before running |
 | C3 Public issues reach a code-writing agent | **Resolved in spec** | §9.1: no brain in a public repo; public portal reports aren't episodes; untrusted-event workflows hold no credentials; code-writing agents run only on schedule or dispatch, as a GitHub App limited to `brain/*` branches; provenance block; workflow linting in CI |
 | C4 Brain loosens its own guardrails | **Resolved in spec** | §9.2: protected paths and fields; `brain-guard` fails agent-authored guardrail changes; CODEOWNERS with no bypass; a deterministic summary of each guardrail change; append-only evals; a merge around the rules trips EX-0004. Solo-maintainer limit is Q8 |
-| H1 Automation can't reach private endpoints | **Resolved in spec** | Playbooks run in the approval-gated Actions job against ARM; state goes back through the run, not the private stores. The scheduled preflight is still H2 |
+| H1 Automation can't reach private endpoints | **Resolved in spec** | Playbooks run in the approval-gated Actions job against ARM; state goes back through the run, not the private stores |
+| H2 Preflight needs Az modules | **Resolved in spec** | A VNet-integrated Container Apps job from a digest-pinned `azure-powershell` image runs the repo's scripts at the deployed commit (§4.2) |
 | H3 Fights the scaling plan and Lock | **Resolved in spec** | Preconditions: not locked, not excluded, drain state restored |
 | H4 Session count from the broken agent | **Resolved in spec** | Unknown counts as occupied |
 | H5 Missing data reads as success | **Resolved in spec** | Positive verification |
-| H6 Executor is SYSTEM on hosts | **Open, required for EX-0003** | Per-run approval reduced it; EX-0003 gives a standing identity Run Command rights again. A fixed, content-hash-pinned script and a custom role are required before `restart-avd-agent` is active |
+| H6 Executor is SYSTEM on hosts | **Resolved in spec** | One identity per playbook with a custom role listing only its actions; fixed Run Command scripts pinned by SHA-256 and checked before sending; Run Command resources deleted after use; an alert on any other Run Command writer; decision 0011's runbook pinned by content hash (§4.5) |
+| H7 Model data outside the Azure boundary | **Resolved in spec** | Keyed pseudonyms at collection with no stored mapping, redaction for GitHub, `AVD_BRAIN_MODEL` names the processor, `none` still works (§9.4) |
+| H8 Tenant-wide Graph permissions | **Resolved in spec** | No Graph permissions: host compliance from guest configuration and AMA; sign-ins optional at Tier 3 through the tenant admin's diagnostic setting (§4.2) |
+| H9 Always-on cost | **Resolved in spec** | Tiers; no AI Search by default (Cosmos DB vector search at Tier 3); the embedding model listed; priced at deploy; the brain's own budget trips `halt-all` (§3.1, §5) |
 | M1 Prod level contradiction | **Resolved in spec** | One ladder, level 2 means approved |
 | M2 Policy outside Git | **Resolved in spec** | App Configuration removed; the kill switch is an ARM tag that can only lower the levels deployed from Git, and an unreadable tag means stop (EX-0004) |
 | M3 Phase 3 exit can't be met | **Resolved in spec** | Exit in `test` with two or more hosts and drills |
 | M4 Blast radius has no headroom | **Resolved in spec** | Demand plus one host, or the scaling plan's minimum |
 | M5 Thin promotion evidence | **Resolved in spec** | Entering EX-0003 needs 10 test runs plus 3 prod runs; the first rollback suspends the playbook |
 | M6 Targets vs. timings | **Resolved in spec** | Split into time to plan and time from approval to verified fix |
-| H2, H7, H8, H9, M7-M10, S1, S2 | Open | Not affected by the rule |
+| S1 Too big for one maintainer | **Addressed in spec** | The owner clarified that the project is for the community, with one maintainer, possibly for good. Answer: tiers with Tier 1 as the small supported core; one language (PowerShell and Bicep, no custom MCP server); Tiers 2–3 experimental until verified; a project/adopter split; solo mode (§3.1, §3.2, §9.3). The residual risk, one maintainer, is in spec §12 |
+| S2 Measure before you heal | **Resolved in spec** | Phase 1 exits with a ranked signature list from 30 days of real data, and phase 2 takes its playbooks from the top of it |
+| M7-M10 | Open | Medium findings not yet folded in |
 
 New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. The owner then decided that the budget Lock stays a **pre-approved exception**, and that more exceptions will follow (spec §4.5.1). That reopens C4 for a new path: exceptions are the one way around approval, so the CI rule that agents can't touch `brain/exceptions/`, together with CODEOWNERS, is now required, not optional. Self-healing then became exception EX-0003 (spec §4.5.1), which brings C1 and H6 back to full weight for the playbooks it lists. The kill switch became EX-0004 (spec §4.5.1). It is held in an ARM tag, which also settles the kill-switch half of H1, and it cuts the executors' federated credentials, so a stop doesn't depend on the brain's own code behaving.
 
-All four critical findings are now resolved in the spec. The open findings are H2, H6 (required before `restart-avd-agent` enters EX-0003), H7, H8, H9, M7-M10, S1 and S2.
+All critical and high findings are now resolved in the spec, and S1 is addressed. Q8 is decided as solo mode (spec §9.3). The open findings are M7-M10 (medium).
 
 ## Next step
 
-Fold C1-C4, H1-H9 and S1 into the spec and the decision record. Then answer Q1, Q3 and Q6 with the data phase 1 produces.
+Fold M7-M10 into the spec. Then answer Q1 and Q6 with the data phase 1 produces.

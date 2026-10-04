@@ -61,37 +61,65 @@ Each comes from something this repo already learned.
 | P9 | Never make operators remember secrets, or carry state between sessions in their heads. | lesson 0002, 0015 |
 | P10 | A person approves every change the brain makes before it is made: one approval, one exact plan, one run. Pre-approved exceptions are written, dated and owned by people in Git, with deterministic triggers. Enforced by Azure (no token without an approval or an exception), not only by process. | Owner requirement, 2026-10-04 |
 
+### 3.1 Tiers: adopt as much as you need (red-team S1)
+
+The brain is for the community, and one person maintains it. So it comes in tiers. Each tier is useful on its own and adds the fewest services that make it work. An adopter picks one with `AVD_BRAIN_TIER` (`0` to `3`, guarded with `empty(...)`, lesson 0004). `0`, the default, deploys nothing.
+
+| Tier | What it does | What it adds in Azure | Highest level |
+|---|---|---|---|
+| **0 Off** | Today's landing zone | Nothing | — |
+| **1 Notice** | Detections raise alerts. A scheduled job runs the preflight and collects pseudonymized evidence, then opens one issue per episode in the adopter's private repo. Claude Code in Actions posts a diagnosis citing the lessons. A weekly digest. The kill switch | Container Apps environment and job, a private Blob container, alert rules, the watchdog Logic App, two small subnets | 1 Recommend |
+| **2 Approved fixes** | Plans, the approval gate and the executor (§4.5); playbooks chosen from Tier 1's ranked signature list | One executor identity per playbook with a custom role | 2 Approve and run |
+| **3 Memory and agents** | Episodes and vector retrieval in Cosmos DB, Foundry agents, the orchestrator, Retro and Evolve PRs, self-healing (EX-0003) | Durable Functions, Cosmos DB, Foundry with a chat model and an embedding model; Azure AI Search only if the estate outgrows Cosmos DB vector search | 2S and 3 |
+
+What keeps this maintainable by one person:
+
+- **One language.** Everything new is PowerShell and Bicep: the job, the playbooks, the orchestrator (Durable Functions supports PowerShell) and the agents' tools. PSScriptAnalyzer, Pester and the offline harness already cover them. No custom MCP server and no new runtime.
+- **Tier 1 is the supported core.** Tiers 2 and 3 are marked **experimental** until real runs have verified them (decision 0006), the same way decision 0011 recorded what it hadn't verified.
+- **Small surface first.** Without Tier 3, episodes live as GitHub issues plus Blob evidence. Retrieval is the Git checkout itself, which Claude Code reads.
+
+### 3.2 The project and its adopters
+
+There are two roles, and the safety rules apply to each one differently.
+
+| | The project | An adopter |
+|---|---|---|
+| Who | This public repository and its one maintainer | An organization, or a person, running the brain in their own tenant |
+| Where the brain runs | Nowhere: the brain refuses to run in a public repository (§9.1) | A private fork, against their landing zone |
+| Ships or holds | Code, templates, detections, playbooks, generic lessons; exception **templates**; conservative defaults (`maxLevel = 1`, EX-0003 with no playbooks) | Their active exceptions, their EX-0003 entries, their approvers, their episodes |
+| Approvals | The maintainer alone, in **solo mode** (§9.3) | Solo mode with one approver; **team mode** with two or more |
+
+**Upstream changes are guardrail changes.** An adopter syncs from a **release tag**, never from `master`. Releases carry GitHub artifact attestations. A sync PR runs `brain-guard` (§9.2) like any other PR, so an adopter sees every guardrail field that upstream changed before merging it. Upstream never ships an active exception beyond EX-0001, EX-0002 and EX-0004, so a release can't turn on self-healing in someone's tenant.
+
 ## 4. Architecture
 
 ### 4.1 Overview
 
 ```
-                          ┌─────────────────────────────── GitHub ───────────────────────────────┐
-                          │ repo: IaC · lessons · decisions · detections · playbooks · evals     │
-                          │ Actions: validate · deploy (OIDC) · brain-evolve · brain-eval        │
-                          │ Issues/Projects: incident inbox · approvals · weekly digest          │
-                          └──────▲──────────────────────────▲─────────────────────▲──────────────┘
-                                 │ PRs (never merges)        │ index on push       │ issues (redacted)
-┌──────────── Sense ─────────┐   │                          │                     │
-│ Log Analytics (AVD Insights│   │   ┌──── Remember ────────┴───────┐   ┌──── Reason ─────────┴──────┐
-│  WVD*, FSLogix, perf)      │   │   │ Azure AI Search (hybrid +    │   │ Microsoft Foundry Agent    │
-│ Resource Graph + changes   ├───┼──►│  vector): repo docs, MS Learn│◄──┤  Service: triage, diagnose,│
-│ Activity Log, Service      │   │   │  excerpts, episodes          │   │  retro, evolve, critic     │
-│  Health, Advisor, Defender,│   │   │ Cosmos DB (NoSQL): episodes, │   │ Models: Claude or Azure    │
-│  Policy, Cost Management   │   │   │  signals, playbook stats     │   │  OpenAI, via Foundry       │
-│ Scheduled preflight state  │   │   │ Blob (immutable): evidence,  │   │ Tools via MCP: Azure MCP,  │
-│  lines (Automation)        │   │   │  state lines, KQL results    │   │  GitHub MCP, AVD-LZ MCP    │
-│ Graph: Intune compliance,  │   │   └──────────────────────────────┘   └─────────────┬──────────────┘
-│  sign-in logs              │   │                                                    │ proposals
-└────────────┬───────────────┘   │   ┌──── Act / Verify ──────────────────────────────▼──────────────┐
-             │ alerts, events    │   │ Durable Functions (Flex Consumption): incident orchestrator    │
-             └──────────────────►│   │ Approval gate: a person approves each exact plan (GitHub Env.) │
-               Event Grid        └───┤ Executor: Actions job, Azure token only after that approval    │
-                                     │ Guardrails: kill switch, Policy, blast radius, verification    │
-                                     └────────────────────────────────────────────────────────────────┘
+┌──── GitHub: the adopter's private repo ──────────────────────────────────────────────────────┐
+│ brain/: detections · playbooks · exceptions · prompts · evals    lessons · decisions · IaC   │
+│ Actions: diagnose (Claude Code) · execute (plan → approval → apply) · killswitch · resume    │
+│ Issues: one per episode, weekly digest              Environments: the approval gates         │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+        ▲ issues with pseudonymized evidence    │ approved job only → federated token
+        │ dispatch (a trusted trigger)          ▼
+┌──── Tier 1: Notice ──────────────────────────────────────────────────────────────────────────┐
+│ Scheduled query rules (detections) → alerts → Container Apps job (PowerShell 7.4, pinned)    │
+│   runs the preflight, collects and pseudonymizes evidence, opens issues, dispatches diagnosis│
+│ Blob (private, immutable): state lines, evidence      Watchdog Logic App: kill switch EX-0004│
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──── Tier 2: Approved fixes ──────────────────────────────────────────────────────────────────┐
+│ Executor identities, one per playbook, custom roles → ARM: drain, restart, pinned Run Command│
+│ Every run bound to an approved plan hash; positive verification; the approved rollback       │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──── Tier 3: Memory and agents ───────────────────────────────────────────────────────────────┐
+│ Durable Functions orchestrator (PowerShell) · Cosmos DB episodes + vector search             │
+│ Foundry agents (Claude or Azure OpenAI) calling PowerShell Functions as OpenAPI tools        │
+│ Self-healing EX-0003 · Retro and Evolve PRs · Azure AI Search only if needed                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-All new resources go into one new resource group, `rg-<prefix>-<env>-brain`, deployed by a new module `bicep/modules/brain.bicep`, opt-in through `AVD_BRAIN_ENABLED` (guarded with `empty(...)`, lesson 0004). A landing zone without it behaves exactly as today.
+All new resources go into one new resource group, `rg-<prefix>-<env>-brain`, deployed by a new module `bicep/modules/brain.bicep`, opt-in through `AVD_BRAIN_TIER` (§3.1). A landing zone at tier 0 behaves exactly as today. Network: two `/27` subnets in the spoke's free range: `snet-brain-jobs` (`10.100.2.64/27`, delegated to the Container Apps environment) and, at Tier 3, `snet-brain-func` (`10.100.2.96/27`, for the Functions app). In hub mode, the hub firewall must allow `github.com` and `mcr.microsoft.com` for the job.
 
 ### 4.2 Sense
 
@@ -103,8 +131,9 @@ All new resources go into one new resource group, `rg-<prefix>-<env>-brain`, dep
 | Platform health | Service Health, Resource Health | Activity Log alert → action group | First check of every connection incident |
 | Posture | Advisor, Defender for Cloud, Policy compliance | Scheduled pull, REST | Same sources as `-WellArchitected` |
 | Cost | Cost Management exports to Blob; budget alerts | Export + action group | Budget lock already exists (0011) |
-| Landing zone health | Post-deployment preflight run on a schedule by Automation (`-SkipTenant -SkipNtfs`, plus `-WellArchitected` weekly) | State line `<<<AVDLZ-STATE ...>>>` written to Blob | Reuses the portal's contract unchanged |
-| Device and identity | Microsoft Graph: Intune managed device compliance, Entra sign-in logs (diagnostic settings to Log Analytics) | Pull / diagnostic settings | Read-only |
+| Landing zone health | Post-deployment preflight (`-SkipTenant -SkipNtfs`, plus `-WellArchitected` weekly), run by a **Container Apps job** on a schedule (red-team H2) | State line `<<<AVDLZ-STATE ...>>>` written to private Blob | Same scripts and modules as Cloud Shell, so the portal's contract holds |
+| Host compliance | Azure Policy guest configuration assignments and the Azure Monitor Agent on the hosts | ARM and Log Analytics | No Graph permissions (red-team H8) |
+| Sign-ins (optional, Tier 3) | Entra sign-in logs, through a diagnostic setting **the tenant admin owns**, filtered by the DCR to the AVD and Windows Cloud Login apps | Log Analytics | Needs Entra ID P1 or P2. The brain holds no Graph application permissions |
 | Code and CI | GitHub: workflow runs and PRs in the brain's private repository | Webhook → Function | Public `portal-report` issues are **not** signals (§9.1) |
 
 Every signal is normalized into a **Signal** (§6.1) with a **signature**: a stable hash of what failed, not when or where (for example `wvd-agent-unhealthy:upgrade-failed`, `fslogix-attach:0x00000005`). Signatures are how the brain recognizes "we've seen this before".
@@ -115,6 +144,14 @@ Every signal is normalized into a **Signal** (§6.1) with a **signature**: a sta
 - An agent can add a **hypothesis** ("this looks like `fslogix-attach:0x00000005`"), lower an episode's level, or ask for a person. It can never set or change the signature.
 - Playbooks are selected only by signature. When Diagnose suggests a playbook for an episode with an unknown signature, the plan is marked `agent-classified`. It always needs approval of each run, it is never eligible for EX-0003, and the approver sees that the brain guessed the match.
 
+**The scheduled job (red-team H2).** The preflight needs PowerShell 7 with Az modules, which Automation can't pin (the reason decision 0011 went module-free). So a Container Apps job runs it:
+- the image is `mcr.microsoft.com/azure-powershell`, pinned by digest, so its module versions are recorded;
+- it runs the repo's scripts at the deployed commit;
+- it signs in with `Connect-AzAccount -Identity`, using a read-only identity;
+- it is VNet-integrated in `snet-brain-jobs`, so it reaches the private Blob container and Key Vault.
+
+The same job collects and pseudonymizes evidence (§9.4), opens or updates episode issues as the brain's GitHub App, and dispatches diagnosis (a trusted trigger, §9.1). The job's image digest is a guardrail (§9.2), and moving to a new image is a PR.
+
 **Detections are code.** Each one is a KQL file with metadata in `brain/detections/` (§7). The Bicep module turns them into scheduled query rules, so a detection changes only by PR, and a template test checks that every detection compiles and names a playbook or `notify-only`.
 
 ### 4.3 Remember
@@ -123,39 +160,39 @@ Five kinds of memory, each with one home.
 
 | Memory | Holds | Home | Written by |
 |---|---|---|---|
-| **Semantic** | Lessons, decisions, docs, gotchas, curated Microsoft Learn excerpts | Git (canonical) → indexed into Azure AI Search on push | People and PRs only |
+| **Semantic** | Lessons, decisions, docs, gotchas, curated Microsoft Learn excerpts | Git (canonical). Tiers 1–2 read the checkout directly; Tier 3 embeds it into Cosmos DB vector search on push | People and PRs only |
 | **Procedural** | Detections, playbooks, guards, evals | Git (`brain/`) | People and PRs only |
-| **Episodic** | Incidents: signals, evidence, hypotheses, actions, outcomes | Cosmos DB for NoSQL (system of record) + AI Search (retrieval) | Orchestrator |
+| **Episodic** | Incidents: signals, evidence, hypotheses, actions, outcomes | Tiers 1–2: a GitHub issue plus Blob evidence. Tier 3: Cosmos DB for NoSQL, with vector search | Job / orchestrator |
 | **State** | What exists now and what changed | Resource Graph, Log Analytics (queried live, never copied) | Azure |
-| **Statistical** | Baselines per host pool and hour of week; playbook success rates; signature frequency | Cosmos DB, refreshed daily | Learn job |
+| **Statistical** | Baselines per host pool and hour of week; playbook success rates; signature frequency | Tiers 1–2: a JSON file in Blob, refreshed daily. Tier 3: Cosmos DB | Job / Learn job |
 
 Why this split:
 
 - **Git is the long-term memory and the only place policy lives.** It is reviewed, versioned and already wired to CI. An agent can propose to it but never write to it directly.
-- **Cosmos DB holds the short-term, tenant-specific memory** that must not reach a public repo: resource names, UPNs, timings. Serverless capacity mode keeps idle cost near zero; its vector search could replace AI Search for small estates (open question Q3).
-- **Azure AI Search** gives hybrid retrieval (keyword + vector + semantic ranker) across both, so "this looks like lesson 0011" and "this looks like episode from last Tuesday" come from one query. Every answer cites its sources.
+- **Tenant-specific memory never reaches a public repo:** resource names, timings and pseudonyms. At Tiers 1–2 it lives in the private repo's issues and in Blob. At Tier 3 it lives in Cosmos DB, whose serverless mode keeps idle cost near zero.
+- **Retrieval at Tier 3 is Cosmos DB vector search** over the embedded repo knowledge and the episodes, so "this looks like lesson 0011" and "this looks like last Tuesday's episode" come from one query, and every answer cites its sources. Azure AI Search is an option for large estates only, because it has no serverless tier and its private networking needs a billed tier that runs all month (red-team H9; Q3).
 - **Evidence is immutable.** Raw outputs go to Blob with a time-based immutability policy, and episodes reference them by hash. A diagnosis can always be re-checked against what was actually returned.
 
 Retention: episodes 13 months (a year of seasonality plus one month), evidence 90 days unless pinned by a lesson, signals 30 days. Lifecycle management deletes the rest.
 
 ### 4.4 Reason
 
-Agents run in **Microsoft Foundry Agent Service**, with the model chosen per agent. Claude models are available through Foundry, so one platform hosts both Claude and Azure OpenAI models. The repo already uses Claude Code for development; the `brain-evolve` and `brain-retro` workflows use Claude Code in GitHub Actions, so code changes go through the same path people use today.
+**Tiers 1–2:** one agent, Diagnose, as Claude Code in GitHub Actions. The scheduled job dispatches it with an episode ID. It reads the episode issue and the repo, has read-only Azure access, and writes one comment. **Tier 3:** the agents below run in **Microsoft Foundry Agent Service**, with the model chosen per agent (Claude or Azure OpenAI). The `brain-evolve` and `brain-retro` workflows use Claude Code in GitHub Actions at every tier where they are enabled, so code changes go through the same path people use today. Where model calls are processed is a deployment choice (§9.4).
 
 | Agent | Trigger | Reads | Produces | Can act? |
 |---|---|---|---|---|
 | **Triage** | New signal | Signal, recent episodes with the same signature, Service Health | Severity and a summary of an episode the orchestrator opened or merged deterministically; may lower the level or ask for a person, never set the signature | No |
-| **Diagnose** | Episode opened, unknown signature or playbook asks | Logs (KQL), Resource Graph changes, preflight state lines, AI Search over lessons and episodes | Ranked hypotheses, each with evidence links and a confidence; a proposed playbook or "escalate" | No |
+| **Diagnose** | Episode opened, unknown signature or playbook asks | Logs (KQL), Resource Graph changes, preflight state lines, the repo checkout (Tiers 1–2) or vector search over lessons and episodes (Tier 3) | Ranked hypotheses, each with evidence links and a confidence; a proposed playbook or "escalate" | No |
 | **Critic** | Before any plan goes to a person, and before any PR | The proposal and its evidence | Agreement, or a dissent shown to the approver beside the plan. A second model or prompt that argues against the proposal | No |
 | **Retro** | Episode closed with a new signature, or a signature repeated ≥3 times in 30 days | Episode, evidence, `.claude/skills/retro/SKILL.md` | A draft PR: lesson + guard (+ detection, + playbook) | PR only |
 | **Evolve** | Weekly, or on drift | Resource Graph vs. what-if, utilization baselines, cost, WAF findings | PRs: codify or revert drift, sizing (`AVD_SESSION_HOST_*`, `AVD_PROFILE_QUOTA_GIB`), new alerts, AVM version bumps | PR only |
 | **Concierge** | Operator question (GitHub issue comment, Teams, portal) | Everything above, read-only | Answer with citations | No |
 
-Agents reach tools through **MCP**, each with an allowlist:
+Agents reach tools with an allowlist:
 
 - **Azure MCP Server**: read-only operations (Resource Graph, Log Analytics query, Monitor, Advisor).
 - **GitHub MCP**: issues, comments, branches and PRs on the brain's repository only.
-- **AVD-LZ MCP** (new, small, in this repo): wraps what already exists as typed tools: run the preflight and return its state line, the KQL catalog by name, `Invoke-AvdPowerAction -WhatIf`, the playbook catalog, and `propose_playbook_run(episodeId, playbookId)` (the orchestrator binds parameters from the episode; the agent supplies none). There is no tool that writes to Azure directly.
+- **AVD-LZ tools** (this repo, PowerShell): what already exists, as typed operations: run the preflight and return its state line, the KQL catalog by name, `Invoke-AvdPowerAction -WhatIf`, the playbook catalog, and `propose_playbook_run(episodeId, playbookId)` (the orchestrator binds parameters from the episode; the agent supplies none). Claude Code runs them as allowlisted commands. At Tier 3 they are PowerShell Azure Functions with an OpenAPI description, which Foundry agents call as OpenAPI tools. There is no tool that writes to Azure directly, and no custom MCP server to maintain.
 
 Everything an agent reads from logs, issues, comments or tool output is **untrusted data**. Prompts mark it as such; no instruction found in it can widen what the agent may do. The only way to act is `propose_playbook_run`, which produces a plan for a person to approve (§4.5). The proposal alone changes nothing.
 
@@ -197,7 +234,7 @@ The plan's hash is the SHA-256 of its canonical JSON.
   - "Prevent self-review" is on;
   - the brain's own GitHub identity is not a reviewer.
 
-  Prod and any plan that uses Run Command need two people: a second environment, `brain-<env>-second`, whose reviewer list shares no one with the first.
+  In team mode, prod and any plan that uses Run Command need two people: a second environment, `brain-<env>-second`, whose reviewer list shares no one with the first. Solo mode is in §9.3.
 - **Approve or reject, never edit.** A changed plan is a new plan with a new hash and a new approval. Rejecting needs a one-line reason.
 - **Silence is not approval.** An expired plan is rejected. The episode returns to the inbox with the Cloud Shell block for doing it by hand (lesson 0015). The brain never re-asks to pressure an approval.
 - **The rollback is part of what's approved.** Approving a plan approves only the rollback steps it lists, and they run only if verification fails. Anything else needs a new approval.
@@ -231,8 +268,13 @@ Playbooks are actions in `scripts/automation/Invoke-AvdPlaybook.ps1`. Like decis
   - session state that can't be read counts as occupied.
 - **Rate limits and circuit breaker:** at most N plans per playbook per hour. Three failed verifications in 24 hours demote the playbook to level 1 and open an issue.
 - **Change windows:** plans outside peak hours are preferred, and the approver sees when a plan falls inside them.
-- **Least privilege:**
-  - the executor has only the roles its playbooks need, on the landing zone's resource groups, and only through the approval environment;
+- **Least privilege (red-team H6):**
+  - **one executor identity per playbook**, each with a **custom role** listing only that playbook's actions, scoped to the hosts and AVD resource groups, and usable only through the approval environment or its EX-0003 environment. For example:
+    - `restart-avd-agent`: `virtualMachines/read`, `virtualMachines/runCommands/read|write|delete`, `hostpools/sessionhosts/read`;
+    - `recycle-empty-host`: `virtualMachines/read`, `virtualMachines/restart/action`, `hostpools/sessionhosts/read|write`, `sessionhosts/usersessions/read`;
+  - **Run Command scripts are fixed files** in `scripts/ops/host/`, Windows PowerShell 5.1, with no parameters or only enumerated ones. The playbook pins each script's SHA-256. The executor hashes the file at the approved commit, refuses on a mismatch, sends the script inline, reads back its output and deletes the Run Command resource afterwards;
+  - an Activity Log alert fires on `runCommands/write` by anyone except the deploy identity or an executor. A write by an executor without a matching plan trips the kill switch (EX-0004);
+  - decision 0011's runbook (EX-0001, EX-0002) is pinned by content hash as well (`publishContentLink.contentHash`; verify the property against the Automation API at build);
   - agents' identities are Reader plus Log Analytics Reader;
   - no identity can write role assignments, policy or Key Vault secrets.
 - **Azure Policy stays the outer wall.** A plan that would violate policy fails, and that failure is an episode, not a retry.
@@ -284,7 +326,7 @@ The owner approved self-healing as a category. A playbook enters EX-0003 only by
 
 - **Reversible and single-host:** it touches one session host and leaves nothing a restart can't undo. No identity, network, storage or control-plane changes.
 - **Deterministic trigger:** one detection signature, computed by the detection (red-team C1). Episodes the Diagnose agent classified are not eligible.
-- **Proven:** at least 10 approved, verified runs without a rollback in `test` (fault-injection drills allowed). For prod, at least 3 more approved, verified runs in prod, and the PR approved by two people.
+- **Proven:** at least 10 approved, verified runs without a rollback in `test` (fault-injection drills allowed). For prod, at least 3 more approved, verified runs in prod. The PR needs two people in team mode, or the 72-hour time-lock in solo mode (§9.3).
 - **Positive verification and a listed rollback**, as for every plan.
 - **Tested:** an offline scenario covering success, failed verification and every precondition that blocks it.
 
@@ -306,7 +348,7 @@ What still holds under EX-0003:
 
 Because no person approves each run, these red-team fixes become **required** before any playbook is active in EX-0003:
 - C1: signatures come only from detections (§4.2), and the `brain-guard` check is in place (§9.2);
-- H6: the Run Command script is fixed text, pinned by content hash, under a custom role scoped to the hosts resource group;
+- H6: the per-playbook identity and custom role, and the pinned Run Command script (§4.5);
 - M5: the first rollback suspends the playbook.
 
 **EX-0004 Kill switch**
@@ -371,7 +413,7 @@ Only a person can start the brain again. The brain never re-enables itself, and 
 1. Close the trip's episode with a reason.
 2. Run `brain-resume.yml`. It refuses while any trigger is still true.
 3. The workflow redeploys `brain.bicep`, which recreates the federated credentials, then clears the tag.
-4. dev and test need one person; prod needs the two required reviewers of the `prod` environment.
+4. dev and test need one person. Prod needs the `prod` environment's two required reviewers in team mode, or the owner after a 60-minute wait timer in solo mode (§9.3).
 
 Clearing the tag by hand restores nothing: without the redeploy the executors still have no credentials, and the watchdog trips again.
 
@@ -410,22 +452,24 @@ The Evolve agent proposes, CI checks, `test` proves, a person decides.
 | Log Analytics, Azure Monitor (scheduled query rules, action groups, DCR) | Sense | Already deployed; AVD Insights tables live here |
 | Event Grid (system and custom topics) | Signal bus | Push delivery to Functions with retries and dead-lettering |
 | Azure Resource Graph | State and change history | Free, fast, cross-resource |
-| Durable Functions (Flex Consumption) | Incident orchestration | Replayable state machine, VNet integration, scales to zero |
+| Container Apps (workload profiles environment, consumption) and a scheduled job | Tier 1: preflight, evidence, episode issues (red-team H2) | Pinned modules, VNet-integrated, PowerShell 7.4 |
+| Durable Functions (Flex Consumption, PowerShell) | Tier 3: incident orchestration and the agents' tools | Replayable state machine, VNet integration, scales to zero |
 | GitHub Actions + Environments | Approval gate and executor (§4.5) | The Azure token exists only after a person approves; same pattern as `deploy.yml` |
 | Azure Automation | Decision 0011's runbook only (exceptions EX-0001 and EX-0002); no brain playbooks | Unchanged |
-| Cosmos DB for NoSQL (serverless) | Episodic and statistical memory | Schemaless episodes, change feed for indexing, private endpoint |
-| Azure AI Search | Retrieval over repo knowledge and episodes | Hybrid + semantic ranking with citations |
+| Cosmos DB for NoSQL (serverless) | Tier 3: episodic and statistical memory, vector search | Schemaless episodes, built-in vector index, private endpoint |
+| Azure AI Search | Optional at Tier 3, large estates only | Hybrid + semantic ranking; always-on billed tier (red-team H9) |
 | Blob Storage (immutable container) | Evidence, state lines, cost exports | Tamper-evident audit |
-| Microsoft Foundry (Agent Service, models) | Reasoning | Hosts Claude and Azure OpenAI models, agent identities, tracing |
+| Microsoft Foundry (Agent Service, a chat model, an embedding model) | Tier 3: reasoning and embeddings | Hosts Claude and Azure OpenAI models, agent identities, tracing |
+| Budget on the brain's resource group | Every tier: its action group trips EX-0004 `halt-all` | The brain can't outspend its own budget (red-team H9) |
 | Logic App (Consumption), its own action group | Kill-switch watchdog (EX-0004) | Independent of the brain it stops; the same pattern as decision 0011's trigger Logic Apps |
-| Key Vault | Only for anything that cannot use a managed identity (ideally nothing) | Existing pattern |
+| Key Vault (the landing zone's) | The pseudonymization key (§9.4), generated at deployment and never shown | Existing pattern; lesson 0002 |
 | Managed identities, Microsoft Entra Agent ID (where available) | One identity per agent; the executor's identity is federated to the approval environment only | Least privilege, auditable per actor |
-| Private endpoints and private DNS | All of the above | Decision 0001 |
+| Private endpoints and private DNS | Blob, Cosmos DB, Key Vault, Functions | Decision 0001 |
 
 ### GitHub (required)
 
 - **Repository** as the long-term memory: `brain/` (detections, playbooks, evals, prompts) beside the existing IaC, lessons and decisions.
-- **Actions:** `validate.yml` gains the brain checks; new `brain-index.yml` (reindex on push), `brain-eval.yml`, `brain-evolve.yml` and `brain-retro.yml` (Claude Code in Actions, OIDC to Azure, read-only roles), and `brain-execute.yml` (plan, then approval-gated apply).
+- **Actions:** `validate.yml` gains the brain checks; new `brain-diagnose.yml` (Tier 1, dispatch only), `brain-index.yml` (Tier 3, re-embed on push), `brain-eval.yml`, `brain-evolve.yml` and `brain-retro.yml` (Claude Code in Actions, OIDC to Azure, read-only roles), and `brain-execute.yml` (plan, then approval-gated apply).
 - **Issues and Projects** as the inbox: one issue per episode that needs a person, labeled `brain`, with a weekly digest issue. Every change is approved through a GitHub Environment with required reviewers (§4.5).
 - **Org brain vs. public brain.** This public repo holds generic knowledge only, and the brain refuses to run in a public repository (§9.1). An organization runs the brain from a **private fork**, so issue bodies may contain more context; even there, issue text passes the redaction rules, and full detail stays in Cosmos DB and Blob, linked by episode ID.
 
@@ -439,7 +483,12 @@ The Evolve agent proposes, CI checks, `test` proves, a person decides.
 | Microsoft Sentinel | Security signals are in scope for the organization | Listed as a next layer in [out-of-scope.md](out-of-scope.md) |
 | PagerDuty or similar | On-call paging outside business hours | Action group webhook |
 
-Cost is driven mainly by AI Search tier, model tokens and Cosmos DB request units. Following decision 0010, the deploy step prices the brain from the retail price API and reports the meters it matched; this spec does not guess numbers.
+**Cost (red-team H9).**
+- Tier 1 runs on consumption meters: Container Apps job executions, Blob storage, alert rules, Logic App runs. Its model cost is per diagnosis.
+- Tier 3 adds Cosmos DB request units, Foundry tokens and embeddings, and AI Search only if it is chosen.
+- Following decision 0010, the deploy step prices the chosen tier from the retail price API and prints the meters it matched. This spec does not guess numbers.
+- Every tier deploys a budget on the brain's resource group (`AVD_BRAIN_MONTHLY_BUDGET`). Its action trips the kill switch (`halt-all`).
+- Decision 0011's budget is subscription-wide, so the brain's spend also counts toward the hosts' Lock. The brain's own budget is there to stop the brain well before that.
 
 ## 6. Contracts
 
@@ -499,7 +548,9 @@ runbook: scripts/automation/Invoke-AvdPlaybook.ps1   # one runbook, one action p
 action: RestartAgent
 parameters:
   sessionHostId: { from: episode.scope.sessionHost }
-approvers: { dev: 1, test: 1, prod: 2 }
+approvers: { dev: 1, test: 1, prod: 2 }      # team mode; solo mode uses 1 (§9.3)
+identity: brain-exec-restart-avd-agent      # its own custom role (§4.5)
+script: { path: scripts/ops/host/Restart-AvdAgent.ps1, sha256: <hash> }
 preconditions:
   - noActiveSessions          # unknown counts as occupied
   - notPowerLocked
@@ -552,7 +603,8 @@ brain/
   schemas/           signal, episode, playbook, exception JSON Schemas
 bicep/modules/brain.bicep
 scripts/automation/Invoke-AvdPlaybook.ps1
-scripts/brain/       Functions app (orchestrator) and the AVD-LZ MCP server
+scripts/brain/       the Tier 1 job entry point; Tier 3 Functions (orchestrator, agents' tools); all PowerShell
+scripts/ops/host/    Run Command scripts for playbooks (Windows PowerShell 5.1, hash-pinned)
 tests/offline/Playbooks.Scenario.ps1, Brain.Scenario.ps1, KillSwitch.Scenario.ps1
 tests/brain/         schema tests, detection compile tests, eval runner
 .github/workflows/   brain-index.yml, brain-eval.yml, brain-evolve.yml, brain-retro.yml, brain-execute.yml, brain-standing.yml,
@@ -592,9 +644,9 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 - **Data classification:** tenant identifiers, UPNs, resource names and IPs are confidential and stay in the tenant's stores. GitHub content passes redaction; public `brain/evals` cases are redacted fixtures only.
 - **Prompt injection:** logs, issue text, PR comments and tool output are untrusted (GitHub specifics in §9.1). Agents cannot act except through `propose_playbook_run`, which only produces a plan. The orchestrator checks schema, level and guardrails, the Critic reviews every plan, and a person approves it. Untrusted text is shown to the approver as quoted evidence, never as the plan's description.
 - **Identities:** one per agent and one per executor; no shared credentials; no secrets in prompts; OIDC for GitHub Actions. Registration tokens and similar short-lived secrets are created inside the runbook and never returned.
-- **Network:** all data stores private; the Functions app and AI Search use private endpoints and VNet integration in the brain's own subnet (a new `/27` in the spoke, or a peered management spoke in hub mode).
+- **Network:** all data stores are private. The job and the Functions app are VNet-integrated in their own `/27` subnets (§4.1).
 - **Audit:** every action has an episode, a plan with its hash, the approving person, the Actions run, Activity Log entries under the executor's identity, and a GitHub comment. Foundry tracing keeps agent steps.
-- **Model data handling:** the organization confirms the data processing terms of the chosen model deployment before enabling the Reason layer. Without it, Sense, Remember and level 0-1 playbooks still work, with diagnosis left to people.
+- **Model data handling:** see §9.4.
 
 ### 9.1 GitHub trust boundaries (red-team C3)
 
@@ -602,8 +654,8 @@ Anything a person outside the approvers team can write is untrusted input. That 
 
 1. **No brain in a public repository.** The brain runs only from a private repository. The orchestrator and every brain workflow read the repository's visibility through the API at startup and before every GitHub write. If the repository is public, they stop and trip EX-0004 (`halt-all`).
 2. **Public portal reports are not episodes.** `portal-report` issues in this public repo come from other people's tenants. They feed public knowledge only through the human retro (decisions 0006 and 0008). An organization's brain doesn't read the public repo's issues.
-3. **Workflows started by untrusted events hold no credentials.** Any workflow triggered by `issues`, `issue_comment`, `pull_request` from a fork, `pull_request_target`, `discussion` or `workflow_run` declares:
-   - `permissions: contents: read` and nothing else;
+3. **Workflows started by untrusted events hold no credentials.** Any workflow triggered by `issues`, `issue_comment`, `pull_request` from a fork, `pull_request_review`, `pull_request_target`, `discussion` or `workflow_run` declares:
+   - read-only permissions (`contents: read`, plus `pull-requests: read` for `brain-guard`) and nothing else;
    - no `id-token: write`, so no Azure;
    - no secrets;
    - no agent with write tools.
@@ -638,10 +690,47 @@ The brain may propose code, but never changes to what limits it. Two mechanisms 
 2. **People review every guardrail change.** CODEOWNERS names the owner and approvers teams for every protected path. Branch protection requires a code owner review, dismisses stale approvals on new commits, and allows no bypass, including for admins.
 3. **A deterministic summary goes with every guardrail change.** `brain-guard` posts a summary: which protected fields changed, old value → new value, and whether the change makes the brain more or less capable. CI produces it, not a model, so the reviewer doesn't rely on the brain's own description.
 4. **Evals are append-only.** Removing or changing a case needs a PR by a person, the label `eval-change`, and a reason recorded in `brain/evals/CHANGES.md`. `brain-eval` always runs the base branch's cases as well as the PR's, so a PR can't pass by editing the test it fails.
-5. **A guardrail change merged around the rules trips the kill switch.** The watchdog trigger "guardrail file changed without the required reviews" (EX-0004) checks the merged PR. It looks for an approving code owner review by a person who isn't the PR's author, or an owner as author for a guardrail change that only lowers capability. Any other merge, including a direct push, trips `halt-actions`.
+5. **A guardrail change merged around the rules trips the kill switch.** The watchdog trigger "guardrail file changed without the required reviews" (EX-0004) checks the merged PR against the team-mode or solo-mode path (§9.3). Any other merge, including a direct push, trips `halt-actions`.
 
-**Solo maintainer.** GitHub doesn't let authors approve their own PRs. With one owner, guardrail changes the owner writes can't get a second review. The rules allow an owner-authored change that **only lowers** capability, as `brain-guard` classifies it, to merge with the owner's own review. A change that raises capability, adds an exception, or adds a playbook to EX-0003 needs a second person. Until a second approver exists, those stay unmerged and the brain stays at approving each run (Q8).
+**Solo maintainer.** See §9.3: in solo mode, time and evidence stand in for the second person.
 
+### 9.3 Solo mode and team mode (resolves Q8)
+
+GitHub doesn't let an author approve their own PR, and an adopter may have only one person, like this project. The mode comes from how many people are in the approvers team: **solo mode** with one, **team mode** with two or more. In solo mode, **time and evidence stand in for the second person.** This is weaker than a second reviewer. It protects against a rash change and a hijacked session, which gets 72 hours to be noticed, not against a determined owner. Each adopter accepts that knowingly by running in solo mode.
+
+| Decision | Team mode | Solo mode |
+|---|---|---|
+| A plan, any environment | One approver who isn't the requester (the requester is the brain's App) | Same: one approver |
+| A prod plan, or any plan using Run Command | Two approvers, from environments that share no reviewers | One approver. The plan must show the script's hash and the targets' current state |
+| A guardrail change that **lowers** capability | A code owner's review | The owner merges once CI is green |
+| A guardrail change that **raises** capability: a new exception, an EX-0003 entry, a higher `maxLevel` or limit | Two code owners | A **72-hour time-lock**: the required check `brain-guard/timelock` stays pending until 72 hours after the last commit. Plus the deterministic summary (§9.2), and a pinned issue for the whole window |
+| An EX-0003 entry | The run record and the last kill-switch drill, checked by CI | Same, plus the time-lock |
+| Resuming after the kill switch, prod | The `prod` environment's two required reviewers | The owner, after a 60-minute wait timer on the resume environment |
+
+Branch protection in solo mode:
+- PRs required (no direct pushes) and status checks required, including `brain-guard`;
+- no required approval count, because GitHub can't count the owner's own review;
+- no bypass.
+
+`brain-guard` checks the rest itself:
+- a PR authored by the brain's App needs the owner's approving review, read with read-only permissions;
+- a PR that raises capability needs the time-lock.
+
+The watchdog's "merged around the rules" trigger (§9.2 rule 5) accepts the solo path, and only that path.
+
+
+### 9.4 Pseudonymization and model data (red-team H7)
+
+- **Pseudonymize at collection.** The job and the orchestrator replace user principal names, user display names, client public IPs and client device names with keyed pseudonyms (`user-3fa2c1d0`), using HMAC-SHA256.
+  - The key is a secret in the landing zone's Key Vault, generated at deployment and never shown to anyone (lesson 0002).
+  - Every brain store, every issue and every model prompt holds pseudonyms only.
+  - The brain keeps no mapping. To answer "who is `user-3fa2c1d0`?", an operator with access to the vault runs `Get-AvdPseudonym -UserPrincipalName <candidate>` in Cloud Shell, or queries Log Analytics, which keeps the raw data under its own access control.
+- **Redact as well.** The redaction rules of decision 0008 (`report.js`, ported to PowerShell with the same fixtures) run after pseudonymization on anything bound for GitHub.
+- **Where model calls go is an explicit choice:** `AVD_BRAIN_MODEL` = `none`, `anthropic-api`, `foundry-global` or `foundry-datazone`. The deployment prints who processes prompts.
+  - For Claude, Anthropic is an independent data processor even when Claude runs in Foundry, and there is no EU data zone for Claude today ([data privacy](https://learn.microsoft.com/en-us/azure/foundry/responsible-ai/claude-models/data-privacy)).
+  - The Tier 1 diagnosis through Claude Code in Actions is `anthropic-api`.
+  - With `none`, Tier 1 and Tier 2 still work, and diagnosis is left to people.
+- **Retention follows from pseudonymization.** Immutable evidence holds only pseudonymized data. Evidence pinned by a lesson must already be a redacted fixture.
 ## 10. Measures of success
 
 | Measure | Target after phase 4 |
@@ -668,9 +757,9 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 | Phase | Delivers | Max level | Exit criterion |
 |---|---|---|---|
 | **0 (done)** | Lessons and guards, state line, portal reports, WAF review, budget runbook | — | — |
-| **1 Sense and remember** | `brain.bicep` (Cosmos, Blob, AI Search, Event Grid, Functions), scheduled preflight, detection catalog, episodes, indexing of the repo, weekly digest issue | 0 | A real incident appears as an episode with its evidence and the changes before it |
-| **2 Diagnose** | Triage and Diagnose agents, Concierge, AVD-LZ MCP, eval harness with offline mock | 1 | Diagnoses cite the right lesson or episode in ≥ 80% of eval cases |
-| **3 Heal, approved** | Plan and approval flow, `brain-execute.yml`, `Invoke-AvdPlaybook.ps1`, first three playbooks, kill switch and watchdog (EX-0004) with its first drill | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback, which is EX-0003's entry criterion |
+| **1 Notice (Tier 1)** | Container Apps job, detections, episode issues, pseudonymization, the diagnosis workflow, digest, brain budget, kill switch and watchdog | 1 | A real incident appears as an issue with pseudonymized evidence, the changes before it and a cited diagnosis; a kill-switch drill passes; **a ranked list of signatures from at least 30 days of real data** (red-team S2) |
+| **2 Approved fixes (Tier 2)** | Plans, `brain-execute.yml`, per-playbook identities and custom roles, hash-pinned scripts; the first playbooks taken **from the top of the ranked list**, not from §8 | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback, which is EX-0003's entry criterion |
+| **3 Memory and agents (Tier 3)** | Cosmos DB episodes and vector search, Foundry agents, orchestrator, eval harness with the offline mock | 2 | Diagnoses cite the right lesson or episode in ≥ 80% of eval cases |
 | **4 Learn and self-heal** | Retro agent PRs, playbook statistics, rejection reasons, demotion, baselines; the first playbooks enter EX-0003 (test first, then prod) | 2S | A new signature reaches a lesson and guard drafted by the brain and merged by a person |
 | **5 Evolve** | Drift, right-sizing and posture PRs, test-then-prod rollout with soak, each deployment started by a person | 3 (PR) | One drift and one sizing PR merged and deployed through test |
 
@@ -680,21 +769,22 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 |---|---|
 | An agent's confident wrong diagnosis reaches the approver | A person approves every plan; the Critic's dissent and the raw evidence sit beside it; preconditions are re-checked at run time; verification and the approved rollback; demotion on failure |
 | Approval fatigue: people approve without reading | Plans readable in 30 seconds; duplicates merged before they reach a person; rejection needs a reason; approvals faster than a few seconds are flagged in the digest; the brain never re-asks to pressure an approval, and an expired plan stays expired |
-| A needed fix waits because nobody approves | Expiry returns the episode to the inbox with the Cloud Shell block for manual action; approver lists of at least two people per environment; on-call paging is optional (§5) |
+| A needed fix waits because nobody approves | Expiry returns the episode to the inbox with the Cloud Shell block for manual action; in team mode, approver lists of at least two people per environment; on-call paging is optional (§5) |
 | Alert storms flood episodes and token budgets | Triage merges by signature and scope; per-signature rate limits; token budget per day with a level-0 fallback |
 | The brain itself fails silently | Heartbeat detection on the orchestrator and indexer; the scheduled preflight reports `brain-*` checks; the brain is watched by Azure Monitor, not by itself |
 | Knowledge rot: lessons go stale as Azure changes | Each lesson gets a `last-verified` date; Retro flags lessons cited by failed playbooks; quarterly review issue |
 | The mock is more permissive than Azure, so playbooks pass tests and fail for real | Lessons 0020 and 0021 apply; every real playbook failure updates `AzMock.psm1` |
-| Cost creep | Consumption tiers where they exist; priced at deploy (decision 0010); the brain's resource group sits under the same budget and Lock |
+| Cost creep | Tiers (§3.1); consumption meters where they exist; priced at deploy (decision 0010); the brain's own budget trips `halt-all` |
+| One maintainer: the project stalls or the maintainer's account is compromised | One language; Tier 1 is the supported core and Tiers 2–3 are experimental until verified; adopters sync from attested release tags and see every upstream guardrail change through `brain-guard` (§3.2); upstream never ships active self-healing |
 | Tenant data leaks to GitHub | Redaction with tests; private fork for org brains; evidence stays in Blob |
 
 ## 13. Open questions
 
 - **Q1** Model choice per agent: Claude through Foundry for diagnosis and code, a smaller model for triage? Decide with the phase 2 eval set, not up front.
 - **Q2** Approval surface: GitHub Environments are where Azure can enforce approval. Are Teams notifications that link to them enough?
-- **Q3** Retrieval: Azure AI Search, or Cosmos DB vector search alone for small estates?
+- **Q3** ~~Retrieval?~~ **Decided:** the Git checkout at Tiers 1–2, Cosmos DB vector search at Tier 3, Azure AI Search only for large estates (red-team H9).
 - **Q4** One brain per landing zone, or one per organization over several landing zones (the episode schema allows `environment` and `scope` to span them)?
 - **Q5** Microsoft Entra Agent ID availability and roles in the target tenants, versus plain user-assigned managed identities.
 - **Q6** Image pipeline: host replacement is far stronger with a golden image (listed in [out-of-scope.md](out-of-scope.md) as a next layer). Build it before or alongside phase 3?
 - **Q7** ~~Does the budget Lock wait for approval?~~ **Decided 2026-10-04:** no; it stays a pre-approved exception (EX-0001). More exceptions will follow through §4.5.1. EX-0002 (scheduled Stop) confirmed the same day, and self-healing became EX-0003.
-- **Q8** Solo maintainer: guardrail changes that raise capability, new exceptions and EX-0003 entries need a second person (§9.2). Who is the second approver, or should the brain stay at approving each run until there is one?
+- **Q8** ~~Who is the second approver?~~ **Decided 2026-10-04:** there may never be one for the project. Solo mode (§9.3) replaces the second person with a 72-hour time-lock and evidence; adopters with two or more approvers run team mode.
