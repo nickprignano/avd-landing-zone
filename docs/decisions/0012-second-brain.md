@@ -11,6 +11,7 @@ Build the loop into the platform, as specified in [second-brain-spec.md](../seco
 - Remember in Git (lessons, decisions, detections, playbooks: reviewed, the only place policy lives), Cosmos DB (episodes, tenant-specific) and Azure AI Search (retrieval with citations).
 - Reason with agents in Microsoft Foundry that can only propose.
 - **A person approves every change before it is made.** The brain turns a proposal into a plan: exact targets, parameters, preconditions, verification and rollback, with a hash. A person approves that plan through a GitHub Environment, one approval per run, with no standing or batch approvals. Azure enforces this: the executor's identity is federated only to the approval environment, so no token exists until a person approves. Then deterministic, offline-tested playbook code runs, re-checks the plan, and verifies the result with positive evidence.
+- **Pre-approved exceptions** are the only changes without approval of each run. A person writes each one in `brain/exceptions/`: one action, a deterministic trigger (never an agent), a narrow scope, an owner, approvers and a review date. The first is decision 0011's budget Lock (EX-0001). More will follow the same way.
 - Learn and evolve by pull request only: lessons and guards through the retro routine, drift and sizing through CI and the `test` environment. The brain never merges or deploys to prod.
 
 ## Consequences

@@ -22,7 +22,7 @@ The **second brain** runs that same loop all the time, against the running estat
 - **Self-learning:** every incident becomes an **episode** with its evidence, diagnosis, action and outcome. Patterns that repeat become lessons, guards, detections and playbooks, through the retro routine that exists today.
 - **Self-evolving:** drift, sizing, cost and Well-Architected findings become **pull requests** against the IaC. CI validates them, they are tried in `test` first, and a person merges them.
 
-The rules that hold it all together: **the LLM reasons and proposes. A person approves every change before it is made. Deterministic, tested code makes it. Git is the only place knowledge becomes policy.**
+The rules that hold it all together: **the LLM reasons and proposes. A person approves every change the brain makes before it is made, except the few pre-approved exceptions people write down in Git. Deterministic, tested code makes it. Git is the only place knowledge becomes policy.**
 
 ## 2. Goals and non-goals
 
@@ -37,7 +37,7 @@ The rules that hold it all together: **the LLM reasons and proposes. A person ap
 
 ### Non-goals
 
-- **No change without a person.** The brain never writes to Azure, merges, deploys or changes its own configuration without a person first approving that exact change (§4.5). There is no autonomous mode, no standing approval and no "approve all similar".
+- **No change without a person.** The brain never writes to Azure, merges, deploys or changes its own configuration without a person first approving that exact change (§4.5). There is no autonomous mode and no "approve all similar". The only changes without approval of each run are **pre-approved exceptions** that people write, date and own in Git (§4.5.1), such as the budget Lock.
 - **No autonomous merge to `master` and no autonomous deployment, in any environment.** The brain opens PRs; people merge them; the `prod` GitHub Environment keeps its required reviewers.
 - **No changes to identity, Conditional Access or Intune policy.** They are the platform's job ([out-of-scope.md](out-of-scope.md)). The brain may observe and recommend.
 - **No reading of user data.** Profile contents, session contents and user files are off limits. Metadata (connection records, FSLogix event IDs, share metrics) is in.
@@ -59,7 +59,7 @@ Each comes from something this repo already learned.
 | P7 | Fail safe. Missing data, a failed verification or an unknown signature means stop and ask, never "try something". | lessons 0008, 0012 |
 | P8 | Tenant data stays in the tenant. Anything bound for GitHub passes the browser redaction rules (`report.js`) or a server-side port of them, with the same tests. | decision 0008 |
 | P9 | Never make operators remember secrets, or carry state between sessions in their heads. | lesson 0002, 0015 |
-| P10 | A person approves every change before it is made: one approval, one exact plan, one run. Enforced by Azure (no token without approval), not only by process. | Owner requirement, 2026-10-04 |
+| P10 | A person approves every change the brain makes before it is made: one approval, one exact plan, one run. Pre-approved exceptions are written, dated and owned by people in Git, with deterministic triggers. Enforced by Azure (no token without an approval or an exception), not only by process. | Owner requirement, 2026-10-04 |
 
 ## 4. Architecture
 
@@ -185,7 +185,7 @@ The plan's hash is the SHA-256 of its canonical JSON.
 
 **Approval rules**
 
-- **One approval, one run.** There are no standing, batch, time-window or "approve all similar" approvals. A playbook's track record changes how its plan is presented, never whether it needs approval.
+- **One approval, one run.** There are no batch, time-window or "approve all similar" approvals. Standing approval exists only as a pre-approved exception (§4.5.1). A playbook's track record changes how its plan is presented, never whether it needs approval.
 - **The approver is a person, and not the requester.** Approval uses a GitHub Environment per landing-zone environment (`brain-<env>`):
   - required reviewers come from an approvers team;
   - "Prevent self-review" is on;
@@ -232,6 +232,42 @@ Playbooks are actions in `scripts/automation/Invoke-AvdPlaybook.ps1`. Like decis
 
 **Verification is mandatory and positive.** Every playbook names fresh evidence that must appear after the action, such as the session host's `Available` status with a `lastHeartBeat` later than the run. Missing data is a failed verification, not a cleared alert. "Fixed" means verified (CLAUDE.md: "Fixed" means done), not "the command returned 200".
 
+### 4.5.1 Pre-approved exceptions
+
+The approval rule covers the changes the second brain process originates. Some changes have to happen without waiting for a person, and the owner has said there will be more of them. Each one is a **pre-approved exception**: a standing approval that a person writes down once, for one narrowly defined action, in `brain/exceptions/` (schema §6.5).
+
+There are two kinds:
+
+- **External:** automation outside the brain that a person configured, such as decision 0011's budget Lock. The brain doesn't run it and never changes or suppresses it. It records each use as an episode and can propose the follow-up, such as Resume, as an ordinary plan for approval.
+- **Standing:** a brain playbook allowed to run without approving each run.
+
+**Rules for every exception**
+
+1. **Only people create one.** People write and merge exceptions; CODEOWNERS on `brain/exceptions/` requires the approvers it names. A PR written by the brain that touches the folder fails CI (red-team C4). The brain may only point out candidates in the weekly digest, such as "approved 20 of 20 times, never rejected".
+2. **The trigger is deterministic:** a detection, a schedule or a budget threshold. It is never a model's output or an agent's judgment. No agent can invoke an exception.
+3. **Narrow:**
+   - one playbook action;
+   - named environments and resource groups;
+   - parameters bound by the orchestrator;
+   - limits on how many runs and how many hosts.
+4. **Owned and dated:** each exception names its owner and approvers, the reason, and a review date. A standing exception has a review date at most 180 days out. An external one is reviewed with the deployment parameters that configure it. When the review date passes, a standing exception falls back to approving each run, automatically.
+5. **Every use is on record:** the episode carries `approval.kind: standing`, with the exception ID and the commit that approved it. Each use is posted to the episode's issue and listed in the weekly digest.
+6. **The guardrails still apply:** blast radius, preconditions and positive verification. A failed verification or a rollback **suspends** a standing exception, so it falls back to approving each run, and opens an issue. Re-enabling it is a PR a person merges.
+7. **The kill switch stops standing exceptions.** It does not stop external ones, which have their own controls (the budget's threshold and action), so turning the brain off never turns off a cost safety.
+8. **Enforced by Azure:**
+   - Each standing exception has its own executor identity, with a custom role limited to its action and scope.
+   - That identity is federated to an environment (`brain-<env>-standing-<id>`) that only accepts the default branch. Its OIDC subject is customized to include the workflow file, so only `brain-standing.yml` on the default branch can get a token.
+   - Before acting, the workflow checks that the exception file at that commit is unexpired and unsuspended.
+
+**Registered exceptions**
+
+| ID | Kind | Action | Trigger | Scope | Approved | Review |
+|---|---|---|---|---|---|---|
+| EX-0001 | External | Budget **Lock**: drain, scaling plan exclusion tag, Start VM on Connect off, deallocate (decision 0011) | Budget actual cost reaches `autoShutdownBudgetPercent` | The landing zone's hosts | Owner, 2026-10-04 | With the budget parameters |
+| EX-0002 | External | Scheduled **Stop**: deallocate idle hosts (decision 0011) | The auto-shutdown schedule (`AVD_AUTO_SHUTDOWN_TIME`) | The landing zone's hosts | Proposed: same runbook as EX-0001, confirm with the owner | With the schedule parameters |
+
+Resume after a Lock is **not** an exception. It stays an approved plan (`budget-lock-review`, §8).
+
 ### 4.6 Learn
 
 - **Close every episode with an outcome:** `resolved-approved`, `rejected`, `expired`, `resolved-manual`, `escalated`, `false-positive`, `no-action`. A person's fix outside the brain is recorded too: the Retro agent asks for it on the issue.
@@ -263,7 +299,7 @@ The Evolve agent proposes, CI checks, `test` proves, a person decides.
 | Azure Resource Graph | State and change history | Free, fast, cross-resource |
 | Durable Functions (Flex Consumption) | Incident orchestration | Replayable state machine, VNet integration, scales to zero |
 | GitHub Actions + Environments | Approval gate and executor (§4.5) | The Azure token exists only after a person approves; same pattern as `deploy.yml` |
-| Azure Automation | Decision 0011's budget runbook only; no brain playbooks | Unchanged |
+| Azure Automation | Decision 0011's runbook only (exceptions EX-0001 and EX-0002); no brain playbooks | Unchanged |
 | Cosmos DB for NoSQL (serverless) | Episodic and statistical memory | Schemaless episodes, change feed for indexing, private endpoint |
 | Azure AI Search | Retrieval over repo knowledge and episodes | Hybrid + semantic ranking with citations |
 | Blob Storage (immutable container) | Evidence, state lines, cost exports | Tamper-evident audit |
@@ -326,7 +362,8 @@ Cost is driven mainly by AI Search tier, model tokens and Cosmos DB request unit
   "actions": [{ "playbook": "restart-avd-agent", "version": "git:<sha>", "level": 2,
                 "plan": { "hash": "sha256-...", "targets": ["/subscriptions/.../virtualMachines/..."],
                           "createdAt": "...", "expiresAt": "..." },
-                "approval": { "approvedBy": ["<github-login>"], "approvedAt": "...", "run": "<actions-run-url>" },
+                "approval": { "kind": "per-run | standing | external", "exception": null,
+                              "approvedBy": ["<github-login>"], "approvedAt": "...", "run": "<actions-run-url>" },
                 "result": "succeeded" }],
   "verification": { "detection": "cleared", "preflight": "Ready" },
   "outcome": "resolved-approved",
@@ -368,27 +405,49 @@ lesson: null
 
 Unchanged: the scheduled preflight writes the same `<<<AVDLZ-STATE {json} AVDLZ-STATE>>>` line the portal reads. The brain adds `stage: playbook` for playbook runs. Any new field goes through `portal-core.js` and its tests (decision 0007).
 
+### 6.5 Exception
+
+```yaml
+# brain/exceptions/EX-0001-budget-lock.yml
+id: EX-0001
+kind: external                     # external | standing
+title: Budget Lock
+action: { runbook: scripts/automation/Invoke-AvdPowerAction.ps1, name: Lock }
+trigger: { budget: { percent: autoShutdownBudgetPercent } }   # detection | schedule | budget; never an agent
+scope: { environments: [dev, test, prod], resourceGroups: [hosts, avd] }
+limits: { perDay: 1 }
+owner: <github-login>
+approvedBy: [<github-login>]
+approvedOn: 2026-10-04
+reason: Stop spending when the budget is exceeded; waiting for a person lets costs run on.
+review: { with: budget parameters }             # standing: { by: <date, at most 180 days out> }
+undo: Resume, as an approved plan (playbook budget-lock-review)
+decision: docs/decisions/0011-auto-shutdown.md
+```
+
 ## 7. Repository layout
 
 ```
 brain/
   detections/        <id>.kql + <id>.yml (signature, severity, playbook or notify-only, owner)
   playbooks/         <id>.yml (schema §6.3)
+  exceptions/        EX-NNNN-<slug>.yml (schema §6.5); CODEOWNERS: people only
   prompts/           one file per agent; versioned like code
   evals/             <case>/ signals.json, evidence/, expected.json (redacted)
-  schemas/           signal, episode, playbook JSON Schemas
+  schemas/           signal, episode, playbook, exception JSON Schemas
 bicep/modules/brain.bicep
 scripts/automation/Invoke-AvdPlaybook.ps1
 scripts/brain/       Functions app (orchestrator) and the AVD-LZ MCP server
 tests/offline/Playbooks.Scenario.ps1, Brain.Scenario.ps1
 tests/brain/         schema tests, detection compile tests, eval runner
-.github/workflows/   brain-index.yml, brain-eval.yml, brain-evolve.yml, brain-retro.yml
+.github/workflows/   brain-index.yml, brain-eval.yml, brain-evolve.yml, brain-retro.yml, brain-execute.yml, brain-standing.yml
 ```
 
 Template and CI guards to add with the first slice:
 
 - every detection compiles against the Log Analytics schema and names a playbook or `notify-only`;
 - every playbook validates against its schema, names an existing runbook action, has a scenario and a verification;
+- every exception validates against its schema, has a deterministic trigger, names a person as owner and approver, and has a review date in the future (standing) or a linked parameter (external); a PR written by the brain that touches `brain/exceptions/` fails;
 - every `AzMock.psm1` path a playbook calls exists (decision 0011's rule);
 - no prompt file contains tenant data (the PII sample test from decision 0008, run over `brain/`);
 - the new entry points carry the project notice (`tests/portal/disclaimer.test.mjs`).
@@ -428,7 +487,8 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 | Time from approval to verified fix | < 20 minutes |
 | Plans approved as proposed (not rejected or replaced) | ≥ 80%, with every rejection reason recorded |
 | Rollbacks after an approved run | < 2% of runs |
-| Changes made without an approval record | 0, checked against the Activity Log |
+| Changes made without an approval record (per-run approval or a registered exception) | 0, checked against the Activity Log |
+| Exceptions past their review date | 0 |
 | Episodes closed with a recorded outcome | 100% |
 | Eval accuracy (signature and playbook) | Reported per PR; no merge on a drop |
 | New signatures turned into lesson + guard within 7 days | ≥ 90% |
@@ -468,4 +528,4 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 - **Q4** One brain per landing zone, or one per organization over several landing zones (the episode schema allows `environment` and `scope` to span them)?
 - **Q5** Microsoft Entra Agent ID availability and roles in the target tenants, versus plain user-assigned managed identities.
 - **Q6** Image pipeline: host replacement is far stronger with a golden image (listed in [out-of-scope.md](out-of-scope.md) as a next layer). Build it before or alongside phase 3?
-- **Q7** Decision 0011's budget Lock acts without a person today: a person set its threshold and action at deployment, and it only stops spending. Keep it as that standing, pre-approved exception, or make it wait for approval like everything else?
+- **Q7** ~~Does the budget Lock wait for approval?~~ **Decided 2026-10-04:** no; it stays a pre-approved exception (EX-0001). More exceptions will follow through §4.5.1. Open: confirm EX-0002 (scheduled Stop).

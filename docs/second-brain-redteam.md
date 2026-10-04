@@ -168,7 +168,7 @@ The owner set a requirement: a person approves every change before it is made. T
 | M6 Targets vs. timings | **Resolved in spec** | Split into time to plan and time from approval to verified fix |
 | H2, H7, H8, H9, M7-M10, S1, S2 | Open | Not affected by the rule |
 
-New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. A new owner question, Q7: does decision 0011's budget Lock stay a pre-approved exception?
+New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. The owner then decided that the budget Lock stays a **pre-approved exception**, and that more exceptions will follow (spec §4.5.1). That reopens C4 for a new path: exceptions are the one way around approval, so the CI rule that agents can't touch `brain/exceptions/`, together with CODEOWNERS, is now required, not optional.
 
 ## Next step
 
