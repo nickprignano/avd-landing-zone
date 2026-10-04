@@ -114,5 +114,5 @@ Configuring ACLs for Entra identities depends on your identity type (hybrid vs c
 1. Recovery Services vault → Backup items → Azure Storage (Azure Files) → **Stop backup** and delete the data. Registration puts a delete lock on the storage account.
 2. `az group delete` the five `rg-<prefix>-<env>-*` groups (hosts first).
 3. Remove the `avdlz-*` policy assignments and their role assignments, the budget, and set Defender plans back to Free if you want.
-4. Delete the session hosts' device objects from Entra ID and Intune.
+4. Delete the session hosts' device objects from Entra ID and Intune, and purge the storage app (`[Storage Account] <account>.file.core.windows.net`) from Entra's deleted applications. The next deployment reuses the storage account name.
 5. Key Vault is soft-deleted with purge protection, and its name stays reserved for 90 days. To redeploy with the same prefix, the pre-deployment preflight with `-Fix` recovers it. See [gotchas](gotchas.md#key-vault-name-after-teardown).

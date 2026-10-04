@@ -150,7 +150,7 @@ function Invoke-AvdArm {
 
 $script:GraphReadScopes = @('Application.Read.All', 'Policy.Read.All', 'Group.Read.All', 'Directory.Read.All')
 $script:GraphFixScopes = @('Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'Policy.Read.All', 'Policy.ReadWrite.ConditionalAccess', 'Group.Read.All', 'Directory.Read.All')
-$script:GraphCleanupScopes = @('Device.ReadWrite.All', 'DeviceManagementManagedDevices.ReadWrite.All')
+$script:GraphCleanupScopes = @('Device.ReadWrite.All', 'DeviceManagementManagedDevices.ReadWrite.All', 'Application.ReadWrite.All')
 $script:GraphPreDeployFixScopes = @('Group.ReadWrite.All', 'Application.ReadWrite.All', 'Policy.Read.All', 'Directory.Read.All')
 
 function Connect-AvdGraph {

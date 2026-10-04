@@ -48,7 +48,7 @@ Connect-MgGraph -TenantId (Get-AzContext).Tenant.Id -UseDeviceCode -NoWelcome -S
 | Well-Architected review (`-WellArchitected`) | Reader on the subscription | — (with `-SkipTenant`) |
 | Preflight `-Fix` | Owner, or Contributor + Role Based Access Control Administrator | Cloud Application Administrator **and** Conditional Access Administrator |
 | Demo deploy | Owner, or Contributor + Role Based Access Control Administrator | Global Reader (Cloud Application Administrator with `-FixNtfs`) |
-| Cleanup | Owner | Intune Administrator + Cloud Device Administrator (to remove device objects) |
+| Cleanup | Owner | Intune Administrator + Cloud Device Administrator (to remove device objects); Cloud Application Administrator (to purge the storage app from deleted items) |
 
 ## Sizing and cost
 
@@ -166,7 +166,8 @@ With `-IncludeLandingZone`, you must type the landing zone name to confirm (`-Fo
 2. **The five landing zone resource groups**, in dependency order. First it deletes the Log Analytics workspace permanently. Deleting its resource group would only soft-delete it for 14 days, and the next deployment under the same name would recover it and fail on the AVD Insights data collection rule ([lesson 0023](lessons/0023-log-analytics-soft-delete.md)).
 3. **Subscription-level resources:** `avdlz-*` policy assignments with their role assignments, the budget, the activity-log diagnostic setting, and deployment records.
 4. **The landing zone hosts' device objects.**
-5. **Defender plans**, set back to Free, only with `-ResetDefender`.
+5. **The storage account's Entra app.** Deleting the storage account moves its Entra Kerberos app (`[Storage Account] <account>.file.core.windows.net`) and service principal to Entra's deleted items for 30 days. They still list the account's names, and the next deployment reuses the name, so the cleanup purges them. It waits up to 2 minutes for them to appear there.
+6. **Defender plans**, set back to Free, only with `-ResetDefender`.
 
 **Another landing zone in the subscription** (for example `parameters/test.bicepparam` beside dev, [demo.md](demo.md)) keeps what it still uses. The cleanup skips the policy assignments, keeps an activity log export that sends to the other landing zone's workspace, and removes only this landing zone's deployment records.
 

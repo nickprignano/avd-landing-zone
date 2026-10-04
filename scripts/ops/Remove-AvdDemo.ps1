@@ -24,6 +24,8 @@
       (with another landing zone in the subscription, only this one's budget,
       deployment records and an activity-log export to its own workspace)
     - Entra ID / Intune device objects of the landing zone hosts
+    - the storage account's Entra app, purged from Entra's deleted items (the next
+      deployment reuses the account name)
     - -ResetDefender also sets the Defender plans the landing zone enabled back to Free
 
   The Log Analytics workspace is deleted permanently first (a soft-deleted one is
@@ -92,6 +94,46 @@ function Remove-AvdDevice {
     }
     catch { Add-AvdCheckResult 'Devices' "Device objects for $name" 'Warn' -Detail $_.Exception.Message }
   }
+}
+
+function Remove-AvdStorageAppLeftover {
+  <#
+    Enabling Entra Kerberos creates the app '[Storage Account] <account>.file.core.windows.net'.
+    Deleting the storage account moves the app and its service principal to Entra's deleted items
+    for 30 days, still listing the account's names. The account name is deterministic, so the next
+    deployment's app would claim the same names: purge the leftovers (docs/rebuild-spec.md, rule 26).
+  #>
+  [CmdletBinding(SupportsShouldProcess)]
+  param([Parameter(Mandatory)][string] $StorageFqdn)
+  $name = "[Storage Account] $StorageFqdn"
+  $check = "Storage app '$name' in Entra deleted items"
+  if (-not $PSCmdlet.ShouldProcess($name, 'Purge from Entra deleted items (after the storage account is deleted)')) { return }
+  try { Connect-AvdGraph -Purpose Cleanup }
+  catch { Add-AvdCheckResult 'Entra ID' $check 'Warn' -Detail $_.Exception.Message -Remediation 'Purge it in Entra ID > App registrations > Deleted applications.'; return }
+  $filter = "displayName eq '$($name.Replace("'", "''"))'"
+  Write-Host '  waiting for the storage app to reach Entra''s deleted items (up to 2 minutes)' -ForegroundColor DarkGray
+  $found = @()
+  try {
+    for ($i = 1; $i -le 8 -and -not $found.Count; $i++) {
+      $found = @(foreach ($type in 'application', 'servicePrincipal') {
+          Invoke-AvdGraph -Uri (Get-AvdGraphFilterUri -Collection "directory/deletedItems/microsoft.graph.$type" -Filter $filter -Select 'id,displayName')
+        })
+      if (-not $found.Count) { Start-Sleep -Seconds 15 }
+    }
+    if (-not $found.Count) {
+      $active = @(Invoke-AvdGraph -Uri (Get-AvdGraphFilterUri -Collection applications -Filter $filter -Select 'id,appId'))
+      if ($active.Count) { Add-AvdCheckResult 'Entra ID' $check 'Warn' -Detail 'The app is still active, not deleted.' -Remediation 'Rerun the cleanup in a few minutes, or purge it in Entra ID > App registrations > Deleted applications once it is there.' }
+      else { Add-AvdCheckResult 'Entra ID' $check 'Pass' -Detail 'None found.' }
+      return
+    }
+    foreach ($o in $found) {
+      # Purging the app can take its service principal with it: a 404 on the second delete means it is gone.
+      try { Invoke-AvdGraph -Method DELETE -Uri "v1.0/directory/deletedItems/$($o.id)" | Out-Null }
+      catch { if ("$_" -notmatch '404|NotFound|does not exist') { throw } }
+    }
+    Add-AvdCheckResult 'Entra ID' $check 'Fixed' -Detail "Purged $($found.Count) deleted object(s) (app and service principal)."
+  }
+  catch { Add-AvdCheckResult 'Entra ID' $check 'Warn' -Detail $_.Exception.Message -Remediation 'Purge it in Entra ID > App registrations > Deleted applications.' }
 }
 
 function Remove-AvdResourceGroupIfPresent {
@@ -235,6 +277,11 @@ if ($ResetDefender) {
 }
 
 if (-not $KeepDevices) { Remove-AvdDevice -ComputerName $lzHosts }
+
+if ($lz.StorageFqdn) {
+  Write-AvdSection 'Entra ID'
+  Remove-AvdStorageAppLeftover -StorageFqdn $lz.StorageFqdn
+}
 
 if ($lz.KeyVault) {
   # Under -WhatIf nothing was deleted yet: say what will happen, not what has.

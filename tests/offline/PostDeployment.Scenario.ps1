@@ -21,6 +21,10 @@ $lawDelete = @($global:Calls | Where-Object { $_ -match '^ARM DELETE .*/workspac
 $lawBeforeRg = @($global:Calls).IndexOf(@($global:Calls | Where-Object { $_ -match '^ARM DELETE .*/workspaces/log-avdlz-dev' })[0]) -lt @($global:Calls).IndexOf(@($global:Calls | Where-Object { $_ -match '^del rg rg-avdlz-dev-management' })[0])
 Write-Host "RESULT remove-lz-workspace forceDeletes=$lawDelete beforeResourceGroup=$lawBeforeRg"
 Write-Host "RESULT remove-lz remainingRgs=$(@($global:St.rgs | Where-Object { $_ -like 'rg-avdlz-dev-*' }).Count)"
+# The storage account's Entra app goes to deleted items with the account; cleanup purges it (rule 26).
+$appPurge = @($global:Calls | Where-Object { $_ -match '^GRAPH DELETE v1\.0/directory/deletedItems/' })
+$afterRg = @($global:Calls).IndexOf($appPurge[0]) -gt @($global:Calls).IndexOf(@($global:Calls | Where-Object { $_ -match '^del rg rg-avdlz-dev-storage' })[0])
+Write-Host "RESULT remove-lz-storage-app deleteCalls=$($appPurge.Count) leftInDeletedItems=$(@($global:St.deletedItems).Count) afterStorageRg=$afterRg"
 
 # Two landing zones in one subscription (test beside dev, docs/demo.md): removing test keeps
 # what dev still uses (policy assignments, the activity log export to dev's workspace, dev's
