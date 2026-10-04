@@ -771,6 +771,11 @@ Branch protection in solo mode:
 
 The watchdog's "merged around the rules" trigger (§9.2 rule 5) accepts the solo path, and only that path.
 
+**AI reviews are advisory, in both modes.** No review by an app, a bot or a model ever satisfies a review requirement here. That includes the repo's own `claude-review.yml` (Claude Code in GitHub Actions), Claude Code Review, and any third-party reviewer.
+- `brain-guard` ignores reviews from any account that isn't a person, and only a person's approving review counts toward the team-mode and solo-mode rules above.
+- `claude-review.yml` posts comments only, on same-repo PRs and on demand. It points out guardrail changes and whether they raise or lower capability, but the 72-hour time-lock or the second person still decides.
+- An AI review that shares the author's blind spots adds little, and one that can be steered by PR text must never be the key that unlocks a guardrail change (red-team C4).
+
 
 ### 9.4 Pseudonymization and model data (red-team H7)
 
