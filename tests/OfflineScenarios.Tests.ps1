@@ -58,6 +58,12 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     $out | Should -Match 'RESULT remove-lz-workspace forceDeletes=1 beforeResourceGroup=True'
     $out | Should -Match '\[FIXED\] Log Analytics workspace log-avdlz-dev'
   }
+  It 'purges the storage account''s Entra app from deleted items after deleting the storage (rule 26)' {
+    $out | Should -Match 'RESULT remove-lz-storage-app deleteCalls=2 leftInDeletedItems=0 afterStorageRg=True'
+    $out | Should -Match "\[FIXED\] Storage app '\[Storage Account\] stavdlzdevabc123\.file\.core\.windows\.net' in Entra deleted items"
+    $whatIf = $out.Substring($out.IndexOf('######## remove-lz-whatif'), $out.IndexOf('RESULT remove-lz-whatif EXIT') - $out.IndexOf('######## remove-lz-whatif'))
+    $whatIf | Should -Match 'Purge from Entra deleted items'
+  }
   It 'removes every landing zone resource group' {
     Get-StepExit $out 'remove-lz' | Should -Be 0
     $out | Should -Match 'RESULT remove-lz remainingRgs=0'

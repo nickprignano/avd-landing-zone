@@ -184,7 +184,7 @@ Build these in from the start. Each one cost at least one failed run last time.
 25. The retail price list has lookalike meters: CloudServices products share VM SKU names, and Premium Page Blob shares disk meter names. Match on the product as well as SKU and meter, and print the product when a match fails. Price a line only when exactly one meter matches, otherwise report the meters seen. Never guess a price.
 26. Entra Kerberos over a private endpoint:
     - add the privatelink names to the storage app's identifier URIs;
-    - cleanup must purge the storage app from Entra's deleted items, because the storage account name is deterministic and the app's names would otherwise be claimed twice.
+    - cleanup must purge the storage app and its service principal from Entra's deleted items, because the storage account name is deterministic and the app's names would otherwise be claimed twice. They appear there as soon as the storage account is deleted; wait for them with a capped loop.
 
 ### Acceptance
 

@@ -236,7 +236,13 @@ function Get-AzDeployment { param($Name,$ErrorAction)
   $names = if ($null -ne $global:St.deployments) { $global:St.deployments } else { @('avdlz-governance-avdlz-dev-eastus2', 'avdlz-dev-20260929-101500') }
   if ($Name) { [pscustomobject]@{DeploymentName=$Name} } else { @($names | ForEach-Object { [pscustomobject]@{DeploymentName=$_} }) } }
 function Remove-AzDeployment { param($Name) Log "del deployment $Name"; if ($null -ne $global:St.deployments) { $global:St.deployments = @($global:St.deployments | Where-Object { $_ -ne $Name }) } }
-function Remove-AzResourceGroup { param($Name,[switch]$Force) Log "del rg $Name"; $global:St.rgs = @($global:St.rgs | ? { $_ -ne $Name }) }
+# Deleting the storage resource group deletes the storage account, which moves its Entra Kerberos app
+# and service principal to Entra's deleted items (as on 2026-09-29/30), still named after the account.
+function Remove-AzResourceGroup { param($Name,[switch]$Force) Log "del rg $Name"; $global:St.rgs = @($global:St.rgs | ? { $_ -ne $Name })
+  if ($Name -like 'rg-*-storage') {
+    $n = "[Storage Account] $saName.file.core.windows.net"
+    $global:St.deletedItems = @($global:St.deletedItems) + @(@{ id = "del-app-$Name"; type = 'application'; displayName = $n }, @{ id = "del-sp-$Name"; type = 'servicePrincipal'; displayName = $n }) | Where-Object { $_ }
+  } }
 function Get-AzRecoveryServicesVault { param($ResourceGroupName,$Name) [pscustomobject]@{Name=$Name;ResourceGroupName=$ResourceGroupName;ID="$S/rsv"} }
 function Update-AzRecoveryServicesVault { param($ResourceGroupName,$Name,$ImmutabilityState) Log "rsv immutability $ImmutabilityState" }
 function Set-AzRecoveryServicesVaultProperty { param($VaultId,$SoftDeleteFeatureState) Log "rsv softdelete $SoftDeleteFeatureState" }
@@ -319,6 +325,13 @@ function Invoke-MgGraphRequest { param($Method,$Uri,$Body,$ContentType,$OutputTy
   if ($Method -eq 'POST' -and $u -match 'v1.0/groups$') { $g=@{id=[guid]::NewGuid().ToString();displayName=$b.displayName;securityEnabled=$true}; $global:St.groups += $g; return [pscustomobject]$g }
   if ($Method -eq 'POST' -and $u -match 'v1.0/servicePrincipals$') { $global:St.avdSp=$true; return [pscustomobject]@{id='33333333-3333-3333-3333-333333333333';appId=$b.appId} }
   if ($Method -eq 'POST' -and $u -match 'checkMemberGroups') { return [pscustomobject]@{value=@($users)} }
+  if ($Method -eq 'DELETE' -and $u -match 'directory/deletedItems/(.+)$') {
+    $id = $Matches[1]; $item = @($global:St.deletedItems) | Where-Object { $_.id -eq $id }
+    if (-not $item) { throw "Response status code does not indicate success: 404 (Not Found). Request_ResourceNotFound: $id does not exist." }
+    # Purging an app takes its service principal with it, as Entra does.
+    $global:St.deletedItems = @(@($global:St.deletedItems) | Where-Object { $_.id -ne $id -and -not ($item.type -eq 'application' -and $_.type -eq 'servicePrincipal' -and $_.displayName -eq $item.displayName) })
+    return $null
+  }
   if ($Method -eq 'DELETE') { return $null }
   $r = switch -Regex ($u) {
     'groups/[0-9a-f-]+/members' { @{value=@(@{id='u1'})} }
@@ -337,6 +350,7 @@ function Invoke-MgGraphRequest { param($Method,$Uri,$Body,$ContentType,$OutputTy
         @{id='p3';displayName='Admins MFA';state='enabled';conditions=@{applications=@{includeApplications=@('All');excludeApplications=@()};users=@{includeUsers=@();includeRoles=@('62e90394')}};grantControls=@{builtInControls=@('mfa')}}
       )} }
     'users/' { @{id='u1';accountEnabled=$true;assignedLicenses=@(@{skuId='x'});userPrincipalName='alex@contoso.com'} }
+    "directory/deletedItems/microsoft\.graph\.(application|servicePrincipal)\?.*displayName eq '([^']+)'" { $t=$Matches[1]; $n=$Matches[2]; @{value=@(@($global:St.deletedItems) | ? { $_.type -eq $t -and $_.displayName -eq $n } | % { @{id=$_.id;displayName=$_.displayName} })} }
     'managedDevices\?' { @{value=@(@{id='md1';deviceName='x'})} }
     'devices\?' { @{value=@(@{id='d1';displayName='x'})} }
     default { throw "unmocked graph $u" }
