@@ -1,6 +1,6 @@
 # Spec: golden image pipeline and host rotation
 
-- **Status:** Proposed (see [decision 0013](decisions/0013-image-pipeline.md)); critical and high red-team findings folded in; medium and strategic findings open in [image-pipeline-redteam.md](image-pipeline-redteam.md)
+- **Status:** Proposed (see [decision 0013](decisions/0013-image-pipeline.md)); critical, high and medium red-team findings folded in; strategic findings open in [image-pipeline-redteam.md](image-pipeline-redteam.md)
 - **Date:** 2026-10-04
 - **Scope:** landing zones built from this repo. This is phase 0b of the [second brain spec](second-brain-spec.md), built before its phase 1 (Q6).
 
@@ -90,7 +90,7 @@ The two build subnets go into the **build environment's** spoke (`AVD_IMAGE_BUIL
 
 ### 4.2 Image versions
 
-- **Name:** `YYYY.MMDD.N`, for example `2026.1004.1`. Gallery versions are three integers, and this keeps them sortable by date.
+- **Name (red-team M1):** `YYYY.MDD.N` with **no zero padding**, for example `2026.1004.1` for October 4 and `2027.104.1` for January 4. Gallery versions are three integers, so a padded `0104` is invalid or gets normalized. Month × 100 + day still sorts by date when compared **numerically**, and every script compares versions numerically, never as strings. A template test covers a January and an October date.
 - **Tags on every version:**
   - `avdlz-commit`: the repo commit of the template and the scripts;
   - `avdlz-source-image`: the marketplace version AIB resolved from `latest`;
@@ -100,6 +100,7 @@ The two build subnets go into the **build environment's** spoke (`AVD_IMAGE_BUIL
 - **`excludeFromLatest: true`** at build. Promotion flips it, so nothing that asks for "latest" picks up an unvalidated build.
 - **Replicas (red-team H8):** one replica in **every region an environment uses**. `parameters/images.bicepparam` lists them, taken from each environment's location (decision 0003).
   - Storage is chosen per region: `Standard_ZRS` where the region has availability zones, `Standard_LRS` where it doesn't. A template test compiles both cases (lesson 0001).
+  - **Replica count (red-team M6):** one per 20 hosts created at once, at least 1. It's computed from the largest pool's `sessionHostCount` in that region, because rotation creates a whole pool's new generation at once (§6.5).
 - **Subscriptions:** when environments sit in different subscriptions, the images deployment grants Reader on the gallery to each environment's deploy identity. The preflight's `-SessionHostImageId` check (§6.1) verifies, from that environment's identity, that it can read the version and that the version is replicated to that environment's region.
 - **Retention (red-team H5):** the last three validated versions plus anything newer. An `endOfLifeDate` six months out is set at build. The build identity can't see any landing zone, so use is recorded on the version itself:
   - the rotation script, running with the landing zone's rights, sets `avdlz-in-use-<env>-<pool>=true` on a version when its Deploy phase succeeds, and clears that tag on the version it removes;
@@ -115,19 +116,22 @@ The two build subnets go into the **build environment's** spoke (`AVD_IMAGE_BUIL
   The schedule is a daily cron on days 15–21, and the job exits unless it's Monday. In a cron expression where both day-of-month and day-of-week are restricted, either field matches, so `0 6 15-21 * 1` alone would run every day from the 15th to the 21st and every Monday.
 - **`workflow_dispatch`** for out-of-band builds, such as a security fix.
 
+**One build at a time (red-team M2).** `image-build.yml` and `image-validate.yml` each run in a concurrency group, `image-build` and `image-validate`, and never cancel a run in progress. One version validates at a time. When a newer version passes §5.4 while an older one is still in validation, the newer one **supersedes** it: the older version is tagged `avdlz-validation=superseded`, its QA pools roll to the newer version at the next stage, and it is never promoted.
+
 The workflow uses OIDC to Azure through the `images` GitHub Environment. Its identity can deploy into the images resource group and run image templates there, and nothing else. Building doesn't change any landing zone: a new version is excluded from `latest`, and no host uses it until a person promotes it. So a scheduled build needs no approval.
 
 ### 5.2 Steps
 
+0. **Sweep orphans (red-team M7).** Delete `it-<prefix>-*` image templates older than 24 hours, left by a run that died, after saving their customization logs to the run's artifacts. Report what was removed. Deleting a template removes its staging resources.
 1. **Resolve and print:** the source image version that `latest` resolves to, the commit, and the new version name. If the source version and the commit both match the newest existing version, stop: nothing changed. The `force` input skips this check (§5.7).
 2. **Stage the inputs.** Hash the customizer scripts and the WDOT profile at that commit (SHA-256), and upload them to the private `image-build` container under `<commit>/`, with the WDOT archive from its verified mirror (§5.5). Adopters' repositories are private (second brain spec §9.1), so AIB can't fetch from GitHub; it reads the container with its own identity.
 3. **Deploy a per-build image template** (`bicep/images/build.bicep`). Templates are immutable, so each build gets its own, named after its version:
    - **source:** the platform image, at the version resolved in step 1;
-   - **`vmProfile`:** the AIB default build VM size, OS disk 127 GB, `vnetConfig` with `subnetId` = `snet-image-build` and `containerInstanceSubnetId` = `snet-image-aci` (isolated build, no proxy VM);
+   - **`vmProfile`:** a pinned size from `images.bicepparam`, by default 4 vCPUs from a current D-series (`Standard_D4s_v5`), OS disk 127 GB (red-team M3). Before the run, the workflow checks the build family's regional vCPU quota and stops with the quota request if it's short (lessons 0013, 0024). `vnetConfig` with `subnetId` = `snet-image-build` and `containerInstanceSubnetId` = `snet-image-aci` (isolated build, no proxy VM);
    - **`customize`:** §5.3, each script by `scriptUri` in the private container at `<commit>/`, with its `sha256Checksum`;
    - **`validate`:** §5.4, with `continueDistributeOnFailure: false`;
    - **`distribute`:** the gallery version from §4.2, with its tags;
-   - **`buildTimeoutInMinutes`:** 240.
+   - **`buildTimeoutInMinutes`:** 360. A cumulative update for Windows 11 multi-session with Microsoft 365 Apps, then WDOT and two restarts, can exceed 4 hours.
 4. **Run it.** Print a line before starting (lesson 0006), then poll `lastRunStatus` with a capped loop that ends on error (lesson 0008).
 5. **Save the logs.** Copy AIB's `customization.log` from the staging storage into the run's artifacts, whatever the result. On a failure, report the step, status, error code and log tail (lesson 0012).
 6. **Delete the template.** Deleting it also removes its staging resources.
@@ -173,6 +177,10 @@ AIB generalizes the VM (sysprep) after the last customizer, with its default dep
 - Windows and Microsoft 365 Apps automatic updates are off (§5.6).
 
 It prints one `RESULT <check> <Pass|Fail> <detail>` line per check, the format of the offline scenarios, so the build issue can quote it.
+
+**What it can't see (red-team M5).** AIB runs `validate` on the customized VM **before** generalizing it. A sysprep failure, and anything sysprep changes, isn't visible here. So:
+- the build checks that generalization succeeded, from the AIB run status and the end of the customization log, and fails the build if it didn't;
+- the QA host's first check (§6.3) is the first evidence from a generalized image, and the build issue says so.
 
 ### 5.5 WDOT optimizations
 
@@ -304,7 +312,7 @@ Validation runs by itself. Nobody has to start it or sit through it: every build
 | **4 `prod` soak** | As stage 2. Organic sign-ins by QA users are collected | As stage 2. The version is tagged `avdlz-validated=<date>` and `excludeFromLatest` is set to `false`. The build issue gets the promotion command |
 
 **The checks.** They are positive evidence (I4), and none of them needs a user's credentials:
-- **Landing zone:** the post-deployment preflight comes back **Ready**. It runs read-only (`-SkipTenant -SkipNtfs`, never `-Fix`).
+- **Landing zone:** the post-deployment preflight comes back **Ready**. It runs read-only (`-SkipTenant -SkipNtfs`, never `-Fix`), with a defined check list, `-Profile ImageValidation` (red-team M8). Checks that need data-plane access or Graph, which the identity doesn't have, are reported as **skipped**, never failed. The in-host check covers what Reader can't see.
 - **Host, from Azure:**
   - Available, accepting sessions, and every AVD session host health check passing;
   - running the expected image version;
@@ -376,6 +384,7 @@ Other rules:
 - **The scaling plan keeps running.** It doesn't route new sessions to drained hosts, and it may deallocate empty old hosts early, which is harmless.
 - **The break-glass password** (decision 0004) is new for the new hosts. Key Vault holds the latest password, as today.
 - **Rollback:** before **Remove**, rotating back is the same script in reverse: undrain the old generation and drain the new one. After **Remove**, rolling back means rotating to the previous validated version (§4.2).
+- **Large pools (red-team M6):** the Deploy phase creates new hosts in batches of 20 per replica, waiting for each batch to report Available before the next. That keeps within the gallery's replica throughput.
 - **No surge capacity** (quota or cost): `-BatchSize` isn't in v1. The script stops at **Check** with the quota request, rather than shrinking capacity silently.
 
 ### 6.6 Teardown (red-team H4)
@@ -437,6 +446,9 @@ Guards, added with the first slice, following decision 0006:
 | Guard | Catches |
 |---|---|
 | Template test: parameter files compiled with `AVD_SESSION_HOST_IMAGE_ID` unset, empty and set | The empty-string trap (lesson 0004); the marketplace default holding |
+| Template test: version names for a January and an October date are valid and compare in date order; replica count follows the largest pool's size | M1, M6 |
+| Offline scenario `ImageBuild`, extra cases: an orphaned template is swept with its log saved; a build family short on quota stops before the run; a failed generalization fails the build; a newer version supersedes one in validation | M2, M3, M5, M7 |
+| Offline scenario `ImageValidation`, extra case: a preflight check the identity can't run is reported skipped, not failed | M8 |
 | Template test: names unchanged with the default generation; valid and distinct for `a` and `b`; at most 15 characters | Replacing existing hosts by accident; NetBIOS length |
 | Template test: the definition is V2 with `TrustedLaunch` and accelerated networking; replica storage is ZRS in a zoned region and LRS in one without zones | Trusted Launch deployment failures; lesson 0001 |
 | Template test: every customizer in the build template has a `sha256Checksum` and a `scriptUri` in the private `image-build` container | Unpinned scripts; GitHub fetches that fail for private forks (C4) |

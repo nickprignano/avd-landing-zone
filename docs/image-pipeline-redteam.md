@@ -224,8 +224,16 @@ In a lab, or an adopter's small deployment, nobody signs in to the QA desktop ev
 | H7 Protected list and self-updating apps | **Resolved in spec**: an extended list plus functional checks; self-updating components listed; Defender platform to verify (§5.5, §5.6) |
 | H8 Regions and subscriptions | **Resolved in spec**: a replica per environment region, a Reader grant per identity, a preflight check (§4.2) |
 | H9 Clashes with the second brain | **Resolved in spec**: allowlisted on QA groups only (second brain spec §4.5); a stop through `manual` and the kill-switch workflow; QA log-off at 1 hour (§6.3, §6.5) |
-| M1-M8, S1, S2 | Open |
+| M1 Version names with leading zeros | **Resolved in spec**: `YYYY.MDD.N`, no padding, numeric comparison (§4.2) |
+| M2 Concurrent builds | **Resolved in spec**: concurrency groups; one version validates at a time; newer supersedes (§5.1) |
+| M3 Build VM size and timeout | **Resolved in spec**: a pinned 4-vCPU D-series size, 360 minutes, a quota check first (§5.2) |
+| M4 WDOT archive stability | **Resolved in spec** with C4: pinned by commit SHA, mirrored privately once verified, builds use the mirror (§5.5) |
+| M5 Validation before sysprep | **Resolved in spec**: generalization success checked from the run; the QA host named as the first post-sysprep evidence (§5.4) |
+| M6 One replica during a surge | **Resolved in spec**: replicas per 20 hosts created at once; Deploy in batches (§4.2, §6.5) |
+| M7 Orphaned templates | **Resolved in spec**: a sweep at the start of each build (§5.2 step 0) |
+| M8 Read-only preflight | **Resolved in spec**: `-Profile ImageValidation`; checks it can't run are skipped, not failed (§6.3) |
+| S1, S2 | Open |
 
 ## Next step
 
-Record S1 in decision 0013, fold M1-M8 into the spec, and decide S2's approach to sign-in evidence before the image pipeline is built.
+Record S1 in decision 0013 and decide S2's approach to sign-in evidence before the image pipeline is built.
