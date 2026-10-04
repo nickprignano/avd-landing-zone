@@ -232,8 +232,9 @@ In a lab, or an adopter's small deployment, nobody signs in to the QA desktop ev
 | M6 One replica during a surge | **Resolved in spec**: replicas per 20 hosts created at once; Deploy in batches (§4.2, §6.5) |
 | M7 Orphaned templates | **Resolved in spec**: a sweep at the start of each build (§5.2 step 0) |
 | M8 Read-only preflight | **Resolved in spec**: `-Profile ImageValidation`; checks it can't run are skipped, not failed (§6.3) |
-| S1, S2 | Open |
+| S1 Native session host update | **Resolved in spec**: the comparison and a revisit trigger in decision 0013; a note in §6.5; verified at each build phase (§11) |
+| S2 Sign-in evidence in small deployments | **Resolved in spec**: the approver signs in to the QA desktop once and promotion waits for it; overrides recorded and counted; Q8 moved to build step 4 (§6.3, §6.4) |
 
 ## Next step
 
-Record S1 in decision 0013 and decide S2's approach to sign-in evidence before the image pipeline is built.
+Every finding is resolved in the spec. What remains is verification: nothing here has run against a real tenant, and §11 of the spec lists what to confirm at build. Build step 1, then run a second red-team pass on the design as built, before rotation (step 3).

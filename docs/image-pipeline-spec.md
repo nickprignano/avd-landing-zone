@@ -1,6 +1,6 @@
 # Spec: golden image pipeline and host rotation
 
-- **Status:** Proposed (see [decision 0013](decisions/0013-image-pipeline.md)); critical, high and medium red-team findings folded in; strategic findings open in [image-pipeline-redteam.md](image-pipeline-redteam.md)
+- **Status:** Proposed (see [decision 0013](decisions/0013-image-pipeline.md)); all red-team findings folded in; see [image-pipeline-redteam.md](image-pipeline-redteam.md)
 - **Date:** 2026-10-04
 - **Scope:** landing zones built from this repo. This is phase 0b of the [second brain spec](second-brain-spec.md), built before its phase 1 (Q6).
 
@@ -334,9 +334,9 @@ Validation runs by itself. Nobody has to start it or sit through it: every build
 **What automation can't prove.** None of these checks signs in as a user. So a **real sign-in**, with its Entra Kerberos ticket and a mounted FSLogix profile, isn't covered. That's what QA users are for (§6.2):
 - the soak collects **organic** sign-ins to the QA host from `WVDConnections`, and the FSLogix result from the host's event log;
 - the promotion page shows how many completed sign-ins the version had, separately for members of the AVD Users group and for anyone else, and whether profiles attached;
-- a promotion with **no** organic sign-in is allowed, but the approver must acknowledge it, and the reason is recorded.
+- in small deployments, nobody may sign in to the QA desktop for days. So promotion itself collects the missing evidence (red-team S2, §6.4).
 
-An optional synthetic sign-in can close the gap later (Q8).
+A synthetic sign-in could close the gap without a person. It is researched in build step 4 (Q8).
 
 **What fails a version (red-team H2).** Checks are classified:
 - **Image-attributable:** the host's AVD health checks, the in-host function checks, the image version. Only these can fail a version.
@@ -363,11 +363,18 @@ An image-attributable check fails the version when it fails **two runs in a row*
 
 ### 6.4 Promotion
 
-`image-promote.yml` (`workflow_dispatch`) takes the version and the target environment. It runs in that GitHub Environment, so `prod`'s required reviewers approve it, or in solo mode, the owner after the wait timer (second brain spec §9.3). It refuses a version without `avdlz-validated`, which means automated validation passed in both QA pools (§6.3). It shows the approver the checks, the posture warnings, and the organic sign-ins and profile attaches on the QA hosts. With no sign-in, it asks for an acknowledgment and records the reason. It sets `avdlz-image-next` on the main pool and starts its rotation (§6.5). The pool's current image only changes when the rotation does (§6.1, red-team C2). It also lists stale QA device objects, with their IDs, for removal by a person with a Graph sign-in (§6.5).
+`image-promote.yml` (`workflow_dispatch`) takes the version and the target environment. It runs in that GitHub Environment, so `prod`'s required reviewers approve it, or in solo mode, the owner after the wait timer (second brain spec §9.3). It refuses a version without `avdlz-validated`, which means automated validation passed in both QA pools (§6.3). It shows the approver the checks, the posture warnings, and the organic sign-ins and profile attaches on the QA hosts. **One sign-in by the approver (red-team S2).** When the version has no completed sign-in by a member of the QA group on the target environment's QA host, promotion doesn't just ask for an acknowledgment, which would become a routine click.
+1. It asks the approver to sign in to the "QA desktop" once, through the Windows App, with an account in the QA group: a regular user account, not an admin account (§6.2).
+2. It waits up to 48 hours for that completed connection in `WVDConnections`, plus the FSLogix result from the host.
+3. Then it continues.
+
+So the person who approves is also the one real sign-in, with a real Entra Kerberos ticket and profile, that automation can't produce. Skipping the wait is still possible as an override with a recorded reason, for example in emergency mode (§5.7). Overrides are listed in the weekly digest, and the second brain counts them (`promotion-without-sign-in`, §7). It sets `avdlz-image-next` on the main pool and starts its rotation (§6.5). The pool's current image only changes when the rotation does (§6.1, red-team C2). It also lists stale QA device objects, with their IDs, for removal by a person with a Graph sign-in (§6.5).
 
 Adopters without GitHub Actions run the same steps from Cloud Shell: the portal gives the commands.
 
 ### 6.5 Rotation
+
+**Why a custom script (red-team S1).** Azure Virtual Desktop has a native **session host update**, used with a **session host configuration**. It replaces hosts with a new image or configuration under a management policy, and it overlaps most of this section. Published guidance at the time of writing says session host configuration doesn't support Microsoft Entra ID-joined hosts, which this landing zone uses exclusively (decision 0001), and that it applies to host pools created with it ([session host update](https://learn.microsoft.com/en-us/azure/virtual-desktop/session-host-update), [host pool management approaches](https://learn.microsoft.com/en-us/azure/virtual-desktop/host-pool-management-approaches)). This is to be verified at build (§11). Until that changes, rotation is the script below. The image build, validation, QA pools and promotion don't depend on the choice, so a move to the native feature would replace only this section. Decision 0013 records the revisit trigger.
 
 `scripts/ops/Invoke-AvdHostRotation.ps1` runs in PowerShell 7 in Cloud Shell, calls ARM and Graph REST (`Invoke-AvdArm`, `Invoke-AvdGraph`), and ends with a state line (`stage: rotation`). Rotation is **resumable**: its state lives in a tag on the host pool (`avdlz-rotation`: from and to generation, version, phase, deadline, who started it), the same pattern as decision 0011's Lock. Running it again continues from the recorded phase, so a Cloud Shell disconnect costs nothing.
 
@@ -404,6 +411,7 @@ Other rules:
   - `rotation-stalled`: a rotation tag is older than its deadline plus 24 hours;
   - `validation-paused`: automated validation paused for a landing-zone-wide failure for more than 24 hours (§6.3);
   - `qa-pool-unused`: no completed sign-in to the QA pool in two business days (§6.2);
+  - `promotion-without-sign-in`: a promotion overrode the approver's sign-in (§6.4). More than one in a quarter means the evidence is being skipped as a habit;
   - `qa-ahead-errors`: the QA pool runs a newer AVD agent or image than production and its error rate is above baseline. That is the early warning the QA pool exists for, raised before production's agent window;
   - `host-auto-updates-on`: a host reports automatic updates on, usually an Intune update ring overriding the image (§5.6).
 - **Evidence:** the Tier 1 job records each host's image version. Baselines are split by version, so a regression after a rotation shows up as "this started with `2026.1004.1`".
@@ -475,7 +483,7 @@ Guards, added with the first slice, following decision 0006:
 | **1 Gallery and build** | `bicep/images`, build subnets, `image-build.yml`, customizers including WDOT, `Test-GoldenImage.ps1` | A scheduled build produces a version with every validation `Pass`, in a region with zones and in one without |
 | **2 Parameters and QA pool** | `AVD_SESSION_HOST_IMAGE_ID`, generations, the QA pool, `deploy.sh` flags, preflight check, portal | dev deploys from a gallery version, with a QA pool whose host reports automatic updates off; the default still deploys the marketplace image with unchanged production names |
 | **3 Rotation** | `Invoke-AvdHostRotation.ps1`, device cleanup shared with `Remove-AvdDemo.ps1` | `test` rotates a → b → a, resumed after a deliberate disconnect, and a real sign-in lands on the new generation each time |
-| **4 Automated validation and promotion** | `image-validate.yml`, `Test-SessionHostFunction.ps1`, `image-promote.yml` | A scheduled build validates through both QA pools with nobody running anything. One deliberately broken build fails, rolls the QA pool back and opens an issue. One emergency build reaches a promotion-ready state within 24 hours. One good version is promoted by a person and rotated into `prod`'s main pool, with the post-deployment preflight Ready afterwards |
+| **4 Automated validation and promotion** | `image-validate.yml`, `Test-SessionHostFunction.ps1`, `image-promote.yml` | A scheduled build validates through both QA pools with nobody running anything. One deliberately broken build fails, rolls the QA pool back and opens an issue. One emergency build reaches a promotion-ready state within 24 hours. One good version is promoted by a person, after the approver's own sign-in to the QA desktop, and rotated into `prod`'s main pool, with the post-deployment preflight Ready afterwards. A written answer to Q8 (synthetic sign-in), from what step 4 learned |
 
 When step 4 passes, phase 0b is done, and the second brain's phase 1 can start.
 
@@ -497,6 +505,7 @@ Each of these is an assumption in the spec, to confirm against the docs and a re
 - That decision 0011's runbook honors the exclusion tag for the scheduled Stop (EX-0002) as well as the Lock (§6.3).
 - AIB downloading customizers from a private storage container through the template's identity, with the isolated build in the VNet (§5.2).
 - That reading `dsregcmd /status` and the Intune enrollment registry from a Run Command gives the device and enrollment IDs (§6.3).
+- Whether session host configuration and session host update support Microsoft Entra ID-joined hosts, and whether an existing host pool can adopt them (§6.5, S1). Check again at every new build phase, and before rotation work starts.
 - The list of AVD session host health checks the ARM API returns, and that Contributor on the QA resource group plus subnet join is enough to register a host to the QA pool.
 
 ## 12. Open questions
@@ -508,4 +517,4 @@ Each of these is an assumption in the spec, to confirm against the docs and a re
 - **Q5** Should `-LogOffAtDeadline` be the default in `prod`? Recommended **no**: losing unsaved work is worse than a slower rotation.
 - **Q6** Opt in to WDOT's AppxPackages removal once a build passes with it? Recommended **yes, after** one passing build and a lesson recording which packages it removed.
 - **Q7** Keep the QA pool on by default in dev and test, whose main pools are already validation environments? Recommended **yes**: it's also each environment's image canary, and one host with Start VM on Connect and the nightly Stop costs little.
-- **Q8** Add a **synthetic sign-in** to automated validation? It would need a dedicated test account and a Windows client signing in through the Windows App, with an MFA policy that suits automation. That puts a credential and a Conditional Access exception in the adopter's tenant. Third-party logon simulators exist ([eG Logon Simulator](https://www.eginnovations.com/blog/free-logon-simulator-for-avd-azure-virtual-desktop-now-available/)); Microsoft offers none. Recommended **not yet**: organic QA sign-ins come first, and this gets revisited after a few months of validation data.
+- **Q8** Add a **synthetic sign-in** to automated validation? It would need a dedicated test account and a Windows client signing in through the Windows App, with an MFA policy that suits automation. That puts a credential and a Conditional Access exception in the adopter's tenant. Third-party logon simulators exist ([eG Logon Simulator](https://www.eginnovations.com/blog/free-logon-simulator-for-avd-azure-virtual-desktop-now-available/)); Microsoft offers none. **Moved up (red-team S2):** research it in build step 4, because it would carry the evidence for small adopters. Until then, the approver's single sign-in at promotion (§6.4) is the evidence.
