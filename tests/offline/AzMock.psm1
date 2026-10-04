@@ -42,6 +42,62 @@ function Get-AzStorageAccount { param($ResourceGroupName,$ErrorAction)
 function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   Log "ARM $Method $Path"
   $ok = { param($o) [pscustomobject]@{StatusCode=200;Content=($o|ConvertTo-Json -Depth 20)} }
+  # ---- Golden image pipeline (scripts/ops/Start-AvdImageBuild.ps1): rg-avdlz-images, its gallery,
+  # per-build image templates, and the marketplace versions. $global:St.images holds the state.
+  $im = $global:St.images
+  if ($Path -match 'rg-avdlz-images|/publishers/MicrosoftWindowsDesktop/') {
+    $notFound = [pscustomobject]@{ StatusCode=404; Content='{"error":{"code":"ResourceNotFound","message":"The Resource was not found."}}' }
+    # The marketplace versions API returns a bare JSON array, even for one version.
+    if ($Path -match '/skus/win11-24h2-avd-m365/versions\?') {
+      return [pscustomobject]@{ StatusCode=200; Content=(ConvertTo-Json -InputObject @($im.sourceVersions | ForEach-Object { @{ name=$_; location='northcentralus' } }) -Depth 5) }
+    }
+    if ($Path -match 'galleries/galavdlz/images/win11-avd-m365/versions/([^/?]+)\?') {
+      $v = $im.versions | Where-Object { $_.name -eq $Matches[1] } | Select-Object -First 1
+      if (-not $v) { return $notFound }
+      if ($Method -eq 'PATCH') { foreach ($t in ($Payload | ConvertFrom-Json).tags.PSObject.Properties) { $v.tags[$t.Name] = $t.Value }; return & $ok @{ name=$v.name; tags=$v.tags } }
+      return & $ok @{ name=$v.name; tags=$v.tags; properties=@{ provisioningState=$v.state; publishingProfile=@{ excludeFromLatest=$true; targetRegions=@(@{ name='North Central US'; regionalReplicaCount=1; storageAccountType='Standard_LRS' }) } } }
+    }
+    if ($Path -match 'galleries/galavdlz/images/win11-avd-m365/versions\?') { return & $ok @{ value=@($im.versions | ForEach-Object { @{ name=$_.name; tags=$_.tags; properties=@{ provisioningState=$_.state } } }) } }
+    if ($Path -match 'galleries/galavdlz/images/win11-avd-m365\?') {
+      if (-not $im.definition) { return $notFound }
+      return & $ok @{ name='win11-avd-m365'; location='northcentralus'; properties=@{ osType='Windows'; hyperVGeneration='V2' } }
+    }
+    if ($Path -match 'rg-avdlz-images-staging/providers/Microsoft.Storage/storageAccounts\?') { return & $ok @{ value=@(@{ name='stagingavdlzabc' }) } }
+    if ($Path -match 'rg-avdlz-images/providers/Microsoft.Resources/deployments/([^/?]+)\?') {
+      if ($Method -eq 'PUT') {
+        $p = ($Payload | ConvertFrom-Json).properties.parameters
+        $name = 'it-avdlz-' + $p.version.value.Replace('.', '-')
+        $im.templates[$name] = @{ created=(Get-Date).ToUniversalTime().ToString('o'); state=$null; polls=0; version=$p.version.value; source=$p.sourceImageVersion.value; commit=$p.commit.value; emergency=$p.emergency.value }
+        $im.deployed += $name
+        return & $ok @{ properties=@{ provisioningState='Accepted' } }
+      }
+      if ($im.deployFails) { return & $ok @{ properties=@{ provisioningState='Failed'; error=@{ code='InvalidTemplateDeployment'; message='The template deployment failed: subnet snet-image-build not found.' } } } }
+      return & $ok @{ properties=@{ provisioningState='Succeeded' } }
+    }
+    if ($Path -match 'imageTemplates/([^/?]+)/run\?') { $im.templates[$Matches[1]].state = 'Running'; return [pscustomobject]@{ StatusCode=202; Content='' } }
+    if ($Path -match 'imageTemplates/([^/?]+)\?') {
+      $name = $Matches[1]; $t = $im.templates[$name]
+      if ($Method -eq 'DELETE') { if ($t) { $im.templates.Remove($name); $im.deleted += $name }; return [pscustomobject]@{ StatusCode=202; Content='' } }
+      if (-not $t) { return $notFound }
+      $o = @{ name=$name; tags=@{ 'avdlz-created'=$t.created }; properties=@{ provisioningState='Succeeded' } }
+      if ($t.state -eq 'Running') {
+        $t.polls++
+        if ($t.polls -ge 3) {
+          $t.state = $im.runOutcome
+          if ($t.state -eq 'Succeeded') { $im.versions += @{ name=$t.version; state='Succeeded'; tags=@{ 'avdlz-source-image'="MicrosoftWindowsDesktop/office-365/win11-24h2-avd-m365/$($t.source)"; 'avdlz-commit'=$t.commit; 'avdlz-emergency'="$($t.emergency)" } } }
+        }
+      }
+      # ARM leaves lastRunStatus out until the template has been run (lesson 0021).
+      if ($t.state) {
+        $o.properties.lastRunStatus = @{ runState=$t.state; runSubState=$(if ($t.state -eq 'Running') { 'Customizing' } else { '' }) }
+        if ($t.state -eq 'Failed') { $o.properties.lastRunStatus.message = 'Validation failed: inVMValidations step golden-image exited with code 1.' }
+      }
+      return & $ok $o
+    }
+    if ($Path -match 'rg-avdlz-images/providers/Microsoft.VirtualMachineImages/imageTemplates\?') {
+      return & $ok @{ value=@($im.templates.Keys | ForEach-Object { @{ name=$_; tags=@{ 'avdlz-created'=$im.templates[$_].created } } }) }
+    }
+  }
   if ($Method -eq 'POST' -and $Path -match '/providers/([^/?]+)/register') { $global:St.registered += $Matches[1]; return & $ok @{} }
   # Soft-deleted Key Vaults ($global:St.deletedVaults: VaultName, Location, ResourceGroup) and their
   # recovery, which (as in Azure) needs the original resource group to exist.
@@ -187,6 +243,12 @@ $global:St.hostSize = 'Standard_D4as_v5'
 $global:St.power = @{ startVMOnConnect = $true; hpTags = @{ workload = 'avd' }; sessions = @{ 'avdlzdsh-001' = 2; 'avdlzdsh-002' = 0 }
   allowNew = @{ 'avdlzdsh-001' = $true; 'avdlzdsh-002' = $true }; state = @{ 'avdlzdsh-001' = 'running'; 'avdlzdsh-002' = 'running' }; vmTags = @{}; failHostPoolPatch = $false }
 $global:St.deletedVaults = @()
+$global:St.images = @{ definition = $true; runOutcome = 'Succeeded'; deployFails = $false; logUnreadable = $false; deployed = @(); deleted = @()
+  # Compared as numbers, 26100.10000 is newer than 26100.6725; as strings it isn't.
+  sourceVersions = @('26100.6584.250910', '26100.10000.251104', '26100.6725.251007')
+  versions = @(@{ name = '2026.915.1'; state = 'Succeeded'; tags = @{ 'avdlz-source-image' = 'MicrosoftWindowsDesktop/office-365/win11-24h2-avd-m365/26100.6584.250910'; 'avdlz-commit' = 'c0ffee1' } })
+  templates = @{ 'it-avdlz-2026-901-1' = @{ created = (Get-Date).ToUniversalTime().AddDays(-2).ToString('o'); state = $null; polls = 0 } }
+  log = @('[PowerShell] golden-image: RESULT os-release Pass DisplayVersion=24H2', '[PowerShell] golden-image: RESULT wdot Pass result=Succeeded', '[PowerShell] golden-image: RESULT protected-services Pass disabled= absent= checked=20') }
 $global:St.groups = @(@{id='11111111-1111-1111-1111-111111111111';displayName='AVD Users';securityEnabled=$true},@{id='22222222-2222-2222-2222-222222222222';displayName='AVD Admins';securityEnabled=$true})
 $global:St.avdSp = $true
 function Get-AzResourceProvider { param($ProviderNamespace,$ErrorAction) [pscustomobject]@{RegistrationState=$(if ($global:St.unregistered -contains $ProviderNamespace -and $global:St.registered -notcontains $ProviderNamespace) {'NotRegistered'} else {'Registered'})} }
@@ -199,13 +261,23 @@ function Get-AzComputeResourceSku { param($Location,$ErrorAction)
       [pscustomobject]@{ResourceType='virtualMachines';Name="Standard_$($series[0])$($v)as_v5";Family=$series[1];Restrictions=@();LocationInfo=@([pscustomobject]@{Location=$Location;Zones=$global:St.skuZones})
         Capabilities=@([pscustomobject]@{Name='vCPUs';Value="$v"},[pscustomobject]@{Name='MemoryGB';Value="$($v * $series[2])"})}
     }
-  } }
+  }
+  # The golden image build VM (bicep/images/build.bicep).
+  [pscustomobject]@{ResourceType='virtualMachines';Name='Standard_D4s_v5';Family='standardDSv5Family';Restrictions=@();LocationInfo=@([pscustomobject]@{Location=$Location;Zones=$global:St.skuZones})
+    Capabilities=@([pscustomobject]@{Name='vCPUs';Value='4'},[pscustomobject]@{Name='MemoryGB';Value='16'})} }
 $global:St.quotaLimit = $null   # set to raise both limits (a subscription after a quota increase)
 # The deployed dev host is a D4as_v5 (as in the first real deployment); the Easv5 family is unused.
 function Get-AzVMUsage { param($Location) $l = $global:St.quotaLimit; @(
     [pscustomobject]@{Name=[pscustomobject]@{Value='standardDASv5Family'};Limit=$(if ($l) { $l } else { 10 });CurrentValue=4},
     [pscustomobject]@{Name=[pscustomobject]@{Value='standardEASv5Family'};Limit=$(if ($global:St.eLimit) { $global:St.eLimit } elseif ($l) { $l } else { 10 });CurrentValue=$(if ($global:St.eUsed) { $global:St.eUsed } else { 0 })},
+    [pscustomobject]@{Name=[pscustomobject]@{Value='standardDSv5Family'};Limit=$(if ($null -ne $global:St.dsLimit) { $global:St.dsLimit } else { 10 });CurrentValue=0},
     [pscustomobject]@{Name=[pscustomobject]@{Value='cores'};Limit=$(if ($l) { $l } else { 20 });CurrentValue=4}) }
+# Az.Storage, as Start-AvdImageBuild.ps1 reads AIB's customization log with the signed-in identity.
+function New-AzStorageContext { param($StorageAccountName,[switch]$UseConnectedAccount) [pscustomobject]@{ StorageAccountName=$StorageAccountName } }
+function Get-AzStorageBlob { param($Container,$Context,$ErrorAction)
+  if ($global:St.images.logUnreadable) { throw 'This request is not authorized to perform this operation using this permission. (403)' }
+  [pscustomobject]@{ Name='0b1c/customization.log'; LastModified=(Get-Date) } }
+function Get-AzStorageBlobContent { param($Container,$Blob,$Destination,$Context,[switch]$Force) Set-Content -Path $Destination -Value $global:St.images.log; [pscustomobject]@{ Name=$Blob } }
 function Get-AzVM { param($ResourceGroupName,$Name,[switch]$Status,$ErrorAction)
   $n = if ($ResourceGroupName -like '*demo') {'avdlzddemo-001'} else {'avdlzdsh-001'}
   $vm=[pscustomobject]@{Name=$n;HardwareProfile=[pscustomobject]@{VmSize=$global:St.hostSize};Id="$S/resourceGroups/$ResourceGroupName/providers/Microsoft.Compute/virtualMachines/$n";Identity=[pscustomobject]@{PrincipalId="mi-$n"};PowerState='VM running';OSProfile=[pscustomobject]@{ComputerName=$n}}

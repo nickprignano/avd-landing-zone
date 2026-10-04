@@ -19,6 +19,9 @@ param localAdminPassword = readEnvironmentVariable('AVD_LOCAL_ADMIN_PASSWORD')
 
 // ---- Connectivity ----
 param connectivityMode = 'Standalone'
+// Golden image build subnets (docs/image-pipeline-spec.md): only in the image build environment.
+// AVD_IMAGE_BUILD_SUBNETS=true adds them (empty = off).
+param deployImageBuildSubnets = empty(readEnvironmentVariable('AVD_IMAGE_BUILD_SUBNETS', '')) ? false : bool(readEnvironmentVariable('AVD_IMAGE_BUILD_SUBNETS', ''))
 
 // ---- Session hosts ----
 // Regional hosts (no zones) work in every region, including those without

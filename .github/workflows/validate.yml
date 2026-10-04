@@ -58,11 +58,15 @@ jobs:
         run: |
           az bicep lint --file bicep/main.bicep
           az bicep lint --file bicep/demo/main.bicep
+          az bicep lint --file bicep/images/main.bicep
+          az bicep lint --file bicep/images/build.bicep
 
       - name: Build template and parameter files
         run: |
           az bicep build --file bicep/main.bicep --stdout > /dev/null
           az bicep build --file bicep/demo/main.bicep --stdout > /dev/null
+          az bicep build --file bicep/images/main.bicep --stdout > /dev/null
+          az bicep build --file bicep/images/build.bicep --stdout > /dev/null
           for f in parameters/*.bicepparam; do
             echo "build-params $f"
             az bicep build-params --file "$f" --stdout > /dev/null

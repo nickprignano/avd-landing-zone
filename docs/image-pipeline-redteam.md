@@ -214,7 +214,7 @@ In a lab, or an adopter's small deployment, nobody signs in to the QA desktop ev
 | C1 QA host deploy needs landing zone rights | **Resolved in spec**: `bicep/qa/main.bicep` at the QA group's scope, no role assignments (§6.2, §6.5) |
 | C2 Image and generation in four places | **Resolved in spec**: the host pool's `avdlz-image` and `avdlz-generation` tags, written only by rotation; deploys read them and refuse during a rotation; promotion sets `avdlz-image-next` (§6.1) |
 | C3 Nightly Stop vs hourly checks | **Resolved in spec**: exclusion tag and start during stages; at least 20 of 24 runs with the host running (§6.3) |
-| C4 Private forks can't serve scripts | **Resolved in spec**: a private `image-build` container read by the AIB identity; WDOT mirrored (§4.1, §5.2, §5.5) |
+| C4 Private forks can't serve scripts | **Resolved, as built**: every script is inlined into the template from the commit, so there is no container and no fetch from the repository (§5.2). That replaced the planned private container |
 | H1 Patch latency | **Resolved in spec**: 14-day and 72-hour targets, `force`, emergency mode, an 8-hour limit on disconnected sessions, `patch-sla` (§5.7) |
 | H2 One failure kills the image | **Resolved in spec**: classified checks, pause on landing-zone failures, the 2-in-a-row or 2-of-soak rule, one retry (§6.3) |
 | H3 Admins as QA users | **Resolved in spec**: a regular-user QA group required, checked by the preflight; sign-ins reported by group (§6.2, §6.3) |
@@ -227,7 +227,7 @@ In a lab, or an adopter's small deployment, nobody signs in to the QA desktop ev
 | M1 Version names with leading zeros | **Resolved in spec**: `YYYY.MDD.N`, no padding, numeric comparison (§4.2) |
 | M2 Concurrent builds | **Resolved in spec**: concurrency groups; one version validates at a time; newer supersedes (§5.1) |
 | M3 Build VM size and timeout | **Resolved in spec**: a pinned 4-vCPU D-series size, 360 minutes, a quota check first (§5.2) |
-| M4 WDOT archive stability | **Resolved in spec** with C4: pinned by commit SHA, mirrored privately once verified, builds use the mirror (§5.5) |
+| M4 WDOT archive stability | **Resolved, as built**: pinned by commit, with the SHA-256 of every file the build runs, so archive bytes don't matter. A function file not in the lock fails the build (§5.5) |
 | M5 Validation before sysprep | **Resolved in spec**: generalization success checked from the run; the QA host named as the first post-sysprep evidence (§5.4) |
 | M6 One replica during a surge | **Resolved in spec**: replicas per 20 hosts created at once; Deploy in batches (§4.2, §6.5) |
 | M7 Orphaned templates | **Resolved in spec**: a sweep at the start of each build (§5.2 step 0) |

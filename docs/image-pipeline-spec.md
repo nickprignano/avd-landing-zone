@@ -83,10 +83,9 @@ The rule that holds it together: **the image is generic, and the landing zone co
 | `id-<prefix>-aib` | User-assigned identity for AIB |
 | Custom role "AVD LZ image distributor" | Read the gallery and the definition; write and read versions. Scoped to the images resource group |
 | Custom role "AVD LZ image build network" | `virtualNetworks/read` and `subnets/join/action`. Scoped to the two build subnets |
-| Storage account `st<prefix>img`, container `image-build` | Holds the customizer scripts, the WDOT archive and the WDOT profile at each build's commit (red-team C4). Public network access off, a private endpoint in the build spoke, shared key off. The AIB identity has Storage Blob Data Reader on the container |
 | Contributor on the staging resource group | `rg-<prefix>-images-staging`, which AIB uses for the build VM, its disk and its logs. AIB requires this role there; nothing else lives in that group |
 
-The two build subnets go into the **build environment's** spoke (`AVD_IMAGE_BUILD_ENVIRONMENT`, default `dev`). They are added by `network.bicep` when `deployImageBuildSubnets` is true. They reuse that spoke's egress, the NAT Gateway or the hub firewall, so the build VM has no public IP (decision 0001), and no second NAT Gateway is needed. In hub mode, the firewall must allow Windows Update, the Microsoft 365 CDN, Defender updates and the AIB service endpoints. GitHub isn't needed: scripts come from the private container.
+The two build subnets go into the **build environment's** spoke (`AVD_IMAGE_BUILD_ENVIRONMENT`, default `dev`). They are added by `network.bicep` when `deployImageBuildSubnets` is true. They reuse that spoke's egress, the NAT Gateway or the hub firewall, so the build VM has no public IP (decision 0001), and no second NAT Gateway is needed. In hub mode, the firewall must allow Windows Update, the Microsoft 365 CDN, Defender updates, the AIB service endpoints, and `github.com` and `codeload.github.com` for WDOT. The repository's own scripts are inlined into the template (§5.2), so nothing is fetched from it.
 
 ### 4.2 Image versions
 
@@ -124,11 +123,13 @@ The workflow uses OIDC to Azure through the `images` GitHub Environment. Its ide
 
 0. **Sweep orphans (red-team M7).** Delete `it-<prefix>-*` image templates older than 24 hours, left by a run that died, after saving their customization logs to the run's artifacts. Report what was removed. Deleting a template removes its staging resources.
 1. **Resolve and print:** the source image version that `latest` resolves to, the commit, and the new version name. If the source version and the commit both match the newest existing version, stop: nothing changed. The `force` input skips this check (§5.7).
-2. **Stage the inputs.** Hash the customizer scripts and the WDOT profile at that commit (SHA-256), and upload them to the private `image-build` container under `<commit>/`, with the WDOT archive from its verified mirror (§5.5). Adopters' repositories are private (second brain spec §9.1), so AIB can't fetch from GitHub; it reads the container with its own identity.
+2. **Inline the inputs (red-team C4, as built).** `build.bicep` inlines every customizer and the WDOT profile into the template at compile time (`loadTextContent`, `loadFileAsBase64`), from the commit being built. Adopters' repositories are private (second brain spec §9.1), and AIB never has to fetch from them, from GitHub or from a storage container.
+
+   This replaced the private `image-build` container in the first version of this spec. It is simpler: no storage account, private endpoint or upload from a runner that can't reach one. Its authenticity is the same: the commit.
 3. **Deploy a per-build image template** (`bicep/images/build.bicep`). Templates are immutable, so each build gets its own, named after its version:
    - **source:** the platform image, at the version resolved in step 1;
    - **`vmProfile`:** a pinned size from `images.bicepparam`, by default 4 vCPUs from a current D-series (`Standard_D4s_v5`), OS disk 127 GB (red-team M3). Before the run, the workflow checks the build family's regional vCPU quota and stops with the quota request if it's short (lessons 0013, 0024). `vnetConfig` with `subnetId` = `snet-image-build` and `containerInstanceSubnetId` = `snet-image-aci` (isolated build, no proxy VM);
-   - **`customize`:** §5.3, each script by `scriptUri` in the private container at `<commit>/`, with its `sha256Checksum`;
+   - **`customize`:** §5.3, each script **inline** from the commit (no `scriptUri`; a template test enforces it);
    - **`validate`:** §5.4, with `continueDistributeOnFailure: false`;
    - **`distribute`:** the gallery version from §4.2, with its tags;
    - **`buildTimeoutInMinutes`:** 360. A cumulative update for Windows 11 multi-session with Microsoft 365 Apps, then WDOT and two restarts, can exceed 4 hours.
@@ -186,22 +187,27 @@ It prints one `RESULT <check> <Pass|Fail> <detail>` line per check, the format o
 
 The pipeline runs the [Windows Desktop Optimization Tool](https://github.com/The-Virtual-Desktop-Team/Windows-Desktop-Optimization-Tool) (WDOT) on every build. WDOT is the Virtual Desktop Team's successor to VDOT, which gets no more updates. It tunes Windows for multi-session hosts: it removes or disables services, scheduled tasks and autologgers that a VDI host doesn't need, and sets default-user and network settings. All its settings are applied to the image once, never to running hosts.
 
-**Pinned, not vendored.** `scripts/image/wdot/wdot.lock.json` records WDOT's version, the release's commit SHA, the archive URL and the archive's SHA-256. When a lock change merges, the workflow fetches the archive once, verifies it, and mirrors it into the private `image-build` container. Builds use the mirror, so a GitHub outage or a regenerated archive can't break or change a build. `Invoke-Wdot.ps1` refuses an archive whose hash differs. A newer release reaches the image only through a PR that updates the lock file, which is a guardrail-style change reviewed like any other. A monthly check in `image-build.yml` opens an issue when a newer release exists.
+**Pinned, not vendored (as built).** `scripts/image/wdot/wdot.lock.json` records WDOT's release (`v1.1`), its commit, and the **SHA-256 of every file the build runs**: `Windows_Optimization.ps1` and each `Functions/*.ps1`. `Invoke-Wdot.ps1` downloads the commit's archive and refuses to run when any file's hash differs, or when the archive holds a function file the lock doesn't list (WDOT loads every `Functions\*-WDOT*.ps1`).
+
+Per-file hashes replace the archive hash and the private mirror of the first version of this spec (red-team M4). GitHub doesn't promise stable archive bytes, but the files are what runs, and their bytes are the commit's. A GitHub outage still stops a build, and the build reports it. A newer release reaches the image only through a PR that updates the lock file, which is a guardrail-style change reviewed like any other. A monthly check in `image-build.yml` opens an issue when a newer release exists.
 
 **Our profile, reviewed in Git.** WDOT reads a configuration profile: JSON files in which each item's `OptimizationState` is `Apply` or `Skip`. The profile was generated once with WDOT's `New-WVDConfigurationFiles.ps1` and is kept in `scripts/image/wdot/profile/`. Every change to it is a diff someone can read. `Invoke-Wdot.ps1` copies it into WDOT's `Configurations` folder as `avdlz`, then runs:
 
 ```
-Windows_Optimization.ps1 -ConfigProfile avdlz -AcceptEULA -Optimizations Services,ScheduledTasks,DefaultUserSettings,LocalPolicy,Autologgers,NetworkOptimizations,DiskCleanup
+Windows_Optimization.ps1 -ConfigProfile avdlz -AcceptEULA -Optimizations Services,ScheduledTasks,Autologgers,DefaultUserSettings
 ```
 
 It doesn't pass `-Restart`; an AIB restart customizer follows instead.
 
 | Category | Default | Why |
 |---|---|---|
-| Services, ScheduledTasks, Autologgers | Apply, with the protected list below kept `Skip` | The bulk of the CPU, memory and logon-time savings |
-| DefaultUserSettings, LocalPolicy, NetworkOptimizations, DiskCleanup | Apply | Generic, and every new FSLogix profile starts from the default user |
+| Services, ScheduledTasks, Autologgers | Apply, with the protected list below and a few reviewed items kept `Skip` | The bulk of the CPU, memory and logon-time savings |
+| DefaultUserSettings | Apply, except Edge update suppression, notification blocks, hidden tray icons and Copilot | Every new FSLogix profile starts from the default user. The exceptions conflict with §5.6 or with Teams and Outlook |
+| LocalPolicy | **Not run yet** | 147 organization-level policy settings, not reviewed one by one |
+| NetworkOptimizations | **Not run yet** | Besides SMB client settings, WDOT changes the network adapter's send buffer, which on Azure is the accelerated networking adapter. Not verified |
+| DiskCleanup | **Never** | Found while building (as built): it deletes every `*.log`, `*.etl` and `*.evtx` on `C:` and empties `C:\Windows\Temp`, which is the build's own evidence, before `Test-GoldenImage.ps1` reads it. `Invoke-ImageCleanup.ps1` cleans narrowly instead |
 | WindowsMediaPlayer | Skip | Little gain, and some line-of-business apps still use it |
-| AppxPackages | **Skip** | Removing Appx packages is the classic sysprep breaker: a package installed for a user but not provisioned for all users fails generalization. It becomes opt-in (`imageWdotAppx = true`) once one build has passed with it and a lesson is written |
+| AppxPackages | **Skip** | Removing Appx packages is the classic sysprep breaker: a package installed for a user but not provisioned for all users fails generalization. It becomes opt-in, by a PR that adds `AppxPackages` to the lock's `optimizations` and reviews the profile, once one build has passed with it and a lesson is written |
 | Advanced: Edge, RemoveLegacyIE, RemoveOneDrive | **Skip** | WDOT itself marks them aggressive. RemoveLegacyIE is irreversible, and OneDrive matters with FSLogix profiles |
 
 **Protected items.** These must stay `Skip` in the profile, because the landing zone depends on them:
@@ -420,7 +426,7 @@ Other rules:
 ## 8. Security
 
 - **No secrets in the image** (§5.3). The build VM has no public IP and no inbound access. Its egress goes through the landing zone's NAT Gateway or the hub firewall.
-- **Pinned scripts (I3, red-team C4):** the build workflow copies each customizer, at the commit, into the private `image-build` container. AIB downloads it with its identity and checks its SHA-256. The commit is the authenticity check, and the hash protects integrity in transit. Nothing is fetched from GitHub at build time, so private forks work as they are.
+- **Pinned scripts (I3, red-team C4):** every customizer is inlined into the template from the commit being built, so its content is the commit's and nothing is fetched from this repository. WDOT, the only download, is checked file by file against the lock (§5.5).
 - **Least privilege:**
   - the AIB identity holds the two custom roles plus Contributor on the staging group only;
   - the build workflow's identity can only deploy and run templates in the images group;
@@ -459,7 +465,7 @@ Guards, added with the first slice, following decision 0006:
 | Offline scenario `ImageValidation`, extra case: a preflight check the identity can't run is reported skipped, not failed | M8 |
 | Template test: names unchanged with the default generation; valid and distinct for `a` and `b`; at most 15 characters | Replacing existing hosts by accident; NetBIOS length |
 | Template test: the definition is V2 with `TrustedLaunch` and accelerated networking; replica storage is ZRS in a zoned region and LRS in one without zones | Trusted Launch deployment failures; lesson 0001 |
-| Template test: every customizer in the build template has a `sha256Checksum` and a `scriptUri` in the private `image-build` container | Unpinned scripts; GitHub fetches that fail for private forks (C4) |
+| Template test: the build template has no `scriptUri` and no GitHub raw URL; every script in `scripts/image` is a build step; every WDOT profile file is inlined byte for byte | Unpinned scripts; fetches that fail for private forks (C4) |
 | Template test: `bicep/qa/main.bicep` creates no role assignments and writes nothing outside the QA resource group | Automated validation reaching the landing zone (C1) |
 | Offline scenario `Redeploy`: a routine deployment before, during and after a rotation uses the host pool's `avdlz-image` and `avdlz-generation` tags, refuses during a rotation, and never changes an existing VM's image or recreates a removed generation | C2 |
 | Offline scenario `ImageValidation`, extra cases: the QA host deallocated by the scheduled Stop mid-soak (kept running, counted); one transient failure (reported, not fatal); a preflight failure (paused, resumed); retry from the failed stage | C3, H2 |
@@ -503,7 +509,9 @@ Each of these is an assumption in the spec, to confirm against the docs and a re
 - How scheduled agent updates interact with a validation pool: whether the service still flights agents to it first inside its own window.
 - How the Defender platform (engine) updates with automatic updates off (§5.6).
 - That decision 0011's runbook honors the exclusion tag for the scheduled Stop (EX-0002) as well as the Lock (§6.3).
-- AIB downloading customizers from a private storage container through the template's identity, with the isolated build in the VNet (§5.2).
+- AIB running long inline PowerShell customizers (the WDOT step carries the profile as base64) and the inline `validate` step (§5.2).
+- WDOT's download from `github.com` through the build environment's egress, and AIB's customization log in the staging account's `packerlogs` container, read by the build identity with Storage Blob Data Reader (§5.2, `Start-AvdImageBuild.ps1`).
+- Whether AIB's build account is enabled on the image after generalization (`Test-GoldenImage.ps1` allows the build's own account).
 - That reading `dsregcmd /status` and the Intune enrollment registry from a Run Command gives the device and enrollment IDs (§6.3).
 - Whether session host configuration and session host update support Microsoft Entra ID-joined hosts, and whether an existing host pool can adopt them (§6.5, S1). Check again at every new build phase, and before rotation work starts.
 - The list of AVD session host health checks the ARM API returns, and that Contributor on the QA resource group plus subnet join is enough to register a host to the QA pool.

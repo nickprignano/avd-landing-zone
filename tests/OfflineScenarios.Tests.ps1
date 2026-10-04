@@ -320,3 +320,46 @@ Describe 'Auto shutdown runbook' {
     ((Get-PortalState $out | Where-Object stage -eq 'power') | ForEach-Object status) -join ' ' | Should -Be 'stopped locked locked resumed locked resumed'
   }
 }
+
+Describe 'Golden image build' {
+  # docs/image-pipeline-spec.md section 5; red-team M1, M2, M3, M5, M7.
+  BeforeAll {
+    $script:out = Invoke-OfflineScenario 'ImageBuild'
+    $script:day = [regex]::Escape([regex]::Match($out, 'RESULT today (\S+)').Groups[1].Value)
+    function Get-BuildLine([string] $Step) { [regex]::Match($out, "RESULT $Step-summary (.*)").Groups[1].Value }
+  }
+
+  It 'removes a leftover template, builds from the newest source version compared as numbers, and removes its own template' {
+    Get-StepExit $out 'build' | Should -Be 0
+    Get-BuildLine 'build' | Should -Match "status=succeeded version=$day\.1 source=26100\.10000\.251104 runState=Succeeded validation=3 failedChecks=0 orphans=it-avdlz-2026-901-1 deploys=1 templatesLeft=0 log=True"
+  }
+  It 'stops when the source image and the commit are unchanged, and -Force builds the day''s next version' {
+    Get-StepExit $out 'unchanged' | Should -Be 0
+    Get-BuildLine 'unchanged' | Should -Match 'status=unchanged .* deploys=0'
+    Get-BuildLine 'force' | Should -Match "status=succeeded version=$day\.2 "
+    $out | Should -Match 'RESULT force-emergency-tag True'
+  }
+  It 'fails with the log''s validation evidence when the build-time validation fails, and still removes the template' {
+    Get-StepExit $out 'failed-run' | Should -Be 1
+    Get-BuildLine 'failed-run' | Should -Match 'status=failed .* runState=Failed validation=2 failedChecks=1 .* templatesLeft=0 log=True'
+  }
+  It 'reports a failed run even when the customization log can''t be read' {
+    Get-StepExit $out 'log-unreadable' | Should -Be 1
+    Get-BuildLine 'log-unreadable' | Should -Match 'status=failed .* runState=Failed .* log=False'
+  }
+  It 'fails safe when AIB reports success but a validation line failed, marks that version, and lets the same inputs be retried' {
+    Get-StepExit $out 'inconsistent' | Should -Be 1
+    Get-BuildLine 'inconsistent' | Should -Match 'status=failed .* runState=Inconsistent'
+    $out | Should -Match 'RESULT inconsistent-tag failed:build'
+    Get-BuildLine 'retry-after-inconsistent' | Should -Match 'status=succeeded '
+  }
+  It 'stops before deploying anything when the gallery is missing or the build VM has no quota' {
+    Get-BuildLine 'no-definition' | Should -Match 'status=failed .* deploys=0'
+    Get-BuildLine 'quota' | Should -Match 'status=failed .* deploys=0'
+  }
+  It 'reports ARM''s error when the template deployment fails, and leaves no template behind' {
+    Get-StepExit $out 'deploy-fails' | Should -Be 1
+    Get-BuildLine 'deploy-fails' | Should -Match 'status=failed .* deploys=1 templatesLeft=0'
+    $out | Should -Match 'InvalidTemplateDeployment'
+  }
+}

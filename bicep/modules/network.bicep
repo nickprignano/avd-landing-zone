@@ -6,6 +6,9 @@
 //   - HubPeered:  peered to an existing hub (both directions), 0.0.0.0/0
 //                 routed to the hub firewall, DNS from the hub.
 // The private endpoint subnet enforces NSG rules on its endpoints.
+// Optionally (deployImageBuildSubnets), two subnets for the golden image build
+// (docs/image-pipeline-spec.md): the Azure Image Builder build VM, and the
+// container instance that drives an isolated build. Same egress as the hosts.
 
 param location string
 param tags object
@@ -27,6 +30,15 @@ param logAnalyticsWorkspaceResourceId string
 
 @description('The landing zone\'s availability zones. Empty = the region has none (or regional deployment): the NAT Gateway public IP gets no zones.')
 param availabilityZones int[] = []
+
+@description('Add the image build subnets (snet-image-build, snet-image-aci) for the golden image pipeline. Only the build environment needs them.')
+param deployImageBuildSubnets bool = false
+
+@description('Image build VM subnet (a /27 in the spoke\'s free range).')
+param imageBuildSubnetPrefix string = '10.100.2.128/27'
+
+@description('Image build container subnet, delegated to Azure Container Instances (a /27).')
+param imageBuildAciSubnetPrefix string = '10.100.2.160/27'
 
 var isHub = connectivityMode == 'HubPeered'
 var useRouteTable = isHub && !empty(hubFirewallPrivateIp)
@@ -147,6 +159,50 @@ module privateEndpointNsg 'br/public:avm/res/network/network-security-group:0.5.
   }
 }
 
+// Image build subnets: no inbound from the internet; the build container reaches the
+// build VM over WinRM (5986) and SSH (22) inside the VNet. Verify the ports against a
+// real isolated build (docs/image-pipeline-spec.md section 11).
+module imageBuildNsg 'br/public:avm/res/network/network-security-group:0.5.3' = if (deployImageBuildSubnets) {
+  name: 'nsg-image-build'
+  params: {
+    name: 'nsg-${vnetName}-image-build'
+    location: location
+    tags: tags
+    securityRules: [
+      {
+        name: 'Allow-BuildContainer-To-BuildVm'
+        properties: {
+          priority: 100
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourceAddressPrefix: imageBuildAciSubnetPrefix
+          sourcePortRange: '*'
+          destinationAddressPrefix: imageBuildSubnetPrefix
+          destinationPortRanges: [
+            '22'
+            '5986'
+          ]
+        }
+      }
+      {
+        name: 'Deny-Internet-Inbound'
+        properties: {
+          priority: 4000
+          direction: 'Inbound'
+          access: 'Deny'
+          protocol: '*'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+        }
+      }
+    ]
+    diagnosticSettings: diagnostics
+  }
+}
+
 // ---------- Egress ----------
 module natGateway 'br/public:avm/res/network/nat-gateway:2.1.1' = if (!isHub) {
   name: 'nat-gateway'
@@ -197,7 +253,7 @@ module vnet 'br/public:avm/res/network/virtual-network:0.10.2' = {
       addressPrefix
     ]
     dnsServers: dnsServers
-    subnets: [
+    subnets: concat([
       {
         name: 'snet-session-hosts'
         addressPrefix: sessionHostSubnetPrefix
@@ -213,7 +269,27 @@ module vnet 'br/public:avm/res/network/virtual-network:0.10.2' = {
         networkSecurityGroupResourceId: privateEndpointNsg.outputs.resourceId
         privateEndpointNetworkPolicies: 'NetworkSecurityGroupEnabled'
       }
-    ]
+    ], deployImageBuildSubnets
+      ? [
+          {
+            name: 'snet-image-build'
+            addressPrefix: imageBuildSubnetPrefix
+            defaultOutboundAccess: false
+            networkSecurityGroupResourceId: imageBuildNsg!.outputs.resourceId
+            natGatewayResourceId: isHub ? null : natGateway!.outputs.resourceId
+            routeTableResourceId: useRouteTable ? routeTable!.outputs.resourceId : null
+          }
+          {
+            name: 'snet-image-aci'
+            addressPrefix: imageBuildAciSubnetPrefix
+            defaultOutboundAccess: false
+            networkSecurityGroupResourceId: imageBuildNsg!.outputs.resourceId
+            natGatewayResourceId: isHub ? null : natGateway!.outputs.resourceId
+            routeTableResourceId: useRouteTable ? routeTable!.outputs.resourceId : null
+            delegation: 'Microsoft.ContainerInstance/containerGroups'
+          }
+        ]
+      : [])
     peerings: isHub
       ? [
           {
@@ -234,3 +310,5 @@ module vnet 'br/public:avm/res/network/virtual-network:0.10.2' = {
 output vnetResourceId string = vnet.outputs.resourceId
 output sessionHostSubnetResourceId string = vnet.outputs.subnetResourceIds[0]
 output privateEndpointSubnetResourceId string = vnet.outputs.subnetResourceIds[1]
+output imageBuildSubnetResourceId string = deployImageBuildSubnets ? vnet.outputs.subnetResourceIds[2] : ''
+output imageBuildAciSubnetResourceId string = deployImageBuildSubnets ? vnet.outputs.subnetResourceIds[3] : ''

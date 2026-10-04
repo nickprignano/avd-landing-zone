@@ -27,6 +27,9 @@ param connectivityMode = 'Standalone'
 param spokeAddressPrefix = '10.100.0.0/22'
 param sessionHostSubnetPrefix = '10.100.0.0/23'
 param privateEndpointSubnetPrefix = '10.100.2.0/27'
+// Golden image build subnets (docs/image-pipeline-spec.md): only in the image build environment.
+// AVD_IMAGE_BUILD_SUBNETS=true adds them (empty = off).
+param deployImageBuildSubnets = empty(readEnvironmentVariable('AVD_IMAGE_BUILD_SUBNETS', '')) ? false : bool(readEnvironmentVariable('AVD_IMAGE_BUILD_SUBNETS', ''))
 
 // ---- Session hosts ----
 // Sizing: the deployment portal's sizing step, deploy.sh (--hosts, --vm-size, --max-sessions,

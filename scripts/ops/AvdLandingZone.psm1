@@ -1953,4 +1953,28 @@ function Test-AvdPreDeployment {
   return [pscustomobject]@{ Plan = $plan; UsersGroup = $users; AdminsGroup = $admins; Estimate = $estimate }
 }
 
+# =====================================================================
+# Golden image pipeline (docs/image-pipeline-spec.md)
+# =====================================================================
+function Get-AvdLatestVersion {
+  <# The highest of a list of dotted versions, compared as numbers (never as strings: red-team M1). #>
+  param([AllowEmptyCollection()][string[]] $Version = @())
+  $parsed = @($Version | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Text = $_; Value = [version]$_ } })
+  if (-not $parsed.Count) { return $null }
+  ($parsed | Sort-Object Value -Descending | Select-Object -First 1).Text
+}
+
+function Get-AvdImageVersionName {
+  <#
+    The next gallery version for a build on $Date (UTC): YYYY.MDD.N with no zero padding, so
+    January 4 is 2027.104.1 and October 4 is 2026.1004.1 (spec section 4.2, red-team M1).
+    N is one more than the highest build already published that day.
+  #>
+  param([Parameter(Mandatory)][datetime] $Date, [AllowEmptyCollection()][string[]] $Existing = @())
+  $prefix = '{0}.{1}' -f $Date.Year, ($Date.Month * 100 + $Date.Day)
+  $taken = @($Existing | Where-Object { $_ -like "$prefix.*" } | ForEach-Object { [int]($_.Split('.')[2]) })
+  $next = if ($taken.Count) { ($taken | Measure-Object -Maximum).Maximum + 1 } else { 1 }
+  "$prefix.$next"
+}
+
 Export-ModuleMember -Function *-Avd*
