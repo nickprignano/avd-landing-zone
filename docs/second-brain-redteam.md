@@ -151,10 +151,10 @@ The owner set a requirement: a person approves every change before it is made. T
 
 | Finding | Status | How |
 |---|---|---|
-| C1 Model picks the playbook | **Open, required for EX-0003** | Under per-run approval a wrong signature reaches a person; under self-healing (EX-0003) it would reach an action again. The spec now requires signatures from detections only before any playbook is active in EX-0003 |
+| C1 Model picks the playbook | **Resolved in spec** | Only detections assign signatures, set once at episode open (§4.2); agents add hypotheses only; agent-classified plans always need approval of each run and are never EX-0003 |
 | C2 Agents supply parameters | **Resolved in spec** | `propose_playbook_run(episodeId, playbookId)`; the orchestrator binds and scope-checks the targets; the approved plan hash is re-checked before running |
-| C3 Public issues reach a code-writing agent | Open | Approval covers merges, not what the agent reads; still needs separation and no credentials on issue-triggered workflows |
-| C4 Brain loosens its own guardrails | **Reduced, still open** | Guardrail changes now need a person to merge, but the person reviews the brain's own argument. CODEOWNERS and the CI path check are still needed |
+| C3 Public issues reach a code-writing agent | **Resolved in spec** | §9.1: no brain in a public repo; public portal reports aren't episodes; untrusted-event workflows hold no credentials; code-writing agents run only on schedule or dispatch, as a GitHub App limited to `brain/*` branches; provenance block; workflow linting in CI |
+| C4 Brain loosens its own guardrails | **Resolved in spec** | §9.2: protected paths and fields; `brain-guard` fails agent-authored guardrail changes; CODEOWNERS with no bypass; a deterministic summary of each guardrail change; append-only evals; a merge around the rules trips EX-0004. Solo-maintainer limit is Q8 |
 | H1 Automation can't reach private endpoints | **Resolved in spec** | Playbooks run in the approval-gated Actions job against ARM; state goes back through the run, not the private stores. The scheduled preflight is still H2 |
 | H3 Fights the scaling plan and Lock | **Resolved in spec** | Preconditions: not locked, not excluded, drain state restored |
 | H4 Session count from the broken agent | **Resolved in spec** | Unknown counts as occupied |
@@ -169,6 +169,8 @@ The owner set a requirement: a person approves every change before it is made. T
 | H2, H7, H8, H9, M7-M10, S1, S2 | Open | Not affected by the rule |
 
 New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. The owner then decided that the budget Lock stays a **pre-approved exception**, and that more exceptions will follow (spec §4.5.1). That reopens C4 for a new path: exceptions are the one way around approval, so the CI rule that agents can't touch `brain/exceptions/`, together with CODEOWNERS, is now required, not optional. Self-healing then became exception EX-0003 (spec §4.5.1), which brings C1 and H6 back to full weight for the playbooks it lists. The kill switch became EX-0004 (spec §4.5.1). It is held in an ARM tag, which also settles the kill-switch half of H1, and it cuts the executors' federated credentials, so a stop doesn't depend on the brain's own code behaving.
+
+All four critical findings are now resolved in the spec. The open findings are H2, H6 (required before `restart-avd-agent` enters EX-0003), H7, H8, H9, M7-M10, S1 and S2.
 
 ## Next step
 

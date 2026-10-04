@@ -105,9 +105,15 @@ All new resources go into one new resource group, `rg-<prefix>-<env>-brain`, dep
 | Cost | Cost Management exports to Blob; budget alerts | Export + action group | Budget lock already exists (0011) |
 | Landing zone health | Post-deployment preflight run on a schedule by Automation (`-SkipTenant -SkipNtfs`, plus `-WellArchitected` weekly) | State line `<<<AVDLZ-STATE ...>>>` written to Blob | Reuses the portal's contract unchanged |
 | Device and identity | Microsoft Graph: Intune managed device compliance, Entra sign-in logs (diagnostic settings to Log Analytics) | Pull / diagnostic settings | Read-only |
-| Code and CI | GitHub: workflow runs, PRs, `portal-report` issues | Webhook → Function, or GitHub Actions calling the brain | Portal reports enter as episodes, already redacted |
+| Code and CI | GitHub: workflow runs and PRs in the brain's private repository | Webhook → Function | Public `portal-report` issues are **not** signals (§9.1) |
 
 Every signal is normalized into a **Signal** (§6.1) with a **signature**: a stable hash of what failed, not when or where (for example `wvd-agent-unhealthy:upgrade-failed`, `fslogix-attach:0x00000005`). Signatures are how the brain recognizes "we've seen this before".
+
+**Only detections assign signatures (red-team C1).** A signature comes from the detection that fired: from its metadata, or from a deterministic function of the columns the detection returns. Nothing else assigns one.
+- An episode's signature is set once, when it opens, and can't change. The orchestrator rejects any write that would change it.
+- Merging signals into an episode is a pure function: the same signature, the same scope, inside a time window.
+- An agent can add a **hypothesis** ("this looks like `fslogix-attach:0x00000005`"), lower an episode's level, or ask for a person. It can never set or change the signature.
+- Playbooks are selected only by signature. When Diagnose suggests a playbook for an episode with an unknown signature, the plan is marked `agent-classified`. It always needs approval of each run, it is never eligible for EX-0003, and the approver sees that the brain guessed the match.
 
 **Detections are code.** Each one is a KQL file with metadata in `brain/detections/` (§7). The Bicep module turns them into scheduled query rules, so a detection changes only by PR, and a template test checks that every detection compiles and names a playbook or `notify-only`.
 
@@ -138,7 +144,7 @@ Agents run in **Microsoft Foundry Agent Service**, with the model chosen per age
 
 | Agent | Trigger | Reads | Produces | Can act? |
 |---|---|---|---|---|
-| **Triage** | New signal | Signal, recent episodes with the same signature, Service Health | Episode opened or merged into an existing one; severity; known/unknown signature | No |
+| **Triage** | New signal | Signal, recent episodes with the same signature, Service Health | Severity and a summary of an episode the orchestrator opened or merged deterministically; may lower the level or ask for a person, never set the signature | No |
 | **Diagnose** | Episode opened, unknown signature or playbook asks | Logs (KQL), Resource Graph changes, preflight state lines, AI Search over lessons and episodes | Ranked hypotheses, each with evidence links and a confidence; a proposed playbook or "escalate" | No |
 | **Critic** | Before any plan goes to a person, and before any PR | The proposal and its evidence | Agreement, or a dissent shown to the approver beside the plan. A second model or prompt that argues against the proposal | No |
 | **Retro** | Episode closed with a new signature, or a signature repeated ≥3 times in 30 days | Episode, evidence, `.claude/skills/retro/SKILL.md` | A draft PR: lesson + guard (+ detection, + playbook) | PR only |
@@ -245,7 +251,7 @@ There are three kinds:
 
 **Rules for every exception**
 
-1. **Only people create one.** People write and merge exceptions; CODEOWNERS on `brain/exceptions/` requires the approvers it names. A PR written by the brain that touches the folder fails CI (red-team C4). The brain may only point out candidates in the weekly digest, such as "approved 20 of 20 times, never rejected".
+1. **Only people create one.** People write and merge exceptions; CODEOWNERS on `brain/exceptions/` requires the approvers it names. A PR written by the brain that touches the folder fails CI (§9.2). The brain may only point out candidates in the weekly digest, such as "approved 20 of 20 times, never rejected".
 2. **The trigger is deterministic:** a detection, a schedule or a budget threshold. It is never a model's output or an agent's judgment. No agent can invoke an exception.
 3. **Narrow:**
    - one playbook action, or a fixed list of named playbooks, each with its own scope and limits (EX-0003); suspension applies per playbook;
@@ -299,7 +305,7 @@ What still holds under EX-0003:
 - a failed verification or a rollback suspends **that playbook** in EX-0003 and sends it back to approving each run, until a person re-enables it by PR.
 
 Because no person approves each run, these red-team fixes become **required** before any playbook is active in EX-0003:
-- C1: signatures come only from detections;
+- C1: signatures come only from detections (§4.2), and the `brain-guard` check is in place (§9.2);
 - H6: the Run Command script is fixed text, pinned by content hash, under a custom role scoped to the hosts resource group;
 - M5: the first rollback suspends the playbook.
 
@@ -421,7 +427,7 @@ The Evolve agent proposes, CI checks, `test` proves, a person decides.
 - **Repository** as the long-term memory: `brain/` (detections, playbooks, evals, prompts) beside the existing IaC, lessons and decisions.
 - **Actions:** `validate.yml` gains the brain checks; new `brain-index.yml` (reindex on push), `brain-eval.yml`, `brain-evolve.yml` and `brain-retro.yml` (Claude Code in Actions, OIDC to Azure, read-only roles), and `brain-execute.yml` (plan, then approval-gated apply).
 - **Issues and Projects** as the inbox: one issue per episode that needs a person, labeled `brain`, with a weekly digest issue. Every change is approved through a GitHub Environment with required reviewers (§4.5).
-- **Org brain vs. public brain.** This public repo holds generic knowledge only. An organization runs the brain from a **private fork**, so issue bodies may contain more context; even there, issue text passes the redaction rules, and full detail stays in Cosmos DB and Blob, linked by episode ID.
+- **Org brain vs. public brain.** This public repo holds generic knowledge only, and the brain refuses to run in a public repository (§9.1). An organization runs the brain from a **private fork**, so issue bodies may contain more context; even there, issue text passes the redaction rules, and full detail stays in Cosmos DB and Blob, linked by episode ID.
 
 ### Additional services (optional, when needed)
 
@@ -461,6 +467,8 @@ Cost is driven mainly by AI Search tier, model tokens and Cosmos DB request unit
   "schema": "avdlz-episode/v1",
   "id": "ep-...",
   "signature": "wvd-agent-unhealthy:upgrade-failed",
+  "signatureSource": "detection:wvd-agent-unhealthy@git:<sha>",
+  "agentClassified": false,
   "status": "open | diagnosing | awaiting-approval | acting | verifying | closed",
   "signals": ["sig-..."],
   "evidence": [{ "kind": "kql | rest | state-line | github", "ref": "blob://...", "sha256": "..." }],
@@ -557,6 +565,9 @@ Template and CI guards to add with the first slice:
 - every playbook validates against its schema, names an existing runbook action, has a scenario and a verification;
 - every exception validates against its schema, has a deterministic trigger, names a person as owner and approver, and has a review date in the future (standing) or a linked parameter (external); a PR written by the brain that touches `brain/exceptions/` fails;
 - every `AzMock.psm1` path a playbook calls exists (decision 0011's rule);
+- `brain-guard` (§9.2): agent-authored PRs touching protected paths or fields fail; every guardrail change gets the deterministic summary; evals are append-only and the base branch's cases always run;
+- the workflow rules of §9.1: a linter, and a repo test that untrusted-event workflows hold no credentials, never interpolate event text, and never use `pull_request_target`;
+- the signature rule of §4.2: detections declare how their signature is computed, and the episode schema has no writable signature after creation;
 - no prompt file contains tenant data (the PII sample test from decision 0008, run over `brain/`);
 - the new entry points carry the project notice (`tests/portal/disclaimer.test.mjs`).
 
@@ -579,11 +590,57 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 ## 9. Security and privacy
 
 - **Data classification:** tenant identifiers, UPNs, resource names and IPs are confidential and stay in the tenant's stores. GitHub content passes redaction; public `brain/evals` cases are redacted fixtures only.
-- **Prompt injection:** logs, issue text, PR comments and tool output are untrusted. Agents cannot act except through `propose_playbook_run`, which only produces a plan. The orchestrator checks schema, level and guardrails, the Critic reviews every plan, and a person approves it. Untrusted text is shown to the approver as quoted evidence, never as the plan's description.
+- **Prompt injection:** logs, issue text, PR comments and tool output are untrusted (GitHub specifics in §9.1). Agents cannot act except through `propose_playbook_run`, which only produces a plan. The orchestrator checks schema, level and guardrails, the Critic reviews every plan, and a person approves it. Untrusted text is shown to the approver as quoted evidence, never as the plan's description.
 - **Identities:** one per agent and one per executor; no shared credentials; no secrets in prompts; OIDC for GitHub Actions. Registration tokens and similar short-lived secrets are created inside the runbook and never returned.
 - **Network:** all data stores private; the Functions app and AI Search use private endpoints and VNet integration in the brain's own subnet (a new `/27` in the spoke, or a peered management spoke in hub mode).
 - **Audit:** every action has an episode, a plan with its hash, the approving person, the Actions run, Activity Log entries under the executor's identity, and a GitHub comment. Foundry tracing keeps agent steps.
 - **Model data handling:** the organization confirms the data processing terms of the chosen model deployment before enabling the Reason layer. Without it, Sense, Remember and level 0-1 playbooks still work, with diagnosis left to people.
+
+### 9.1 GitHub trust boundaries (red-team C3)
+
+Anything a person outside the approvers team can write is untrusted input. That includes issues, comments, PR titles and bodies, branch names, commit messages and fork PRs. None of it may reach a component that holds write credentials. Text from these sources never becomes an instruction.
+
+1. **No brain in a public repository.** The brain runs only from a private repository. The orchestrator and every brain workflow read the repository's visibility through the API at startup and before every GitHub write. If the repository is public, they stop and trip EX-0004 (`halt-all`).
+2. **Public portal reports are not episodes.** `portal-report` issues in this public repo come from other people's tenants. They feed public knowledge only through the human retro (decisions 0006 and 0008). An organization's brain doesn't read the public repo's issues.
+3. **Workflows started by untrusted events hold no credentials.** Any workflow triggered by `issues`, `issue_comment`, `pull_request` from a fork, `pull_request_target`, `discussion` or `workflow_run` declares:
+   - `permissions: contents: read` and nothing else;
+   - no `id-token: write`, so no Azure;
+   - no secrets;
+   - no agent with write tools.
+
+   `pull_request_target` is not used at all. Event text is never interpolated into `run:` steps (`${{ github.event.* }}`); it is passed through `env:` and treated as data.
+4. **Agents that write code run only from trusted triggers.** Retro and Evolve run only on `schedule` or `workflow_dispatch`, on the default branch. They don't run because an issue or comment arrived.
+   - Their GitHub identity is a dedicated GitHub App (`avdlz-brain`) whose installation can write only `brain/*` branches, which branch protection enforces, and open draft PRs. It can never write to the default branch, change workflows, manage environments or bypass rules.
+   - Their Azure identity is read-only.
+5. **Inputs are quoted, with provenance.** When an agent uses issue or comment text, the text goes in as quoted evidence with its author and URL. Every agent PR lists the episodes, issues and comments it drew on in a deterministic **provenance** block, written by the workflow, not by the model. A reviewer can then see which parts of the change came from untrusted text.
+6. **The workflows are checked in CI.** `validate.yml` runs a workflow linter (actionlint, plus zizmor or an equivalent) and a repo test that enforces rules 3 and 4 on every file in `.github/workflows/`.
+
+### 9.2 Protected paths: the brain can't loosen its own guardrails (red-team C4)
+
+The brain may propose code, but never changes to what limits it. Two mechanisms enforce this: GitHub's rules on who may merge, and a CI check on what changed. A change to a protected path is a **guardrail change**.
+
+**Protected:**
+
+| Path or field | Why |
+|---|---|
+| `brain/exceptions/**` | The only way around approval |
+| In `brain/playbooks/*.yml`: `maxLevel`, `limits`, `preconditions`, `approvers`, `verify`, `rollback`, `signatures` | What a playbook may do and when |
+| `brain/prompts/**` | How agents reason, including what they treat as untrusted |
+| `brain/detections/*.yml`: `signature`, `severity`, `playbook` | What triggers a playbook (C1) |
+| `brain/evals/**`: changes or deletions (additions are allowed) | The gate on agent quality |
+| `scripts/automation/**`, `scripts/brain/**` guardrail and orchestrator code | The executor, the kill switch, the watchdog |
+| `.github/workflows/**`, `.github/CODEOWNERS`, `bicep/modules/brain.bicep` role assignments and federated credentials | Who can do what |
+
+**Rules:**
+
+1. **Agents can't author guardrail changes.** CI job `brain-guard` fails any PR that has a commit by the `avdlz-brain` App and touches a protected path or field. It parses the YAML, so a guardrail field hidden in an otherwise ordinary playbook edit still fails.
+   - The brain can only suggest a guardrail change as text in an issue or the digest. A person writes the change.
+2. **People review every guardrail change.** CODEOWNERS names the owner and approvers teams for every protected path. Branch protection requires a code owner review, dismisses stale approvals on new commits, and allows no bypass, including for admins.
+3. **A deterministic summary goes with every guardrail change.** `brain-guard` posts a summary: which protected fields changed, old value → new value, and whether the change makes the brain more or less capable. CI produces it, not a model, so the reviewer doesn't rely on the brain's own description.
+4. **Evals are append-only.** Removing or changing a case needs a PR by a person, the label `eval-change`, and a reason recorded in `brain/evals/CHANGES.md`. `brain-eval` always runs the base branch's cases as well as the PR's, so a PR can't pass by editing the test it fails.
+5. **A guardrail change merged around the rules trips the kill switch.** The watchdog trigger "guardrail file changed without the required reviews" (EX-0004) checks the merged PR. It looks for an approving code owner review by a person who isn't the PR's author, or an owner as author for a guardrail change that only lowers capability. Any other merge, including a direct push, trips `halt-actions`.
+
+**Solo maintainer.** GitHub doesn't let authors approve their own PRs. With one owner, guardrail changes the owner writes can't get a second review. The rules allow an owner-authored change that **only lowers** capability, as `brain-guard` classifies it, to merge with the owner's own review. A change that raises capability, adds an exception, or adds a playbook to EX-0003 needs a second person. Until a second approver exists, those stay unmerged and the brain stays at approving each run (Q8).
 
 ## 10. Measures of success
 
@@ -640,3 +697,4 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 - **Q5** Microsoft Entra Agent ID availability and roles in the target tenants, versus plain user-assigned managed identities.
 - **Q6** Image pipeline: host replacement is far stronger with a golden image (listed in [out-of-scope.md](out-of-scope.md) as a next layer). Build it before or alongside phase 3?
 - **Q7** ~~Does the budget Lock wait for approval?~~ **Decided 2026-10-04:** no; it stays a pre-approved exception (EX-0001). More exceptions will follow through §4.5.1. EX-0002 (scheduled Stop) confirmed the same day, and self-healing became EX-0003.
+- **Q8** Solo maintainer: guardrail changes that raise capability, new exceptions and EX-0003 entries need a second person (§9.2). Who is the second approver, or should the brain stay at approving each run until there is one?
