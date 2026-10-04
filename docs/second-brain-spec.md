@@ -173,7 +173,12 @@ Why this split:
 - **Retrieval at Tier 3 is Cosmos DB vector search** over the embedded repo knowledge and the episodes, so "this looks like lesson 0011" and "this looks like last Tuesday's episode" come from one query, and every answer cites its sources. Azure AI Search is an option for large estates only, because it has no serverless tier and its private networking needs a billed tier that runs all month (red-team H9; Q3).
 - **Evidence is immutable.** Raw outputs go to Blob with a time-based immutability policy, and episodes reference them by hash. A diagnosis can always be re-checked against what was actually returned.
 
-Retention: episodes 13 months (a year of seasonality plus one month), evidence 90 days unless pinned by a lesson, signals 30 days. Lifecycle management deletes the rest.
+Retention (red-team M7):
+- **Episodes:** 13 months, which is a year of seasonality plus one month.
+- **Signals:** 30 days.
+- **Evidence:** 90 days, under a time-based immutability window of **30 days**, so it is tamper-evident while an incident is live and deletable afterwards. Evidence a lesson needs is copied into a redacted fixture in Git, never kept in Blob.
+
+Lifecycle management deletes the rest. Erasure is covered in §9.4.
 
 ### 4.4 Reason
 
@@ -431,17 +436,30 @@ Clearing the tag by hand restores nothing: without the redeploy the executors st
 - **Playbook statistics:** success rate, verification time, rollbacks, approval and rejection rates with reasons. A good record changes how a plan is presented (its history is shown to the approver), **never whether it needs approval**. A playbook is **demoted** to level 1 automatically on failures (fail safe); restoring it is a PR a person merges.
 - **Rejections teach:** a rejected plan needs a one-line reason. Rejections by signature feed the Retro agent, because a playbook people keep rejecting is a wrong playbook.
 - **Baselines:** daily recomputation of per-hour-of-week connection counts, error rates, logon duration and profile load time, so detections can use "unusual for Monday 9:00" rather than fixed thresholds.
-- **Evals:** every closed episode, redacted, can become an eval case: input signals and evidence, expected signature, expected playbook or escalation. `brain-eval` runs the agents against the eval set on every PR that changes prompts, models, detections or playbooks, with tools served by the offline mock. A drop in accuracy fails CI.
+- **Evals (red-team M10):** every closed episode, redacted, can become an eval case: input signals and evidence, expected signature, expected playbook or escalation. `brain-eval` runs the agents against the eval set with tools served by the offline mock. Model output varies from run to run, so the gate is statistical:
+  - each case runs **5 times**. A PR fails when the **90% lower confidence bound** of its pass rate falls more than **5 points** below the base branch's pass rate, measured the same way. A single unlucky run never fails a PR;
+  - it runs on PRs that change prompts, models, detections or playbooks, **only from branches in the same repository** (the owner's or the brain's App), and nightly on the default branch. Never on fork PRs: the model key sits in a `brain-eval` environment limited to those branches;
+  - a daily spend cap stops evals once reached and reports it, rather than passing silently.
 
 ### 4.7 Evolve
 
 The Evolve agent proposes, CI checks, `test` proves, a person decides.
 
-1. **Drift:** nightly what-if of the deployed parameter file against the subscription, plus Resource Graph changes not made by the deploy identity. Each drift becomes a PR that either codifies the change in Bicep or documents the revert command.
+1. **Drift (red-team M8):** found from Resource Graph `resourcechanges` that the deploy identity didn't make, not from a nightly what-if. What-if over AVM templates reports changes that aren't real, and it needs the deployment's inputs.
+   - What-if runs only on PRs, inside the deploy workflow.
+   - Known what-if noise is suppressed only through `brain/whatif-noise.yml`. That file is a guardrail (§9.2), because a suppression can hide real drift. Each entry names the resource type, the property, and the evidence that it's noise.
+   - Each drift becomes either a PR that codifies the change in Bicep, or a plan to revert it, which a person approves.
 2. **Right-sizing:** from baselines, propose `AVD_SESSION_HOST_COUNT`, `AVD_SESSION_HOST_VM_SIZE`, `AVD_MAX_SESSION_LIMIT` or `AVD_PROFILE_QUOTA_GIB` changes. Prices come from the retail price API with the matching rules of decision 0010 and lesson 0025; a size change on an existing landing zone is called out in the PR, never applied silently.
 3. **Posture:** Well-Architected findings that are not `data.accepted` become PRs or issues, by pillar.
 4. **Dependencies:** AVM module and API version bumps (Dependabot or Renovate), with what-if output attached by CI.
-5. **Rollout:** a merged change deploys to `test` first (`test.bicepparam`, same subscription), the brain watches it for a soak period (default 24 hours) with the same detections, then a person runs the `deploy` workflow to promote to `prod` behind its required reviewers. The brain never triggers a deployment; merging approves the code, and running the deployment is a second, separate human decision.
+5. **Rollout (red-team M9):** a person deploys a merged change to `test` first (`test.bicepparam`, same subscription). A quiet `test` with no users proves nothing, so the soak needs **positive evidence**:
+   - **The readiness probe passes** at the start of the soak and every hour after: the sign-in readiness checks of `Deploy-AvdDemo.ps1` (hosts Available and accepting sessions, all AVD health checks, the host run commands, the access assignments), run by the scheduled job against `test`'s host pool, read-only;
+   - **no detection fires** for `test` during the soak (default 24 hours);
+   - **a real sign-in, when the change touches the user's path.** CI classifies the diff: session hosts, storage, network, the control plane, RBAC. For those changes, `WVDConnections` must show at least one completed connection to `test`'s host pool after the deployment. A person signs in through the Windows App to produce it, and the soak waits for it.
+
+   Then a person runs the `deploy` workflow to promote to `prod` behind its required reviewers.
+
+   **Shared budget:** `test` sits in the same subscription as `dev` (and, for many adopters, `prod`), so its spend counts toward decision 0011's subscription-wide budget and Lock (EX-0001). A long soak with extra hosts can trip the Lock for everyone. The spec doesn't change that coupling; the soak report shows `test`'s spend so far, and adopters who soak often should give `test` its own subscription. The brain never triggers a deployment; merging approves the code, and running the deployment is a second, separate human decision.
 
 ## 5. Services
 
@@ -601,6 +619,7 @@ brain/
   prompts/           one file per agent; versioned like code
   evals/             <case>/ signals.json, evidence/, expected.json (redacted)
   schemas/           signal, episode, playbook, exception JSON Schemas
+  whatif-noise.yml   reviewed what-if suppressions, each with evidence (§4.7)
 bicep/modules/brain.bicep
 scripts/automation/Invoke-AvdPlaybook.ps1
 scripts/brain/       the Tier 1 job entry point; Tier 3 Functions (orchestrator, agents' tools); all PowerShell
@@ -636,7 +655,7 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 | `connection-errors-spike` | `WVDErrors` above baseline | 1 | Correlate with Service Health and recent changes; post diagnosis | n/a (diagnosis) |
 | `fslogix-attach-failure` | FSLogix attach errors | 1 | Diagnosis with lesson 0011 and the open Kerberos case; escalate with evidence pack | n/a |
 | `budget-lock-review` | Budget Lock active (0011) | 2 | Resume after approval | `power-locked` cleared |
-| `drift-detected` | What-if or change not by deploy identity | 3 | PR to codify, or a plan to revert | Next what-if clean |
+| `drift-detected` | A Resource Graph change not made by the deploy identity | 3 | PR to codify, or a plan to revert | No unexplained changes on the next pass; what-if clean on the PR |
 | `quota-pressure` | vCPU quota near the limit (lesson 0013, 0024) | 1 | Issue with the request command | Preflight quota check passes |
 
 ## 9. Security and privacy
@@ -652,7 +671,7 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 
 Anything a person outside the approvers team can write is untrusted input. That includes issues, comments, PR titles and bodies, branch names, commit messages and fork PRs. None of it may reach a component that holds write credentials. Text from these sources never becomes an instruction.
 
-1. **No brain in a public repository.** The brain runs only from a private repository. The orchestrator and every brain workflow read the repository's visibility through the API at startup and before every GitHub write. If the repository is public, they stop and trip EX-0004 (`halt-all`).
+1. **No brain in a public repository.** The brain runs only from a private repository. That covers every workflow that touches a tenant or the brain's memory: diagnose, execute, standing, kill switch, resume, retro, evolve and index. `brain-guard` and `brain-eval` are CI: they also run in the public project repository, against redacted fixtures and the offline mock, never tenant data. The orchestrator and every brain workflow read the repository's visibility through the API at startup and before every GitHub write. If the repository is public, they stop and trip EX-0004 (`halt-all`).
 2. **Public portal reports are not episodes.** `portal-report` issues in this public repo come from other people's tenants. They feed public knowledge only through the human retro (decisions 0006 and 0008). An organization's brain doesn't read the public repo's issues.
 3. **Workflows started by untrusted events hold no credentials.** Any workflow triggered by `issues`, `issue_comment`, `pull_request` from a fork, `pull_request_review`, `pull_request_target`, `discussion` or `workflow_run` declares:
    - read-only permissions (`contents: read`, plus `pull-requests: read` for `brain-guard`) and nothing else;
@@ -680,6 +699,7 @@ The brain may propose code, but never changes to what limits it. Two mechanisms 
 | `brain/prompts/**` | How agents reason, including what they treat as untrusted |
 | `brain/detections/*.yml`: `signature`, `severity`, `playbook` | What triggers a playbook (C1) |
 | `brain/evals/**`: changes or deletions (additions are allowed) | The gate on agent quality |
+| `brain/whatif-noise.yml` | A suppression can hide real drift |
 | `scripts/automation/**`, `scripts/brain/**` guardrail and orchestrator code | The executor, the kill switch, the watchdog |
 | `.github/workflows/**`, `.github/CODEOWNERS`, `bicep/modules/brain.bicep` role assignments and federated credentials | Who can do what |
 
@@ -730,7 +750,10 @@ The watchdog's "merged around the rules" trigger (§9.2 rule 5) accepts the solo
   - For Claude, Anthropic is an independent data processor even when Claude runs in Foundry, and there is no EU data zone for Claude today ([data privacy](https://learn.microsoft.com/en-us/azure/foundry/responsible-ai/claude-models/data-privacy)).
   - The Tier 1 diagnosis through Claude Code in Actions is `anthropic-api`.
   - With `none`, Tier 1 and Tier 2 still work, and diagnosis is left to people.
-- **Retention follows from pseudonymization.** Immutable evidence holds only pseudonymized data. Evidence pinned by a lesson must already be a redacted fixture.
+- **Erasure (red-team M7).** Pseudonymized data is still personal data, so the brain has to be able to forget a person.
+  - **One person:** an operator computes their pseudonym (`Get-AvdPseudonym`). `Remove-AvdBrainSubject` then scrubs it from the mutable stores (issue comments the brain wrote, Cosmos DB, the statistics file). Immutable evidence that still holds the pseudonym ages out within the 30-day window, and the script reports which blobs those are and when they unlock.
+  - **Everyone at once:** the pseudonymization key **rotates every 12 months**, and the old key is deleted and purged from Key Vault. Pseudonyms made with it can then no longer be linked to anyone (crypto-shredding). An erasure request can also trigger an early rotation.
+  - **Fixtures in Git** hold redacted placeholders only, never pseudonyms (decision 0008).
 ## 10. Measures of success
 
 | Measure | Target after phase 4 |

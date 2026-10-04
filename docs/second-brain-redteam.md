@@ -172,12 +172,15 @@ The owner set a requirement: a person approves every change before it is made. T
 | M6 Targets vs. timings | **Resolved in spec** | Split into time to plan and time from approval to verified fix |
 | S1 Too big for one maintainer | **Addressed in spec** | The owner clarified that the project is for the community, with one maintainer, possibly for good. Answer: tiers with Tier 1 as the small supported core; one language (PowerShell and Bicep, no custom MCP server); Tiers 2–3 experimental until verified; a project/adopter split; solo mode (§3.1, §3.2, §9.3). The residual risk, one maintainer, is in spec §12 |
 | S2 Measure before you heal | **Resolved in spec** | Phase 1 exits with a ranked signature list from 30 days of real data, and phase 2 takes its playbooks from the top of it |
-| M7-M10 | Open | Medium findings not yet folded in |
+| M7 Immutable evidence vs. erasure | **Resolved in spec** | A 30-day immutability window inside 90-day retention; `Remove-AvdBrainSubject` scrubs a pseudonym from the mutable stores; yearly key rotation with purge makes old pseudonyms unlinkable; lessons keep redacted fixtures, not evidence (§4.3, §9.4) |
+| M8 Noisy what-if | **Resolved in spec** | Drift comes from Resource Graph changes not made by the deploy identity; what-if only on PRs; suppressions in a guardrail file with evidence (§4.7) |
+| M9 Soak without users, shared budget | **Resolved in spec** | The soak needs positive evidence: an hourly readiness probe (the demo's checks), no detections, and for user-path changes a real completed connection in `WVDConnections`. The shared budget is documented, with test spend in the soak report (§4.7) |
+| M10 Stochastic eval gate | **Resolved in spec** | 5 runs per case and a 90% lower bound against the base branch with a 5-point margin; same-repo branches and nightly only; a key limited to an environment; a daily spend cap (§4.6) |
 
 New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. The owner then decided that the budget Lock stays a **pre-approved exception**, and that more exceptions will follow (spec §4.5.1). That reopens C4 for a new path: exceptions are the one way around approval, so the CI rule that agents can't touch `brain/exceptions/`, together with CODEOWNERS, is now required, not optional. Self-healing then became exception EX-0003 (spec §4.5.1), which brings C1 and H6 back to full weight for the playbooks it lists. The kill switch became EX-0004 (spec §4.5.1). It is held in an ARM tag, which also settles the kill-switch half of H1, and it cuts the executors' federated credentials, so a stop doesn't depend on the brain's own code behaving.
 
-All critical and high findings are now resolved in the spec, and S1 is addressed. Q8 is decided as solo mode (spec §9.3). The open findings are M7-M10 (medium).
+Every finding is now resolved or addressed in the spec. Q3, Q7 and Q8 are decided. What remains is verification: nothing here has run against a real tenant, and the spec flags the Azure details to confirm at build time.
 
 ## Next step
 
-Fold M7-M10 into the spec. Then answer Q1 and Q6 with the data phase 1 produces.
+Build phase 1 (Tier 1). Then answer Q1 and Q6 with the data it produces, and run a second red-team pass on the as-built design before Tier 2.
