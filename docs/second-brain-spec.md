@@ -201,6 +201,34 @@ Agents reach tools with an allowlist:
 
 Everything an agent reads from logs, issues, comments or tool output is **untrusted data**. Prompts mark it as such; no instruction found in it can widen what the agent may do. The only way to act is `propose_playbook_run`, which produces a plan for a person to approve (§4.5). The proposal alone changes nothing.
 
+**Models (Q1, decided 2026-10-04).** All agents start on one model, **Claude Opus 5.5** (`claude-opus-5-5`). Each agent gets its own effort level. A cheaper model replaces it only where evals show quality holds.
+
+| Agent | Model | Effort | Why |
+|---|---|---|---|
+| Diagnose (the only agent at Tiers 1–2) | Claude Opus 5.5 | `high` | Reading evidence and citing the right lesson is where capability pays off |
+| Triage (Tier 3) | Claude Opus 5.5 | `low` | It only summarizes; signatures come from detections (§4.2). First candidate for Claude Sonnet 5.5 |
+| Critic | Claude Opus 5.5, separate adversarial prompt | `high` | Then tested against a different model (below) |
+| Retro and Evolve (Claude Code in Actions) | Claude Opus 5.5 | `high` | Writes code and tests; its PRs are what a person reviews |
+| Concierge | Claude Opus 5.5 | `low` to `medium` | Answers with citations |
+
+Why one model:
+- **Volume is low.** An estate has a handful of episodes a day, so a wrong diagnosis costs more than the token difference.
+- **Effort first, then model.** On current models, a stronger model at lower effort usually matches a weaker model at high effort. One model also means one prompt cache and one eval baseline.
+- **Prices come from the meters.** Claude Sonnet 5.5 costs about half as much per token as Claude Opus 5.5, and Claude on Foundry is billed at the same per-token rates as the Anthropic API. The deploy step prices the chosen setup from the meters (decision 0010). This spec doesn't estimate it.
+
+Rules:
+- **Set effort explicitly.** Claude Opus 5.5 defaults to `medium`. Prompts keep the lessons and docs first, so prompt caching covers the repeated input.
+- **A refusal is an escalation.** Safety classifiers can decline content that looks like security work, and Run Command, credentials and access are near that line. A `refusal` stop reason marks the episode for a person, with the evidence. The brain never rephrases to get past it.
+  - On the Anthropic API, server-side fallbacks (`fallbacks: "default"`) are enabled.
+  - On Foundry, the SDK's refusal-fallback middleware does the same job.
+  - Either way, a fallback answer is labeled with the model that produced it.
+- **Hosting changes features, not prices.** `AVD_BRAIN_MODEL` (§9.4) picks the platform. Some features work only on Anthropic-hosted Foundry deployments, so the Tier 3 tools are plain function tools that work on both.
+- **Model IDs are configuration.** They live in `brain/models.yml`, a guardrail file (§9.2), and change only by PR.
+
+**Re-testing the choice.** Once the eval set has about 20 redacted real episodes (phase 3), each agent's cases run on Claude Opus 5.5 at the next lower effort and on Claude Sonnet 5.5. The cheapest setup that passes the eval gate (§4.6) wins, decided per agent and recorded in `brain/models.yml` with the eval run.
+
+For the Critic, Claude Opus 5.5 with its own prompt is also run against Claude Sonnet 5.5 and an Azure OpenAI model on episodes seeded with known-wrong plans. The Critic keeps whichever model catches the most of them, because a critic that shares the diagnoser's blind spots adds little. The same re-test runs whenever a new model generation ships.
+
 ### 4.5 Act and verify: a person approves every change
 
 **The rule:** the brain never makes a change until a person has approved that exact change.
@@ -621,6 +649,7 @@ brain/
   evals/             <case>/ signals.json, evidence/, expected.json (redacted)
   schemas/           signal, episode, playbook, exception JSON Schemas
   whatif-noise.yml   reviewed what-if suppressions, each with evidence (§4.7)
+  models.yml         model and effort per agent, with the eval run that chose them (§4.4)
 bicep/modules/brain.bicep
 scripts/automation/Invoke-AvdPlaybook.ps1
 scripts/brain/       the Tier 1 job entry point; Tier 3 Functions (orchestrator, agents' tools); all PowerShell
@@ -702,6 +731,7 @@ The brain may propose code, but never changes to what limits it. Two mechanisms 
 | `brain/detections/*.yml`: `signature`, `severity`, `playbook` | What triggers a playbook (C1) |
 | `brain/evals/**`: changes or deletions (additions are allowed) | The gate on agent quality |
 | `brain/whatif-noise.yml` | A suppression can hide real drift |
+| `brain/models.yml` | Which model and effort each agent uses |
 | `scripts/automation/**`, `scripts/brain/**` guardrail and orchestrator code | The executor, the kill switch, the watchdog |
 | `.github/workflows/**`, `.github/CODEOWNERS`, `bicep/modules/brain.bicep` role assignments and federated credentials | Who can do what |
 
@@ -806,7 +836,7 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 
 ## 13. Open questions
 
-- **Q1** Model choice per agent: Claude through Foundry for diagnosis and code, a smaller model for triage? Decide with the phase 2 eval set, not up front.
+- **Q1** ~~Which model per agent?~~ **Decided 2026-10-04:** Claude Opus 5.5 for every agent, with effort set per agent; cheaper models only where evals show quality holds (§4.4).
 - **Q2** Approval surface: GitHub Environments are where Azure can enforce approval. Are Teams notifications that link to them enough?
 - **Q3** ~~Retrieval?~~ **Decided:** the Git checkout at Tiers 1–2, Cosmos DB vector search at Tier 3, Azure AI Search only for large estates (red-team H9).
 - **Q4** One brain per landing zone, or one per organization over several landing zones (the episode schema allows `environment` and `scope` to span them)?
