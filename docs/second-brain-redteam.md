@@ -145,6 +145,31 @@ That is phases 1 and 2, roughly level 1, with about four new resources. Add Cosm
 ### S2. Measure before you heal
 The spec has no baseline for how often each failure actually happens in this estate. Without one, the first playbooks are guesses. Phase 1 should end with a ranked signature list from real data. Phase 3's playbooks are the top of that list, not the table in §8.
 
+## Status after the human-approval rule (2026-10-04)
+
+The owner set a requirement: a person approves every change before it is made. The spec now has no autonomous level. The executor gets an Azure token only through an approved GitHub Environment job, and every run is bound to an approved plan hash (spec §4.5).
+
+| Finding | Status | How |
+|---|---|---|
+| C1 Model picks the playbook | **Reduced, still open** | A wrong signature now reaches a person instead of an action, but it still shapes the plan they see. Signatures must still come only from detections |
+| C2 Agents supply parameters | **Resolved in spec** | `propose_playbook_run(episodeId, playbookId)`; the orchestrator binds and scope-checks the targets; the approved plan hash is re-checked before running |
+| C3 Public issues reach a code-writing agent | Open | Approval covers merges, not what the agent reads; still needs separation and no credentials on issue-triggered workflows |
+| C4 Brain loosens its own guardrails | **Reduced, still open** | Guardrail changes now need a person to merge, but the person reviews the brain's own argument. CODEOWNERS and the CI path check are still needed |
+| H1 Automation can't reach private endpoints | **Resolved in spec** | Playbooks run in the approval-gated Actions job against ARM; state goes back through the run, not the private stores. The scheduled preflight is still H2 |
+| H3 Fights the scaling plan and Lock | **Resolved in spec** | Preconditions: not locked, not excluded, drain state restored |
+| H4 Session count from the broken agent | **Resolved in spec** | Unknown counts as occupied |
+| H5 Missing data reads as success | **Resolved in spec** | Positive verification |
+| H6 Executor is SYSTEM on hosts | **Reduced, still open** | No standing credential, and two approvers for Run Command and prod; a content-hash-pinned script and a custom role are still needed |
+| M1 Prod level contradiction | **Resolved in spec** | One ladder, level 2 means approved |
+| M2 Policy outside Git | **Resolved in spec** | App Configuration can only lower; unreadable means 0 |
+| M3 Phase 3 exit can't be met | **Resolved in spec** | Exit in `test` with two or more hosts and drills |
+| M4 Blast radius has no headroom | **Resolved in spec** | Demand plus one host, or the scaling plan's minimum |
+| M5 Thin promotion evidence | **Moot** | No promotion to autonomy exists |
+| M6 Targets vs. timings | **Resolved in spec** | Split into time to plan and time from approval to verified fix |
+| H2, H7, H8, H9, M7-M10, S1, S2 | Open | Not affected by the rule |
+
+New risk introduced by the rule: **approval fatigue**, and fixes waiting on people. Both are in spec §12. A new owner question, Q7: does decision 0011's budget Lock stay a pre-approved exception?
+
 ## Next step
 
 Fold C1-C4, H1-H9 and S1 into the spec and the decision record. Then answer Q1, Q3 and Q6 with the data phase 1 produces.
