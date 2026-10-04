@@ -217,7 +217,7 @@ Playbooks are actions in `scripts/automation/Invoke-AvdPlaybook.ps1`. Like decis
 
 **Guardrails.** They hold even after an approval. The orchestrator checks them before it asks, and the executor checks them again before it acts.
 
-- **Kill switch:** the levels and limits deploy from Git. App Configuration (`brain:enabled`, `brain:maxLevel`) can only **lower** them. If the flag can't be read, the level is 0. Default for a new deployment: `maxLevel = 1`.
+- **Kill switch (EX-0004):** the levels and limits deploy from Git. The tag `avdlz-brain-killswitch` on the brain's resource group can only **lower** them (§4.5.1). If the tag can't be read, nothing runs. Default for a new deployment: `maxLevel = 1`.
 - **Blast radius:** at most one host per host pool in remediation at a time. Availability never drops below current demand plus one host, or the scaling plan's minimum, whichever is higher.
 - **Respect the other actors:**
   - never act on a host that is `power-locked` (decision 0011) or carries the scaling plan's exclusion tag;
@@ -237,10 +237,11 @@ Playbooks are actions in `scripts/automation/Invoke-AvdPlaybook.ps1`. Like decis
 
 The approval rule covers the changes the second brain process originates. Some changes have to happen without waiting for a person, and the owner has said there will be more of them. Each one is a **pre-approved exception**: a standing approval that a person writes down once, for one narrowly defined action, in `brain/exceptions/` (schema §6.5).
 
-There are two kinds:
+There are three kinds:
 
 - **External:** automation outside the brain that a person configured, such as decision 0011's budget Lock. The brain doesn't run it and never changes or suppresses it. It records each use as an episode and can propose the follow-up, such as Resume, as an ordinary plan for approval.
 - **Standing:** a brain playbook allowed to run without approving each run.
+- **Safety:** an action that can only take the brain's own capability away, never add it. The kill switch (EX-0004) is the only one. The kill switch can't stop it, and a failure pages the owner instead of suspending it.
 
 **Rules for every exception**
 
@@ -254,7 +255,7 @@ There are two kinds:
 4. **Owned and dated:** each exception names its owner and approvers, the reason, and a review date. A standing exception has a review date at most 180 days out. An external one is reviewed with the deployment parameters that configure it. When the review date passes, a standing exception falls back to approving each run, automatically.
 5. **Every use is on record:** the episode carries `approval.kind: standing`, with the exception ID and the commit that approved it. Each use is posted to the episode's issue and listed in the weekly digest.
 6. **The guardrails still apply:** blast radius, preconditions and positive verification. A failed verification or a rollback **suspends** a standing exception, so it falls back to approving each run, and opens an issue. Re-enabling it is a PR a person merges.
-7. **The kill switch stops standing exceptions.** It does not stop external ones, which have their own controls (the budget's threshold and action), so turning the brain off never turns off a cost safety.
+7. **The kill switch (EX-0004) stops standing exceptions.** It does not stop external ones, which have their own controls (the budget's threshold and action), so turning the brain off never turns off a cost safety.
 8. **Enforced by Azure:**
    - Each standing exception has its own executor identity, with a custom role limited to its action and scope.
    - That identity is federated to an environment (`brain-<env>-standing-<id>`) that only accepts the default branch. Its OIDC subject is customized to include the workflow file, so only `brain-standing.yml` on the default branch can get a token.
@@ -267,6 +268,7 @@ There are two kinds:
 | EX-0001 | External | Budget **Lock**: drain, scaling plan exclusion tag, Start VM on Connect off, deallocate (decision 0011) | Budget actual cost reaches `autoShutdownBudgetPercent` | The landing zone's hosts | Owner, 2026-10-04 | With the budget parameters |
 | EX-0002 | External | Scheduled **Stop**: deallocate idle hosts (decision 0011) | The auto-shutdown schedule (`AVD_AUTO_SHUTDOWN_TIME`) | The landing zone's hosts | Owner, 2026-10-04 | With the schedule parameters |
 | EX-0003 | Standing | **Self-healing**: the playbooks in the table below, each on one host at a time | Each playbook's own detection signature, computed by the detection, never by an agent | Per playbook | Owner, 2026-10-04 (as a category; each playbook enters by PR) | Every 180 days, and on any change to a listed playbook |
+| EX-0004 | Safety | **Kill switch**: halt the brain's actions, or all of it; cut the executors' credentials | A person (one is enough), or the watchdog's deterministic triggers | The brain's own resource group and identities only | Owner, 2026-10-04 | Every 180 days, and after every real trip |
 
 Resume after a Lock is **not** an exception. It stays an approved plan (`budget-lock-review`, §8).
 
@@ -300,6 +302,78 @@ Because no person approves each run, these red-team fixes become **required** be
 - C1: signatures come only from detections;
 - H6: the Run Command script is fixed text, pinned by content hash, under a custom role scoped to the hosts resource group;
 - M5: the first rollback suspends the playbook.
+
+**EX-0004 Kill switch**
+
+The kill switch stops the brain from changing anything, at once and from more than one place. Stopping it is a change the brain process can make by itself, so it is an exception. It is the only exception of kind **safety**: it can only take capability away, never add it.
+
+*Positions*
+
+| Position | Effect | Brain level |
+|---|---|---|
+| `run` | Normal | As deployed |
+| `halt-actions` | No changes by the brain. Agents keep diagnosing and recommending, with Cloud Shell blocks for people to run themselves | 1 |
+| `halt-all` | No changes and no model calls. The brain only records signals and evidence | 0 |
+
+*What a trip does, in order*
+
+1. **Sets the switch:** the tag `avdlz-brain-killswitch` on the brain's resource group becomes `halt-actions` or `halt-all`. Companion tags record who or what tripped it, when, and the episode (the same pattern as decision 0011's Lock tag).
+
+   The state lives in an ARM tag, not in App Configuration. Every runtime can read it over the public control plane: the Actions runner, Automation, Cloud Shell and the orchestrator (red-team H1). And the Activity Log records every change to it.
+2. **Cuts the executors' credentials:** it deletes the federated identity credentials on the executor identities (`brain-execute` and every EX-0003 identity). After that, Azure won't issue them a token, whatever GitHub approves.
+3. **Expires every pending plan** and posts the trip on each open episode.
+4. **Stops runs in flight at the next step boundary.** Each executor reads the switch before every step and stops when it isn't `run` or can't be read. A run that already changed something completes **only** its approved rollback, such as restoring the drain state it found. It still holds a token from before the trip, which lasts about an hour at most. That is also why step 2 alone isn't enough.
+5. **Notifies:** the owner and the approvers team, through the action group and a pinned issue.
+
+*What it never touches*
+
+- **EX-0001 and EX-0002.** The kill switch never turns off a cost safety.
+- **Azure's own features:** the scaling plan, Start VM on Connect, agent updates.
+- **The landing zone's resources:** a trip changes only the brain's own tag and identities.
+
+*Who can trip it*
+
+- **Any one person** in the owner or approvers team, with no second approval. Stopping is easy; starting again is hard. There are two ways:
+  - the `brain-killswitch.yml` workflow (`workflow_dispatch`, which also works from GitHub mobile);
+  - a self-contained Cloud Shell block in [operations.md](operations.md) (lesson 0015).
+- **The watchdog**, automatically, on these deterministic triggers:
+
+| Trigger | Position |
+|---|---|
+| A write by a brain identity with no matching approved plan or exception run (Activity Log) | `halt-all` |
+| A write by a brain identity outside the landing zone's resource groups | `halt-all` |
+| `brain/exceptions/` or a guardrail file changed on the default branch without the required CODEOWNERS reviews | `halt-actions` |
+| Two EX-0003 suspensions within 24 hours, or failed verifications above 20% of runs in a day | `halt-actions` |
+| A Service Health incident for Azure Virtual Desktop in the landing zone's region (healing during a platform outage only churns) | `halt-actions` |
+| The brain's daily token or cost cap reached | `halt-all` |
+| The switch tag cleared outside `brain-resume.yml` | Trips again at the previous position |
+
+- **Not agents.** No model or agent can trip it or clear it. The Critic and Diagnose agents can recommend a trip, and a person decides.
+
+*The watchdog is not the brain*
+
+The watchdog is a separate Consumption Logic App, in the same pattern as decision 0011's trigger Logic Apps:
+- Azure Monitor alerts and Activity Log alerts start it through its own action group;
+- it calls ARM with its own managed identity, which has exactly two roles: Tag Contributor on the brain's resource group, and Managed Identity Contributor on the executor identities;
+- it doesn't depend on the orchestrator, Foundry or any private endpoint, so it still works when those are the problem.
+
+If a trip fails, the action group pages the owner. A trip that doesn't happen is never silent.
+
+*Starting again*
+
+Only a person can start the brain again. The brain never re-enables itself, and nothing re-enables on a timer.
+1. Close the trip's episode with a reason.
+2. Run `brain-resume.yml`. It refuses while any trigger is still true.
+3. The workflow redeploys `brain.bicep`, which recreates the federated credentials, then clears the tag.
+4. dev and test need one person; prod needs the two required reviewers of the `prod` environment.
+
+Clearing the tag by hand restores nothing: without the redeploy the executors still have no credentials, and the watchdog trips again.
+
+*Drills*
+
+- The kill switch has an offline scenario (`tests/offline/KillSwitch.Scenario.ps1`) with mock paths for the tag write, the deletion of federated credentials, and an executor that stops at a step boundary.
+- It is drilled in `test` before any playbook is active under EX-0003, and then monthly. Each drill trips the switch while a drill run is in flight, confirms the executor can no longer get a token, confirms the run stopped and rolled back, and resumes.
+- A missed or failed drill sets EX-0003 to approving each run until a drill passes.
 
 ### 4.6 Learn
 
@@ -337,7 +411,7 @@ The Evolve agent proposes, CI checks, `test` proves, a person decides.
 | Azure AI Search | Retrieval over repo knowledge and episodes | Hybrid + semantic ranking with citations |
 | Blob Storage (immutable container) | Evidence, state lines, cost exports | Tamper-evident audit |
 | Microsoft Foundry (Agent Service, models) | Reasoning | Hosts Claude and Azure OpenAI models, agent identities, tracing |
-| App Configuration | Kill switch: can only lower the levels deployed from Git | Change without redeploy, audited |
+| Logic App (Consumption), its own action group | Kill-switch watchdog (EX-0004) | Independent of the brain it stops; the same pattern as decision 0011's trigger Logic Apps |
 | Key Vault | Only for anything that cannot use a managed identity (ideally nothing) | Existing pattern |
 | Managed identities, Microsoft Entra Agent ID (where available) | One identity per agent; the executor's identity is federated to the approval environment only | Least privilege, auditable per actor |
 | Private endpoints and private DNS | All of the above | Decision 0001 |
@@ -443,7 +517,7 @@ Unchanged: the scheduled preflight writes the same `<<<AVDLZ-STATE {json} AVDLZ-
 ```yaml
 # brain/exceptions/EX-0001-budget-lock.yml
 id: EX-0001
-kind: external                     # external | standing
+kind: external                     # external | standing | safety
 title: Budget Lock
 action: { runbook: scripts/automation/Invoke-AvdPowerAction.ps1, name: Lock }
 trigger: { budget: { percent: autoShutdownBudgetPercent } }   # detection | schedule | budget; never an agent
@@ -471,9 +545,10 @@ brain/
 bicep/modules/brain.bicep
 scripts/automation/Invoke-AvdPlaybook.ps1
 scripts/brain/       Functions app (orchestrator) and the AVD-LZ MCP server
-tests/offline/Playbooks.Scenario.ps1, Brain.Scenario.ps1
+tests/offline/Playbooks.Scenario.ps1, Brain.Scenario.ps1, KillSwitch.Scenario.ps1
 tests/brain/         schema tests, detection compile tests, eval runner
-.github/workflows/   brain-index.yml, brain-eval.yml, brain-evolve.yml, brain-retro.yml, brain-execute.yml, brain-standing.yml
+.github/workflows/   brain-index.yml, brain-eval.yml, brain-evolve.yml, brain-retro.yml, brain-execute.yml, brain-standing.yml,
+                     brain-killswitch.yml, brain-resume.yml
 ```
 
 Template and CI guards to add with the first slice:
@@ -524,6 +599,7 @@ Chosen because they are frequent in AVD estates, reversible, and verifiable from
 | Rollbacks after an approved run | < 2% of runs |
 | Changes made without an approval record (per-run approval or a registered exception) | 0, checked against the Activity Log |
 | Exceptions past their review date | 0 |
+| Kill-switch drill: from trip to the executors unable to get a token | < 5 minutes, monthly, every drill passed |
 | Episodes closed with a recorded outcome | 100% |
 | Eval accuracy (signature and playbook) | Reported per PR; no merge on a drop |
 | New signatures turned into lesson + guard within 7 days | ≥ 90% |
@@ -537,7 +613,7 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 | **0 (done)** | Lessons and guards, state line, portal reports, WAF review, budget runbook | — | — |
 | **1 Sense and remember** | `brain.bicep` (Cosmos, Blob, AI Search, Event Grid, Functions), scheduled preflight, detection catalog, episodes, indexing of the repo, weekly digest issue | 0 | A real incident appears as an episode with its evidence and the changes before it |
 | **2 Diagnose** | Triage and Diagnose agents, Concierge, AVD-LZ MCP, eval harness with offline mock | 1 | Diagnoses cite the right lesson or episode in ≥ 80% of eval cases |
-| **3 Heal, approved** | Plan and approval flow, `brain-execute.yml`, `Invoke-AvdPlaybook.ps1`, first three playbooks, kill switch | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback, which is EX-0003's entry criterion |
+| **3 Heal, approved** | Plan and approval flow, `brain-execute.yml`, `Invoke-AvdPlaybook.ps1`, first three playbooks, kill switch and watchdog (EX-0004) with its first drill | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback, which is EX-0003's entry criterion |
 | **4 Learn and self-heal** | Retro agent PRs, playbook statistics, rejection reasons, demotion, baselines; the first playbooks enter EX-0003 (test first, then prod) | 2S | A new signature reaches a lesson and guard drafted by the brain and merged by a person |
 | **5 Evolve** | Drift, right-sizing and posture PRs, test-then-prod rollout with soak, each deployment started by a person | 3 (PR) | One drift and one sizing PR merged and deployed through test |
 
