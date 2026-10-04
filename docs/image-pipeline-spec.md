@@ -1,6 +1,6 @@
 # Spec: golden image pipeline and host rotation
 
-- **Status:** Proposed (see [decision 0013](decisions/0013-image-pipeline.md))
+- **Status:** Proposed (see [decision 0013](decisions/0013-image-pipeline.md)); red-team findings open in [image-pipeline-redteam.md](image-pipeline-redteam.md)
 - **Date:** 2026-10-04
 - **Scope:** landing zones built from this repo. This is phase 0b of the [second brain spec](second-brain-spec.md), built before its phase 1 (Q6).
 
