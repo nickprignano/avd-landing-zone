@@ -306,7 +306,7 @@ Playbooks are actions in `scripts/automation/Invoke-AvdPlaybook.ps1`. Like decis
     - `restart-avd-agent`: `virtualMachines/read`, `virtualMachines/runCommands/read|write|delete`, `hostpools/sessionhosts/read`;
     - `recycle-empty-host`: `virtualMachines/read`, `virtualMachines/restart/action`, `hostpools/sessionhosts/read|write`, `sessionhosts/usersessions/read`;
   - **Run Command scripts are fixed files** in `scripts/ops/host/`, Windows PowerShell 5.1, with no parameters or only enumerated ones. The playbook pins each script's SHA-256. The executor hashes the file at the approved commit, refuses on a mismatch, sends the script inline, reads back its output and deletes the Run Command resource afterwards;
-  - an Activity Log alert fires on `runCommands/write` by anyone except the deploy identity or an executor. A write by an executor without a matching plan trips the kill switch (EX-0004);
+  - an Activity Log alert fires on `runCommands/write` by anyone except the deploy identity, an executor, or the image pipeline's `image-validate` identity on the QA resource groups (EX-0005). A write by an executor without a matching plan trips the kill switch (EX-0004);
   - decision 0011's runbook (EX-0001, EX-0002) is pinned by content hash as well (`publishContentLink.contentHash`; verify the property against the Automation API at build);
   - agents' identities are Reader plus Log Analytics Reader;
   - no identity can write role assignments, policy or Key Vault secrets.

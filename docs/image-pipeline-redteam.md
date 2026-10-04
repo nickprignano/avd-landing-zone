@@ -211,8 +211,21 @@ In a lab, or an adopter's small deployment, nobody signs in to the QA desktop ev
 
 | Finding | Status |
 |---|---|
-| C1-C4, H1-H9, M1-M8, S1, S2 | Open |
+| C1 QA host deploy needs landing zone rights | **Resolved in spec**: `bicep/qa/main.bicep` at the QA group's scope, no role assignments (§6.2, §6.5) |
+| C2 Image and generation in four places | **Resolved in spec**: the host pool's `avdlz-image` and `avdlz-generation` tags, written only by rotation; deploys read them and refuse during a rotation; promotion sets `avdlz-image-next` (§6.1) |
+| C3 Nightly Stop vs hourly checks | **Resolved in spec**: exclusion tag and start during stages; at least 20 of 24 runs with the host running (§6.3) |
+| C4 Private forks can't serve scripts | **Resolved in spec**: a private `image-build` container read by the AIB identity; WDOT mirrored (§4.1, §5.2, §5.5) |
+| H1 Patch latency | **Resolved in spec**: 14-day and 72-hour targets, `force`, emergency mode, an 8-hour limit on disconnected sessions, `patch-sla` (§5.7) |
+| H2 One failure kills the image | **Resolved in spec**: classified checks, pause on landing-zone failures, the 2-in-a-row or 2-of-soak rule, one retry (§6.3) |
+| H3 Admins as QA users | **Resolved in spec**: a regular-user QA group required, checked by the preflight; sign-ins reported by group (§6.2, §6.3) |
+| H4 Teardown | **Resolved in spec**: §6.6 |
+| H5 Retention blind to use | **Resolved in spec**: `avdlz-in-use-*` tags written by rotation (§4.2) |
+| H6 Device cleanup by name | **Resolved in spec**: IDs recorded from inside the host; cleanup by ID; the enrollment check moved in-host (§6.3, §6.5) |
+| H7 Protected list and self-updating apps | **Resolved in spec**: an extended list plus functional checks; self-updating components listed; Defender platform to verify (§5.5, §5.6) |
+| H8 Regions and subscriptions | **Resolved in spec**: a replica per environment region, a Reader grant per identity, a preflight check (§4.2) |
+| H9 Clashes with the second brain | **Resolved in spec**: allowlisted on QA groups only (second brain spec §4.5); a stop through `manual` and the kill-switch workflow; QA log-off at 1 hour (§6.3, §6.5) |
+| M1-M8, S1, S2 | Open |
 
 ## Next step
 
-Fold C1-C4 and H1-H9 into the spec, and record S1 in decision 0013, before the image pipeline is built. Then fold M1-M8, and decide S2's approach to sign-in evidence.
+Record S1 in decision 0013, fold M1-M8 into the spec, and decide S2's approach to sign-in evidence before the image pipeline is built.

@@ -14,7 +14,10 @@ As specified in [image-pipeline-spec.md](../image-pipeline-spec.md):
   - A failure rolls the QA pool back automatically.
   - Real sign-ins come from QA users and are shown at promotion. Promotion without any needs an acknowledgment.
   - The automation's identity reaches only the QA resource groups. It is registered as pre-approved exception EX-0005.
-  - Hosts pin a version ID (`AVD_SESSION_HOST_IMAGE_ID`, guarded with `empty(...)`); the marketplace image stays the default.
+  - Each host pool records the image version and host generation it runs in its own tags. Only the rotation script writes them, and every deployment reads them, so a routine redeploy can't change a running pool's image or recreate removed hosts. The marketplace image stays the default.
+  - QA hosts come from their own template, scoped to the QA resource group. QA users must be regular users, not admins.
+  - Builds read their scripts from a private storage container, so adopters' private forks work.
+  - Patch targets: 14 days after Patch Tuesday, and 72 hours for critical out-of-band fixes, with an emergency mode that shortens the soaks.
 - **WDOT on every build:** pinned by version and SHA-256, with a reviewed profile in Git. Services the landing zone needs (Intune push, Defender, Windows Update, search, the RDP stack) are protected by a test and by a build-time check. Appx removal and WDOT's advanced optimizations are off by default.
 - **Hosts don't update themselves:** Windows and Microsoft 365 Apps automatic updates are off, per Microsoft's golden image guidance. Patches come through the monthly image. Defender signatures and the AVD agent keep updating.
 - **A one-host QA pool in every landing zone** (`AVD_QA_POOL`, on by default). It is a validation environment with an earlier agent update window, the canary for each new image in each environment, and the place for maintenance work. It is a production twin, so it doesn't update itself either.
