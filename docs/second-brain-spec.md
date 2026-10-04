@@ -89,7 +89,7 @@ There are two roles, and the safety rules apply to each one differently.
 | Ships or holds | Code, templates, detections, playbooks, generic lessons; exception **templates**; conservative defaults (`maxLevel = 1`, EX-0003 with no playbooks) | Their active exceptions, their EX-0003 entries, their approvers, their episodes |
 | Approvals | The maintainer alone, in **solo mode** (§9.3) | Solo mode with one approver; **team mode** with two or more |
 
-**Upstream changes are guardrail changes.** An adopter syncs from a **release tag**, never from `master`. Releases carry GitHub artifact attestations. A sync PR runs `brain-guard` (§9.2) like any other PR, so an adopter sees every guardrail field that upstream changed before merging it. Upstream never ships an active exception beyond EX-0001, EX-0002 and EX-0004, so a release can't turn on self-healing in someone's tenant.
+**Upstream changes are guardrail changes.** An adopter syncs from a **release tag**, never from `master`. Releases carry GitHub artifact attestations. A sync PR runs `brain-guard` (§9.2) like any other PR, so an adopter sees every guardrail field that upstream changed before merging it. Upstream never ships an active exception beyond EX-0001, EX-0002, EX-0004 and EX-0005, so a release can't turn on self-healing in someone's tenant.
 
 ## 4. Architecture
 
@@ -350,6 +350,7 @@ There are three kinds:
 | EX-0002 | External | Scheduled **Stop**: deallocate idle hosts (decision 0011) | The auto-shutdown schedule (`AVD_AUTO_SHUTDOWN_TIME`) | The landing zone's hosts | Owner, 2026-10-04 | With the schedule parameters |
 | EX-0003 | Standing | **Self-healing**: the playbooks in the table below, each on one host at a time | Each playbook's own detection signature, computed by the detection, never by an agent | Per playbook | Owner, 2026-10-04 (as a category; each playbook enters by PR) | Every 180 days, and on any change to a listed playbook |
 | EX-0004 | Safety | **Kill switch**: halt the brain's actions, or all of it; cut the executors' credentials | A person (one is enough), or the watchdog's deterministic triggers | The brain's own resource group and identities only | Owner, 2026-10-04 | Every 180 days, and after every real trip |
+| EX-0005 | External | **Image validation**: rotate a QA pool to a new image version, and back to the last validated version on failure ([image-pipeline-spec.md](image-pipeline-spec.md) §6.3) | A successful image build, then the hourly validation schedule | The QA resource groups only (`rg-<prefix>-<env>-qa`) | Owner, 2026-10-04 | With the image pipeline parameters |
 
 Resume after a Lock is **not** an exception. It stays an approved plan (`budget-lock-review`, §8).
 

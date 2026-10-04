@@ -14,7 +14,7 @@ This spec adds:
 
 1. **A golden image.** Azure Image Builder (AIB) builds it monthly from the marketplace image. It applies updates, the WDOT optimizations and a small set of generic customizations, validates the result inside the build VM, and publishes it as a version in an Azure Compute Gallery. Hosts don't update themselves; the image carries the patches (§5.6).
 2. **A one-host QA pool in every landing zone.** It is a validation environment that gets AVD service and agent updates first, the canary for every new image, and the place for maintenance work (§6.2).
-3. **Promotion through environments.** A new version is excluded from `latest` until it passes a canary in `test`'s QA pool with a real sign-in. A person then promotes it, through `prod`'s QA pool, to `prod`.
+3. **Automated validation, then promotion by a person.** A new version is excluded from `latest` until it passes automated validation in `test`'s and then `prod`'s QA pools, with a 24-hour soak in each. Nobody has to run anything. A person then promotes it to a production pool, with the validation results and the QA users' real sign-ins in front of them.
 4. **Host rotation.** A resumable script replaces hosts blue/green: it deploys new hosts from the promoted version, drains the old ones, waits for sessions to end, and removes the old VMs, their session host objects and their Entra ID and Intune device objects.
 
 The rule that holds it together: **the image is generic, and the landing zone configures it.** Nothing tenant- or landing-zone-specific goes into the image: no share path, no registration token, no domain, no secrets. The same version serves dev, test, prod and any adopter. Per-landing-zone configuration stays in the managed Run Commands that already exist (`Configure-FSLogix`, `Register-AvdAgent`).
@@ -41,7 +41,7 @@ The rule that holds it together: **the image is generic, and the landing zone co
 | # | Principle | Source |
 |---|---|---|
 | I1 | The image is generic; configuration is applied per landing zone at host creation | decision 0001 (no post-deployment scripts on the host: configuration stays declarative in the template) |
-| I2 | Build automatically, promote by a person | second brain spec P10 |
+| I2 | Build and validate automatically; a person promotes to a production pool | second brain spec P10 |
 | I3 | Every script that reaches a build VM or a host is pinned: the commit for authenticity, SHA-256 for integrity in transit | red-team H6 |
 | I4 | Validate with positive evidence: Available hosts, passing health checks, and a real sign-in, not "the build succeeded" | red-team H5, M9 |
 | I5 | Anything slow prints a line before it starts; a long wait is a resumable phase, not a blocked Cloud Shell | lessons 0006, 0015 |
@@ -94,7 +94,8 @@ The two build subnets go into the **build environment's** spoke (`AVD_IMAGE_BUIL
   - `avdlz-commit`: the repo commit of the template and the scripts;
   - `avdlz-source-image`: the marketplace version AIB resolved from `latest`;
   - `avdlz-run`: the Actions run URL;
-  - `avdlz-validated`: `false` until the canary passes, then the date.
+  - `avdlz-validation`: the automated validation stage, or the failed check (§6.3);
+  - `avdlz-validated`: `false` until validation passes, then the date.
 - **`excludeFromLatest: true`** at build. Promotion flips it, so nothing that asks for "latest" picks up an unvalidated build.
 - **Replicas:** one replica in the landing zone's region. Storage is `Standard_ZRS` where the region has availability zones and `Standard_LRS` where it doesn't. A template test compiles both cases (lesson 0001).
 - **Retention:** the last three validated versions plus anything newer. An `endOfLifeDate` six months out is set at build. `image-build.yml` deletes versions beyond retention, never one that a host still runs: it checks every landing zone's hosts first.
@@ -125,7 +126,7 @@ The workflow uses OIDC to Azure through the `images` GitHub Environment. Its ide
 4. **Run it.** Print a line before starting (lesson 0006), then poll `lastRunStatus` with a capped loop that ends on error (lesson 0008).
 5. **Save the logs.** Copy AIB's `customization.log` from the staging storage into the run's artifacts, whatever the result. On a failure, report the step, status, error code and log tail (lesson 0012).
 6. **Delete the template.** Deleting it also removes its staging resources.
-7. **Open an issue** with the version, the source image version, the validation results and the next command, the QA canary (§6.3).
+7. **Open an issue** with the version, the source image version, the build-time validation results. Automated validation then starts on its own (§6.3).
 
 ### 5.3 Customizations
 
@@ -237,11 +238,12 @@ Every landing zone gets a **QA pool**: a second pooled host pool with **one host
 - **AVD service and agent updates.** The QA pool is a **validation environment** (`validationEnvironment: true`), so the AVD service rolls out service and agent updates to it before the production pool ([validation environments](https://learn.microsoft.com/en-us/azure/virtual-desktop/terminology)).
   - Its scheduled agent update window is **Wednesday 02:00**, host local time, before production's Saturday 02:00 (`controlPlane.bicep`). A bad agent version shows up there first.
   - Today `validationEnvironment` is already on for dev and test pools but off in prod (`main.bicep`), so prod has no early warning. The QA pool gives prod one without making its main pool a validation pool.
-- **New image versions.** The canary for each environment is its QA pool (§6.3).
+- **New image versions.** Automated validation runs in each environment's QA pool (§6.3).
 - **Maintenance work.** Admins test settings, apps and Run Commands on a host that matches production, without touching users.
 
 | Setting | Value | Why |
 |---|---|---|
+| Resource group | `rg-<prefix>-<env>-qa`: the QA host pool, app group and host | Automated validation's identity reaches the QA pool and nothing else (§6.3) |
 | Host pool | `vdpool-<prefix>-<env>-qa`, pooled, `validationEnvironment: true`, same RDP properties and session limit as production | Microsoft's guidance is that a validation environment should be as similar to production as possible |
 | Host | 1, same size and image version as production; names `take(<base>, 9)q<gen>-NNN` | Mirrors production. It stays 15 characters at most and is distinct from production names |
 | Updates | As §5.6: Windows and Microsoft 365 Apps automatic updates off, Defender signatures on, AVD agent on its earlier schedule | A QA host that patched itself would no longer test the image production runs |
@@ -254,21 +256,68 @@ Every landing zone gets a **QA pool**: a second pooled host pool with **one host
 - the post-deployment preflight warns (`qa-pool-unused`) when `WVDConnections` shows no completed sign-in to the QA pool in two business days;
 - once the second brain is running, that becomes a level 1 detection (§7).
 
-### 6.3 Canary: QA pool first, in each environment
+### 6.3 Automated validation (the default)
 
-A person runs `image-validate.yml` (`workflow_dispatch`) with the version and an environment, `test` first and then `prod`. It needs a real sign-in (I4):
+Validation runs by itself. Nobody has to start it or sit through it: every build that passes §5.4 goes through the QA pools automatically, and a person gets involved only to promote a version to a production pool (§6.4). `AVD_IMAGE_VALIDATION = manual` turns the automation off; then a person runs each stage with `workflow_dispatch`.
 
-1. Rotate the environment's **QA pool** to the version (§6.5, with `-HostPool qa`). That is one host, so it's quick, and production users aren't touched.
-2. Run the post-deployment preflight. It must come back **Ready**.
-3. Run the sign-in readiness checks of `Deploy-AvdDemo.ps1` against the QA pool: the host Available and accepting sessions, all AVD health checks passing, the run commands succeeded, the access assignments in place, and automatic updates off (§5.6).
-4. Wait for a real sign-in. A QA user signs in through the Windows App, and `WVDConnections` must show a completed connection to the QA host. The workflow waits up to 48 hours, then fails.
-5. Record whether FSLogix attached the profile. Because of the open Kerberos case ([rebuild-spec.md](rebuild-spec.md#known-open-issue)), this result is recorded but doesn't block, until that issue is resolved.
-6. Soak for 24 hours: no detection fires for the QA pool, and the readiness checks pass every hour (second brain spec §4.7).
-7. Pass in `test`: tag the version `avdlz-validated=<date>` and set `excludeFromLatest: false`. Pass in `prod`'s QA pool: the version may be promoted to prod's main pool (§6.4). Each step comments on the build issue with the next command.
+**How it runs.**
+- `image-build.yml` hands a successful build to `image-validate.yml` as a reusable workflow (`workflow_call`), in the same trusted run.
+- From then on, `image-validate.yml` runs **hourly** on a schedule and moves each version one stage forward.
+- A version's progress is a tag on the gallery version (`avdlz-validation`: the stage, the environment, and the soak end time), the same resumable pattern as rotation (§6.5). No job has to stay alive through a 24-hour soak, and a missed hour costs nothing.
+
+| Stage | What happens | Passes when |
+|---|---|---|
+| **1 `test` QA** | Rotate `test`'s QA pool to the version (§6.5, `-HostPool qa`) | The checks below all pass |
+| **2 `test` soak** | 24 hours. The checks run hourly | Every hourly run passes and no detection fires for the QA pool |
+| **3 `prod` QA** | Rotate `prod`'s QA pool to the version | The checks below all pass |
+| **4 `prod` soak** | 24 hours. The checks run hourly. Organic sign-ins by QA users are collected | Every hourly run passes and no detection fires. The version is tagged `avdlz-validated=<date>` and `excludeFromLatest` is set to `false`. The build issue gets the promotion command |
+
+**The checks.** They are positive evidence (I4), and none of them needs a user's credentials:
+- **Landing zone:** the post-deployment preflight comes back **Ready**.
+- **Host, from Azure:**
+  - Available, accepting sessions, and every AVD session host health check passing;
+  - running the expected image version;
+  - its `Configure-FSLogix` and `Register-AvdAgent` run commands succeeded;
+  - Entra ID joined and Intune enrolled.
+
+  These are the sign-in readiness checks of `Deploy-AvdDemo.ps1`.
+- **Host, from inside:** `scripts/ops/host/Test-SessionHostFunction.ps1` (Windows PowerShell 5.1) runs as a Run Command and checks:
+  - the RDP side-by-side listener is up and the agent reports a recent heartbeat;
+  - FSLogix is configured with this landing zone's share, which resolves to a private IP and answers on TCP 445;
+  - Microsoft 365 Apps shared computer activation is on;
+  - automatic updates are off (§5.6);
+  - every service protected from WDOT (§5.5) is running or set to start;
+  - the WDOT version and profile hash match the image's tags.
+
+  It prints `RESULT` lines that the workflow quotes.
+- **Posture:** open Defender for Cloud recommendations and guest configuration results for the QA host. These are warnings, not failures (decision 0009). They're listed for the person who promotes.
+
+**What automation can't prove.** None of these checks signs in as a user. So a **real sign-in**, with its Entra Kerberos ticket and a mounted FSLogix profile, isn't covered. That's what QA users are for (§6.2):
+- the soak collects **organic** sign-ins to the QA host from `WVDConnections`, and the FSLogix result from the host's event log;
+- the promotion page shows how many completed sign-ins the version had, and whether profiles attached;
+- a promotion with **no** organic sign-in is allowed, but the approver must acknowledge it, and the reason is recorded.
+
+An optional synthetic sign-in can close the gap later (Q8).
+
+**On failure.**
+1. The version is tagged `avdlz-validation=failed:<stage>:<check>`, and it is never promoted.
+2. The QA pool rotates back to the previous validated version **automatically**. The QA pool exists to fail safely, and a failed canary mustn't leave QA users on a broken host.
+3. An issue opens with every check's output, the step, status and error code (lesson 0012), and the customization log.
+4. The next scheduled build starts over from stage 1. Nothing is retried in place.
+
+**Who can do what.** Automation reaches only the QA pools.
+- Each QA pool lives in its own resource group, `rg-<prefix>-<env>-qa`, holding the QA host pool, its app group and its host.
+- The `image-validate` identity, through OIDC and a GitHub Environment of the same name with no reviewers, has:
+  - Contributor on the QA resource groups;
+  - subnet join on the session host subnet;
+  - Reader and Log Analytics Reader for the checks.
+- It can't touch a production pool, the hosts resource group, Key Vault or the budget. Promoting to a production pool stays with `image-promote.yml` and a person.
+- The QA host's break-glass password is random and isn't stored, like the demo host's. **VM > Reset password** recovers access.
+- Because this automation changes the QA pools without approval of each run, it is registered as pre-approved exception **EX-0005** in the second brain spec (§4.5.1), next to EX-0001 and EX-0002.
 
 ### 6.4 Promotion
 
-`image-promote.yml` (`workflow_dispatch`) takes the version and the target environment. It runs in that GitHub Environment, so `prod`'s required reviewers approve it, or in solo mode, the owner after the wait timer (second brain spec §9.3). It refuses a version without `avdlz-validated`. For `prod`, it also refuses a version that hasn't passed `prod`'s QA canary. It sets the environment's `AVD_SESSION_HOST_IMAGE_ID` and opens the rotation of the main pool (§6.5).
+`image-promote.yml` (`workflow_dispatch`) takes the version and the target environment. It runs in that GitHub Environment, so `prod`'s required reviewers approve it, or in solo mode, the owner after the wait timer (second brain spec §9.3). It refuses a version without `avdlz-validated`, which means automated validation passed in both QA pools (§6.3). It shows the approver the checks, the posture warnings, and the organic sign-ins and profile attaches on the QA hosts. With no sign-in, it asks for an acknowledgment and records the reason. It sets the environment's `AVD_SESSION_HOST_IMAGE_ID` and opens the rotation of the main pool (§6.5).
 
 Adopters without GitHub Actions run the same steps from Cloud Shell: the portal gives the commands.
 
@@ -310,9 +359,10 @@ Other rules:
 - **Least privilege:**
   - the AIB identity holds the two custom roles plus Contributor on the staging group only;
   - the build workflow's identity can only deploy and run templates in the images group;
-  - promotion needs the target environment's approval.
+  - the `image-validate` identity can change only the QA resource groups (§6.3);
+  - promotion to a production pool needs the target environment's approval.
 - **Traceability:** every version's tags name its commit, source image and run, and the run keeps the customization log.
-- **Posture:** the canary host is covered by Defender for Cloud and guest configuration like any host. Findings on it are shown at promotion as warnings, not failures (decision 0009). A person decides, with the findings in front of them.
+- **Posture:** the QA host is covered by Defender for Cloud and guest configuration like any host. Findings on it are shown at promotion as warnings, not failures (decision 0009). A person decides, with the findings in front of them.
 - **New GUIDs** (built-in role IDs, if any role is assigned by ID) go into `PUBLIC_IDS` (decision 0008).
 
 ## 9. Repository layout and guards
@@ -326,9 +376,10 @@ parameters/images.bicepparam     region, replica storage, retention, build envir
 scripts/image/                   customizers and Test-GoldenImage.ps1 (Windows PowerShell 5.1)
 scripts/image/custom/            adopter customizations (empty here)
 scripts/image/wdot/              wdot.lock.json (version, URL, SHA-256) and profile/ (reviewed OptimizationState JSON)
-bicep/modules/qaPool.bicep       QA host pool, app group in the workspace, one host
+bicep/modules/qaPool.bicep       QA resource group, host pool, app group in the workspace, one host
+scripts/ops/host/Test-SessionHostFunction.ps1   in-host checks for automated validation (5.1)
 scripts/ops/Invoke-AvdHostRotation.ps1
-.github/workflows/               image-build.yml, image-validate.yml, image-promote.yml
+.github/workflows/               image-build.yml, image-validate.yml (workflow_call and hourly), image-promote.yml
 tests/offline/HostRotation.Scenario.ps1, ImageBuild.Scenario.ps1
 ```
 
@@ -343,6 +394,8 @@ Guards, added with the first slice, following decision 0006:
 | Pester: the WDOT profile keeps every protected item `Skip`, AppxPackages and the advanced categories are off unless opted in, and the lock file has a SHA-256 | Silently broken Intune, Defender, search or RDP |
 | Template test: the QA pool exists by default with `validationEnvironment: true`, one host, an earlier agent update window, and names distinct from production; it's absent with `AVD_QA_POOL=false`; the quota and price lines count its host | The maintenance ring's guarantees; decision 0010 |
 | Offline scenario `ImageBuild`: a failed build reports the step, code and log tail; the poll loop ends on error | Lessons 0008, 0012 |
+| Offline scenario `ImageValidation`: the four stages advance one per run; resume after a missed run; a failure at each stage rolls the QA pool back, tags the version and opens an issue; manual mode does nothing on its own | The state machine and its rollback |
+| Template test: the `image-validate` identity's role assignments are scoped to the QA resource groups (plus subnet join and readers), never the hosts group or a production pool | Automation reaching production |
 | Offline scenario `HostRotation`: each phase, resume after a disconnect at every phase, refusal while locked, a quota shortfall, `-LogOffAtDeadline` off and on, device cleanup without a Graph sign-in (a warning, not a failure) | Resumability and its edge cases. Mock paths added to `AzMock.psm1`, which omits empty properties like ARM does (lesson 0021) |
 | Portal tests: `stage: rotation` and `image` state lines, and the commands with `--image-id` and `--generation` | Decision 0007 drift |
 | PSScriptAnalyzer over `scripts/image/` in its 5.1-compatible settings | Lesson 0011 |
@@ -355,7 +408,7 @@ Guards, added with the first slice, following decision 0006:
 | **1 Gallery and build** | `bicep/images`, build subnets, `image-build.yml`, customizers including WDOT, `Test-GoldenImage.ps1` | A scheduled build produces a version with every validation `Pass`, in a region with zones and in one without |
 | **2 Parameters and QA pool** | `AVD_SESSION_HOST_IMAGE_ID`, generations, the QA pool, `deploy.sh` flags, preflight check, portal | dev deploys from a gallery version, with a QA pool whose host reports automatic updates off; the default still deploys the marketplace image with unchanged production names |
 | **3 Rotation** | `Invoke-AvdHostRotation.ps1`, device cleanup shared with `Remove-AvdDemo.ps1` | `test` rotates a → b → a, resumed after a deliberate disconnect, and a real sign-in lands on the new generation each time |
-| **4 Canary and promotion** | `image-validate.yml`, `image-promote.yml` | One version goes build → `test` QA canary → `prod` QA canary → promoted → rotated in `prod`'s main pool, with the post-deployment preflight Ready afterwards |
+| **4 Automated validation and promotion** | `image-validate.yml`, `Test-SessionHostFunction.ps1`, `image-promote.yml` | A scheduled build validates through both QA pools with nobody running anything. One deliberately broken build fails, rolls the QA pool back and opens an issue. One good version is promoted by a person and rotated into `prod`'s main pool, with the post-deployment preflight Ready afterwards |
 
 When step 4 passes, phase 0b is done, and the second brain's phase 1 can start.
 
@@ -373,6 +426,7 @@ Each of these is an assumption in the spec, to confirm against the docs and a re
 - That Defender signature updates keep working with `NoAutoUpdate = 1`, and the exact Microsoft 365 Apps update policy key.
 - That decision 0011's runbook (EX-0002) finds the QA pool's host, which sits in a second host pool.
 - How scheduled agent updates interact with a validation pool: whether the service still flights agents to it first inside its own window.
+- The list of AVD session host health checks the ARM API returns, and that Contributor on the QA resource group plus subnet join is enough to register a host to the QA pool.
 
 ## 12. Open questions
 
@@ -383,3 +437,4 @@ Each of these is an assumption in the spec, to confirm against the docs and a re
 - **Q5** Should `-LogOffAtDeadline` be the default in `prod`? Recommended **no**: losing unsaved work is worse than a slower rotation.
 - **Q6** Opt in to WDOT's AppxPackages removal once a build passes with it? Recommended **yes, after** one passing build and a lesson recording which packages it removed.
 - **Q7** Keep the QA pool on by default in dev and test, whose main pools are already validation environments? Recommended **yes**: it's also each environment's image canary, and one host with Start VM on Connect and the nightly Stop costs little.
+- **Q8** Add a **synthetic sign-in** to automated validation? It would need a dedicated test account and a Windows client signing in through the Windows App, with an MFA policy that suits automation. That puts a credential and a Conditional Access exception in the adopter's tenant. Third-party logon simulators exist ([eG Logon Simulator](https://www.eginnovations.com/blog/free-logon-simulator-for-avd-azure-virtual-desktop-now-available/)); Microsoft offers none. Recommended **not yet**: organic QA sign-ins come first, and this gets revisited after a few months of validation data.

@@ -9,9 +9,11 @@ Session hosts come from the marketplace image at `latest`, so two hosts deployed
 As specified in [image-pipeline-spec.md](../image-pipeline-spec.md):
 - **Azure Image Builder, not Packer.** It is Azure-native, defined in Bicep, and runs with a managed identity. That keeps the project to one language.
 - **The image is generic.** Updates and a few settings go in. Nothing tenant- or landing-zone-specific does: share paths, tokens, joins and the AVD agent stay with the existing Run Commands. One version serves every environment and adopter.
-- **Built monthly on a schedule, promoted by a person.**
-  - A version stays excluded from `latest` until a canary in `test` passes the preflight, the readiness checks and a real sign-in.
-  - Promotion runs through the target GitHub Environment's approval.
+- **Built monthly and validated automatically; a person promotes to production pools.**
+  - A version stays excluded from `latest` until automated validation passes in `test`'s and then `prod`'s QA pools, each with a 24-hour soak. The checks need no user credentials: the preflight, the readiness checks, in-host function checks, and posture as warnings.
+  - A failure rolls the QA pool back automatically.
+  - Real sign-ins come from QA users and are shown at promotion. Promotion without any needs an acknowledgment.
+  - The automation's identity reaches only the QA resource groups. It is registered as pre-approved exception EX-0005.
   - Hosts pin a version ID (`AVD_SESSION_HOST_IMAGE_ID`, guarded with `empty(...)`); the marketplace image stays the default.
 - **WDOT on every build:** pinned by version and SHA-256, with a reviewed profile in Git. Services the landing zone needs (Intune push, Defender, Windows Update, search, the RDP stack) are protected by a test and by a build-time check. Appx removal and WDOT's advanced optimizations are off by default.
 - **Hosts don't update themselves:** Windows and Microsoft 365 Apps automatic updates are off, per Microsoft's golden image guidance. Patches come through the monthly image. Defender signatures and the AVD agent keep updating.
