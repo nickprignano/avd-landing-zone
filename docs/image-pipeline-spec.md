@@ -1,0 +1,295 @@
+# Spec: golden image pipeline and host rotation
+
+- **Status:** Proposed (see [decision 0013](decisions/0013-image-pipeline.md))
+- **Date:** 2026-10-04
+- **Scope:** landing zones built from this repo. This is phase 0b of the [second brain spec](second-brain-spec.md), built before its phase 1 (Q6).
+
+This is a personal project, not for production, provided as is. Nothing in this spec has run against a real tenant yet; §11 lists what to verify at build time.
+
+## 1. Summary
+
+Session hosts are built from the marketplace image today (`MicrosoftWindowsDesktop/office-365/win11-24h2-avd-m365`, `version: latest`). Two hosts deployed a week apart can therefore differ, and nobody can say which build a host runs. Replacing hosts is a manual procedure in [deploy.md](deploy.md#7-day-2-operations): a new `sessionHostNamePrefix`, drain, delete.
+
+This spec adds:
+
+1. **A golden image.** Azure Image Builder (AIB) builds it monthly from the marketplace image, applies updates and a small set of generic customizations, validates it inside the build VM, and publishes it as a version in an Azure Compute Gallery.
+2. **Promotion through environments.** A new version is excluded from `latest` until it passes a canary rotation in `test` with a real sign-in. Then a person promotes it to `prod`.
+3. **Host rotation.** A resumable script replaces hosts blue/green: it deploys new hosts from the promoted version, drains the old ones, waits for sessions to end, and removes the old VMs, their session host objects and their Entra ID and Intune device objects.
+
+The rule that holds it together: **the image is generic, and the landing zone configures it.** Nothing tenant- or landing-zone-specific goes into the image: no share path, no registration token, no domain, no secrets. The same version serves dev, test, prod and any adopter. Per-landing-zone configuration stays in the managed Run Commands that already exist (`Configure-FSLogix`, `Register-AvdAgent`).
+
+## 2. Goals and non-goals
+
+### Goals
+
+1. Every host's software is known: an image version traceable to a commit, a source image version and a build run.
+2. A monthly image with current updates, built and validated without anyone at a keyboard, and promoted only by a person.
+3. Hosts replaced without users losing work, from Cloud Shell, surviving a disconnect (lesson 0015).
+4. The second brain's `replace-host` playbook and its detections can rely on a known image (second brain spec §8).
+
+### Non-goals
+
+- **App delivery.** App Attach, Intune apps and line-of-business installers stay a separate layer ([out-of-scope.md](out-of-scope.md)). The pipeline has an optional customization folder for adopters, empty by default.
+- **Multi-region replication for DR.** The gallery replicates to the landing zone's region only.
+- **Personal host pools** and **brownfield images.** Same scope as the landing zone (decision 0001).
+- **Forced log-offs by default.** Rotation waits for users unless the operator opts in (§6.4).
+- **A shared community image.** The project doesn't publish images. Each adopter builds their own in their own subscription (§10, Q4).
+
+## 3. Principles
+
+| # | Principle | Source |
+|---|---|---|
+| I1 | The image is generic; configuration is applied per landing zone at host creation | decision 0001 (no post-deployment scripts on the host: configuration stays declarative in the template) |
+| I2 | Build automatically, promote by a person | second brain spec P10 |
+| I3 | Every script that reaches a build VM or a host is pinned: the commit for authenticity, SHA-256 for integrity in transit | red-team H6 |
+| I4 | Validate with positive evidence: Available hosts, passing health checks, and a real sign-in, not "the build succeeded" | red-team H5, M9 |
+| I5 | Anything slow prints a line before it starts; a long wait is a resumable phase, not a blocked Cloud Shell | lessons 0006, 0015 |
+| I6 | Test a region without availability zones | lessons 0001, 0021 |
+| I7 | Host and build scripts run in Windows PowerShell 5.1 | lesson 0011 |
+
+## 4. Architecture
+
+```
+┌──── rg-<prefix>-images (shared by every environment) ───────────────────────────────────────┐
+│ Azure Compute Gallery  gal<prefix>                                                          │
+│   image definition  win11-avd-m365  (Windows, Generalized, V2, TrustedLaunch, accel. net.)  │
+│   versions  YYYY.MMDD.N  (tags: commit, source image version, run; excludeFromLatest)       │
+│ User-assigned identity  id-<prefix>-aib  (custom roles: gallery write, subnet join)         │
+│ Per-build image template  it-<prefix>-<version>  (created, run, logs saved, deleted)        │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+        ▲ distribute (replica in the landing zone's region; ZRS where zones exist, else LRS)
+┌───────┴────── build network: the build environment's spoke (default: dev) ──────────────────┐
+│ snet-image-build  10.100.2.128/27  build VM, egress through the NAT Gateway or hub firewall │
+│ snet-image-aci    10.100.2.160/27  AIB isolated build container (delegated to ACI)          │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+        │ version ID
+┌───────▼────── each landing zone ────────────────────────────────────────────────────────────┐
+│ AVD_SESSION_HOST_IMAGE_ID → sessionHosts.bicep imageReference { id }                        │
+│ sessionHostGeneration a|b → host names <prefix10><gen>-NNN, rotated blue/green              │
+│ Run Commands (unchanged): Configure-FSLogix → Register-AvdAgent                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.1 Resources
+
+`bicep/images/main.bicep` is a new entry point at subscription scope, like `bicep/demo/main.bicep`, and carries the project notice (`tests/portal/disclaimer.test.mjs`). It deploys:
+
+| Resource | Notes |
+|---|---|
+| `rg-<prefix>-images` | One per name prefix, shared by dev, test and prod, so every environment runs the same artifact |
+| Azure Compute Gallery `gal<prefix>` | Gallery names allow letters, digits, underscores and periods: the prefix is normalized the way `sessionHostNamePrefix` is |
+| Image definition `win11-avd-m365` | `osType: Windows`, `osState: Generalized`, `hyperVGeneration: V2`, features `SecurityType = TrustedLaunch` and `IsAcceleratedNetworkSupported = true`, because hosts are Trusted Launch with accelerated networking (`sessionHosts.bicep`). Publisher, offer and SKU: `avdlz`, `win11-avd-m365`, `24h2` |
+| `id-<prefix>-aib` | User-assigned identity for AIB |
+| Custom role "AVD LZ image distributor" | Read the gallery and the definition; write and read versions. Scoped to the images resource group |
+| Custom role "AVD LZ image build network" | `virtualNetworks/read` and `subnets/join/action`. Scoped to the two build subnets |
+| Contributor on the staging resource group | `rg-<prefix>-images-staging`, which AIB uses for the build VM, its disk and its logs. AIB requires this role there; nothing else lives in that group |
+
+The two build subnets go into the **build environment's** spoke (`AVD_IMAGE_BUILD_ENVIRONMENT`, default `dev`). They are added by `network.bicep` when `deployImageBuildSubnets` is true. They reuse that spoke's egress, the NAT Gateway or the hub firewall, so the build VM has no public IP (decision 0001), and no second NAT Gateway is needed. In hub mode, the firewall must allow Windows Update, the Microsoft 365 CDN, Defender updates, `raw.githubusercontent.com` for the customizer scripts, and the AIB service endpoints.
+
+### 4.2 Image versions
+
+- **Name:** `YYYY.MMDD.N`, for example `2026.1004.1`. Gallery versions are three integers, and this keeps them sortable by date.
+- **Tags on every version:**
+  - `avdlz-commit`: the repo commit of the template and the scripts;
+  - `avdlz-source-image`: the marketplace version AIB resolved from `latest`;
+  - `avdlz-run`: the Actions run URL;
+  - `avdlz-validated`: `false` until the canary passes, then the date.
+- **`excludeFromLatest: true`** at build. Promotion flips it, so nothing that asks for "latest" picks up an unvalidated build.
+- **Replicas:** one replica in the landing zone's region. Storage is `Standard_ZRS` where the region has availability zones and `Standard_LRS` where it doesn't. A template test compiles both cases (lesson 0001).
+- **Retention:** the last three validated versions plus anything newer. An `endOfLifeDate` six months out is set at build. `image-build.yml` deletes versions beyond retention, never one that a host still runs: it checks every landing zone's hosts first.
+
+## 5. Build
+
+### 5.1 Trigger
+
+`.github/workflows/image-build.yml`:
+- **Schedule:** monthly, about a week after Patch Tuesday, when updated marketplace images are usually out.
+
+  The schedule is a daily cron on days 15–21, and the job exits unless it's Monday. In a cron expression where both day-of-month and day-of-week are restricted, either field matches, so `0 6 15-21 * 1` alone would run every day from the 15th to the 21st and every Monday.
+- **`workflow_dispatch`** for out-of-band builds, such as a security fix.
+
+The workflow uses OIDC to Azure through the `images` GitHub Environment. Its identity can deploy into the images resource group and run image templates there, and nothing else. Building doesn't change any landing zone: a new version is excluded from `latest`, and no host uses it until a person promotes it. So a scheduled build needs no approval.
+
+### 5.2 Steps
+
+1. **Resolve and print:** the source image version that `latest` resolves to, the commit, and the new version name. If the source version and the commit both match the newest existing version, stop: nothing changed.
+2. **Hash the customizer scripts** at that commit (SHA-256).
+3. **Deploy a per-build image template** (`bicep/images/build.bicep`). Templates are immutable, so each build gets its own, named after its version:
+   - **source:** the platform image, at the version resolved in step 1;
+   - **`vmProfile`:** the AIB default build VM size, OS disk 127 GB, `vnetConfig` with `subnetId` = `snet-image-build` and `containerInstanceSubnetId` = `snet-image-aci` (isolated build, no proxy VM);
+   - **`customize`:** §5.3, each script by `scriptUri` at the commit with its `sha256Checksum`;
+   - **`validate`:** §5.4, with `continueDistributeOnFailure: false`;
+   - **`distribute`:** the gallery version from §4.2, with its tags;
+   - **`buildTimeoutInMinutes`:** 240.
+4. **Run it.** Print a line before starting (lesson 0006), then poll `lastRunStatus` with a capped loop that ends on error (lesson 0008).
+5. **Save the logs.** Copy AIB's `customization.log` from the staging storage into the run's artifacts, whatever the result. On a failure, report the step, status, error code and log tail (lesson 0012).
+6. **Delete the template.** Deleting it also removes its staging resources.
+7. **Open an issue** with the version, the source image version, the validation results and the next command (§6.1).
+
+### 5.3 Customizations
+
+Each customization is a Windows PowerShell 5.1 script in `scripts/image/`, covered by PSScriptAnalyzer like every other script. Defaults:
+
+| Order | Customization | Why |
+|---|---|---|
+| 1 | Windows Update (AIB's `WindowsUpdate` customizer; security and critical updates, no previews, no drivers), then restart | The month's patches in the image, not at first boot |
+| 2 | `Disable-StorageSense.ps1` | Storage Sense can delete files inside FSLogix profiles; Microsoft's AVD guidance turns it off |
+| 3 | `Enable-TimeZoneRedirection.ps1` | Sessions use the client's time zone |
+| 4 | `Update-DefenderSignature.ps1` | Hosts start with current signatures |
+| 5 | Adopter scripts from `scripts/image/custom/`, in name order; empty in this repo | Apps and settings that belong to the adopter |
+| 6 | `Invoke-ImageCleanup.ps1`: DISM component cleanup, temp and update download folders | Smaller image, faster deployments |
+
+Never in the image:
+- the AVD agent and Boot Loader. `Register-AvdAgent` installs the current version at host creation, and it handles a preinstalled agent if an adopter adds one (Q1);
+- FSLogix **configuration**. FSLogix itself ships in the marketplace image; `Configure-FSLogix` writes the share path per landing zone;
+- domain or Entra ID joins, local accounts or passwords, registration tokens, tenant IDs;
+- removal of provisioned Appx packages. Removing them for some users breaks sysprep, so it waits for a tested script and a lesson.
+
+AIB generalizes the VM (sysprep) after the last customizer, with its default deprovisioning command.
+
+### 5.4 Build-time validation
+
+`scripts/image/Test-GoldenImage.ps1` runs in the build VM as AIB's `validate` step. Any failure stops distribution. It checks:
+
+- the OS build matches the expected release (24H2) and is at least the source image's build;
+- FSLogix is installed (`frx.exe`), at or above a minimum version;
+- Microsoft 365 Apps are installed with shared computer activation on;
+- Storage Sense is off and time zone redirection is on;
+- no AVD agent or Boot Loader is installed, unless the adopter opted in (Q1);
+- no reboot is pending, and no update failed in this build;
+- no local user account exists beyond the built-ins;
+- Defender is enabled, with signatures less than 24 hours old.
+
+It prints one `RESULT <check> <Pass|Fail> <detail>` line per check, the format of the offline scenarios, so the build issue can quote it.
+
+## 6. Promotion and rotation
+
+### 6.1 Parameters
+
+- **`AVD_SESSION_HOST_IMAGE_ID`:** the gallery image **version** resource ID. The parameter files read it with an `empty(...)` guard (lesson 0004).
+  - When it's set, `sessionHostImage` becomes `{ id: <version id> }`.
+  - When it's empty, the marketplace image stays the default, so a landing zone without the pipeline behaves exactly as today.
+  - It is always a pinned version, never `latest` or a definition ID, so a redeploy never changes software silently (decision 0010's rule against silent changes).
+- **`AVD_SESSION_HOST_GENERATION`:** `''`, `a` or `b`.
+  - Empty keeps today's names (`take(<base>, 11)-NNN`), so existing hosts aren't replaced.
+  - `a` or `b` gives `take(<base>, 10)<gen>-NNN`, still 15 characters at most.
+  - A template test checks that the default leaves names unchanged and that each generation yields valid, distinct names.
+- `deploy.sh` gains `--image-id` and `--generation`. The preflight gains `-SessionHostImageId`, which checks that the version exists, is replicated to the region, and has a Trusted Launch definition. The portal's commands carry both (decision 0007: `portal-core.js` and its tests change with them).
+- GitHub's `deploy.yml` reads `vars.AVD_SESSION_HOST_IMAGE_ID` from the target environment. Promotion sets that variable (§6.3).
+
+### 6.2 Canary in `test`
+
+A person runs `image-validate.yml` (`workflow_dispatch`, `test` environment) with the version. It doesn't need users to be present, but it needs a real sign-in (I4):
+
+1. Rotate `test` to the version (§6.4), with one host.
+2. Run the post-deployment preflight. It must come back **Ready**.
+3. Run the sign-in readiness checks of `Deploy-AvdDemo.ps1` against `test`'s host pool: hosts Available and accepting sessions, all AVD health checks passing, the run commands succeeded, the access assignments in place.
+4. Wait for a real sign-in. A member of the users group signs in through the Windows App, and `WVDConnections` must show a completed connection to the canary host. The workflow waits up to 48 hours, then fails.
+5. Record whether FSLogix attached the profile. Because of the open Kerberos case ([rebuild-spec.md](rebuild-spec.md#known-open-issue)), this result is recorded but doesn't block, until that issue is resolved.
+6. Soak for 24 hours: no detection fires for `test`, and the readiness checks pass every hour (second brain spec §4.7).
+7. Pass: tag the version `avdlz-validated=<date>`, set `excludeFromLatest: false`, and comment on the build issue with the promotion command.
+
+### 6.3 Promotion
+
+`image-promote.yml` (`workflow_dispatch`) takes the version and the target environment. It runs in that GitHub Environment, so `prod`'s required reviewers approve it, or in solo mode, the owner after the wait timer (second brain spec §9.3). It refuses a version without `avdlz-validated`. It sets the environment's `AVD_SESSION_HOST_IMAGE_ID` and opens the rotation (§6.4).
+
+Adopters without GitHub Actions run the same steps from Cloud Shell: the portal gives the commands.
+
+### 6.4 Rotation
+
+`scripts/ops/Invoke-AvdHostRotation.ps1` runs in PowerShell 7 in Cloud Shell, calls ARM and Graph REST (`Invoke-AvdArm`, `Invoke-AvdGraph`), and ends with a state line (`stage: rotation`). Rotation is **resumable**: its state lives in a tag on the host pool (`avdlz-rotation`: from and to generation, version, phase, deadline, who started it), the same pattern as decision 0011's Lock. Running it again continues from the recorded phase, so a Cloud Shell disconnect costs nothing.
+
+| Phase | What it does | Ends when |
+|---|---|---|
+| **Check** | Refuses if the host pool is `power-locked` (EX-0001). Checks vCPU quota for the new hosts: surge needs room for `sessionHostCount` more, and deployed hosts already count as used (lessons 0013, 0024); when it's short, prints the quota request. Checks the version (§6.1) | All checks pass |
+| **Deploy** | Deploys the landing zone with the other generation and the version. Existing hosts are untouched, because incremental deployment leaves VMs that aren't in the template | Every new host is Available, passes the AVD health checks, and its run commands succeeded |
+| **Drain** | Sets the old hosts to drain mode (no new sessions), saving each host's previous drain state. Sends users a message saying the host is being replaced and to sign out when convenient. Sets the deadline (default 72 hours) | Immediately; prints how many sessions remain |
+| **Wait** | Each run reports the remaining sessions on old hosts. With `-LogOffAtDeadline`, once the deadline passes it sends a final message and logs remaining sessions off 15 minutes later. Without it, it only reports | No sessions remain on old hosts |
+| **Remove** | Deletes the old session host objects from the host pool, then the old VMs (their disks and NICs go with them, `deleteOption: Delete`). With a Graph sign-in, also their Entra ID and Intune device objects (shared with `Remove-AvdDemo.ps1` as `Remove-AvdHostDevice`; never `| Out-Null` on `Connect-MgGraph`, lesson 0007) | Nothing of the old generation remains; the tag is cleared |
+
+Other rules:
+- **The scaling plan keeps running.** It doesn't route new sessions to drained hosts, and it may deallocate empty old hosts early, which is harmless.
+- **The break-glass password** (decision 0004) is new for the new hosts. Key Vault holds the latest password, as today.
+- **Rollback:** before **Remove**, rotating back is the same script in reverse: undrain the old generation and drain the new one. After **Remove**, rolling back means rotating to the previous validated version (§4.2).
+- **No surge capacity** (quota or cost): `-BatchSize` isn't in v1. The script stops at **Check** with the quota request, rather than shrinking capacity silently.
+
+## 7. Second brain integration
+
+- **`replace-host`** (second brain spec §8, level 2, never EX-0003) deploys a single host from the environment's promoted version into the current generation, then removes the unhealthy one. It uses the same helpers as rotation.
+- **Detections (level 1):**
+  - `image-age`: the promoted version is older than 45 days;
+  - `image-mixed`: hosts in one host pool run different versions outside a rotation;
+  - `rotation-stalled`: a rotation tag is older than its deadline plus 24 hours.
+- **Evidence:** the Tier 1 job records each host's image version. Baselines are split by version, so a regression after a rotation shows up as "this started with `2026.1004.1`".
+- **Not autonomous.** Builds run on a schedule because they change no landing zone. Promotion and rotation are started by a person, as the second brain's human-in-the-loop rule requires.
+
+## 8. Security
+
+- **No secrets in the image** (§5.3). The build VM has no public IP and no inbound access. Its egress goes through the landing zone's NAT Gateway or the hub firewall.
+- **Pinned scripts (I3):** AIB downloads each customizer from the commit's raw URL and checks its SHA-256. A fork or a private copy sets `AVD_IMAGE_SCRIPTS_URI`, as `AVD_RUNBOOK_URI` works in decision 0011. The commit is the authenticity check, and the hash protects integrity in transit.
+- **Least privilege:**
+  - the AIB identity holds the two custom roles plus Contributor on the staging group only;
+  - the build workflow's identity can only deploy and run templates in the images group;
+  - promotion needs the target environment's approval.
+- **Traceability:** every version's tags name its commit, source image and run, and the run keeps the customization log.
+- **Posture:** the canary host is covered by Defender for Cloud and guest configuration like any host. Findings on it are shown at promotion as warnings, not failures (decision 0009). A person decides, with the findings in front of them.
+- **New GUIDs** (built-in role IDs, if any role is assigned by ID) go into `PUBLIC_IDS` (decision 0008).
+
+## 9. Repository layout and guards
+
+```
+bicep/images/main.bicep          gallery, definition, identity, roles (entry point, carries the notice)
+bicep/images/build.bicep         per-build image template
+bicep/modules/network.bicep      + snet-image-build, snet-image-aci (deployImageBuildSubnets)
+bicep/modules/sessionHosts.bicep + generation in names; imageReference by id
+parameters/images.bicepparam     region, replica storage, retention, build environment
+scripts/image/                   customizers and Test-GoldenImage.ps1 (Windows PowerShell 5.1)
+scripts/image/custom/            adopter customizations (empty here)
+scripts/ops/Invoke-AvdHostRotation.ps1
+.github/workflows/               image-build.yml, image-validate.yml, image-promote.yml
+tests/offline/HostRotation.Scenario.ps1, ImageBuild.Scenario.ps1
+```
+
+Guards, added with the first slice, following decision 0006:
+
+| Guard | Catches |
+|---|---|
+| Template test: parameter files compiled with `AVD_SESSION_HOST_IMAGE_ID` unset, empty and set | The empty-string trap (lesson 0004); the marketplace default holding |
+| Template test: names unchanged with the default generation; valid and distinct for `a` and `b`; at most 15 characters | Replacing existing hosts by accident; NetBIOS length |
+| Template test: the definition is V2 with `TrustedLaunch` and accelerated networking; replica storage is ZRS in a zoned region and LRS in one without zones | Trusted Launch deployment failures; lesson 0001 |
+| Template test: every customizer in the build template has a `sha256Checksum` | Unpinned scripts |
+| Offline scenario `ImageBuild`: a failed build reports the step, code and log tail; the poll loop ends on error | Lessons 0008, 0012 |
+| Offline scenario `HostRotation`: each phase, resume after a disconnect at every phase, refusal while locked, a quota shortfall, `-LogOffAtDeadline` off and on, device cleanup without a Graph sign-in (a warning, not a failure) | Resumability and its edge cases. Mock paths added to `AzMock.psm1`, which omits empty properties like ARM does (lesson 0021) |
+| Portal tests: `stage: rotation` and `image` state lines, and the commands with `--image-id` and `--generation` | Decision 0007 drift |
+| PSScriptAnalyzer over `scripts/image/` in its 5.1-compatible settings | Lesson 0011 |
+| Disclaimer test over the new entry points | The project notice |
+
+## 10. Phases
+
+| Step | Delivers | Exit criterion |
+|---|---|---|
+| **1 Gallery and build** | `bicep/images`, build subnets, `image-build.yml`, customizers, `Test-GoldenImage.ps1` | A scheduled build produces a version with every validation `Pass`, in a region with zones and in one without |
+| **2 Parameters** | `AVD_SESSION_HOST_IMAGE_ID`, generations, `deploy.sh` flags, preflight check, portal | dev deploys from a gallery version; the default still deploys the marketplace image with unchanged names |
+| **3 Rotation** | `Invoke-AvdHostRotation.ps1`, device cleanup shared with `Remove-AvdDemo.ps1` | `test` rotates a → b → a, resumed after a deliberate disconnect, and a real sign-in lands on the new generation each time |
+| **4 Canary and promotion** | `image-validate.yml`, `image-promote.yml` | One version goes build → canary → promoted → rotated in `prod`, with the post-deployment preflight Ready afterwards |
+
+When step 4 passes, phase 0b is done, and the second brain's phase 1 can start.
+
+## 11. Verify at build
+
+Each of these is an assumption in the spec, to confirm against the docs and a real run before relying on it:
+
+- AIB isolated builds with `containerInstanceSubnetId`: the subnet delegation and the network policies each subnet needs, and that no proxy VM or Private Link service is created.
+- AIB builds for a Trusted Launch gallery definition from the `win11-24h2-avd-m365` source.
+- The AIB PowerShell customizer's `sha256Checksum` field, and the `validate` phase's `continueDistributeOnFailure`.
+- `Standard_ZRS` replica storage in the chosen regions.
+- GitHub Actions cron semantics, where day-of-month and day-of-week combine as OR.
+- Whether AIB source-image triggers could replace the schedule (Q2).
+
+## 12. Open questions
+
+- **Q1** Preinstall the AVD agent and Boot Loader in the image, for faster registration? Default **no**: `Register-AvdAgent` installs the current version, and it already handles a preinstalled agent if an adopter wants one.
+- **Q2** Schedule or AIB source-image triggers? The schedule is the default until triggers are verified (§11).
+- **Q3** When to move to the next Windows 11 release: a new image definition per release (`25h2`), run side by side through a canary.
+- **Q4** Should the project publish a community gallery image for adopters? Recommended **no**: supply chain trust and cost would fall on one maintainer, and each adopter's own build is traceable to their own commit.
+- **Q5** Should `-LogOffAtDeadline` be the default in `prod`? Recommended **no**: losing unsaved work is worse than a slower rotation.

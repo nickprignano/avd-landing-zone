@@ -1,0 +1,23 @@
+# 0013. A generic golden image built by Azure Image Builder, promoted by a person, rotated blue/green
+
+- **Status:** Proposed
+
+## Context
+Session hosts come from the marketplace image at `latest`, so two hosts deployed a week apart can differ, and nobody can say which build a host runs. Replacing hosts is a manual procedure. The second brain's `replace-host` playbook, its detections and its baselines need a known image, and the owner decided to build the image pipeline before the second brain (second brain spec Q6).
+
+## Decision
+As specified in [image-pipeline-spec.md](../image-pipeline-spec.md):
+- **Azure Image Builder, not Packer.** It is Azure-native, defined in Bicep, and runs with a managed identity. That keeps the project to one language.
+- **The image is generic.** Updates and a few settings go in. Nothing tenant- or landing-zone-specific does: share paths, tokens, joins and the AVD agent stay with the existing Run Commands. One version serves every environment and adopter.
+- **Built monthly on a schedule, promoted by a person.**
+  - A version stays excluded from `latest` until a canary in `test` passes the preflight, the readiness checks and a real sign-in.
+  - Promotion runs through the target GitHub Environment's approval.
+  - Hosts pin a version ID (`AVD_SESSION_HOST_IMAGE_ID`, guarded with `empty(...)`); the marketplace image stays the default.
+- **Blue/green rotation** through alternating name generations, by a resumable Cloud Shell script. Its state lives in a host pool tag. It never logs users off unless the operator opts in, and it removes old VMs, session host objects and device objects.
+- **Builds run in the build environment's spoke,** reusing its egress, with no public IP. Customizer scripts are pinned by commit and SHA-256.
+
+## Consequences
+- Every host's software traces to a commit, a source image version and a build run. Patching becomes a monthly, reviewable promotion.
+- Rotation needs vCPU quota for a second set of hosts while it runs. Without it, rotation stops at its first check instead of shrinking capacity.
+- A gallery, replicas and a build VM per month to pay for, priced at deploy (decision 0010).
+- Not verified against a real deployment yet; the spec lists what to confirm at build.
