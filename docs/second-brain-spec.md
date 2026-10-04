@@ -1,6 +1,6 @@
 # Spec: an organizational second brain for AVD
 
-- **Status:** Proposed (see [decision 0012](decisions/0012-second-brain.md))
+- **Status:** Proposed (see [decision 0012](decisions/0012-second-brain.md)); red-team findings open in [second-brain-redteam.md](second-brain-redteam.md)
 - **Date:** 2026-10-04
 - **Scope:** landing zones built from this repo (Entra ID-only, greenfield, private by default; [decision 0001](decisions/0001-cloud-native-scope.md))
 
