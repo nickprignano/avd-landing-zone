@@ -12,7 +12,7 @@
     "Autologgers",
     "DefaultUserSettings"
   ],
-  "profileSha256": "5123ccb1aa2fd8439a41a51a676b5e36f7a7f7821b758f5cc7252ddf962a5b83",
+  "profileSha256": "08092903f13f079100f4c242f3281446344567076a0a12f39627cae9ced87f74",
   "files": {
     "Windows_Optimization.ps1": "87fc0bb13d725150afa308b8e2210f42baa657ee2078b6f6e5719582c7dd67cc",
     "Functions/Disable-WDOTAutoLoggers.ps1": "4e979c8ceab9b18cfcb96bfa4df77b44823245c620c5771cb6e477b18a564bd0",
