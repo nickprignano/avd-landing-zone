@@ -626,6 +626,32 @@
     return o;
   }
 
+  // ---------------------------------------------------------------- verify access: launch link (decision 0014)
+  // The web client's direct launch URL, from the workspace and desktop object IDs in the post-deployment
+  // or demo state line (context.launch). UNVERIFIED wording: the path, ?tenant= (for external identities)
+  // and #loginHint= (must come last) come from a search summary of
+  // https://learn.microsoft.com/windows-app/direct-launch-urls, not its text (verify-access-spec.md §11 A2).
+  // A pasted state line is untrusted input: the IDs must be GUIDs, so the link can only point at
+  // windows.cloud.microsoft, and a login hint must look like a UPN with nothing that could end the URL part.
+  var GUID = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  var WEB_CLIENT = 'https://windows.cloud.microsoft';
+  function launchTarget(launch) {
+    if (!launch || typeof launch !== 'object' || !GUID.test(launch.workspaceObjectId || '') || !GUID.test(launch.desktopObjectId || '')) return null;
+    var t = { workspaceObjectId: launch.workspaceObjectId, desktopObjectId: launch.desktopObjectId };
+    if (GUID.test(launch.tenantId || '')) t.tenantId = launch.tenantId;
+    ['workspace', 'appGroup'].forEach(function (k) { if (typeof launch[k] === 'string' && /^[A-Za-z0-9._-]{1,80}$/.test(launch[k])) t[k] = launch[k]; });
+    return t;
+  }
+  function launchUrl(launch, opts) {
+    opts = opts || {};
+    var t = launchTarget(launch);
+    if (!t) return null;
+    var url = WEB_CLIENT + '/webclient/avd/' + t.workspaceObjectId + '/' + t.desktopObjectId;
+    if (opts.tenant && t.tenantId) url += '?tenant=' + t.tenantId;
+    if (opts.loginHint && /^[^\s@#?&\/%'"<>]+@[^\s@#?&\/%'"<>]+\.[^\s@#?&\/%'"<>]+$/.test(opts.loginHint)) url += '#loginHint=' + opts.loginHint;
+    return url;
+  }
+
   // The first command for someone who has not run anything yet.
   function firstStep(config) {
     var cfg = merge(DEFAULTS, config);
@@ -647,13 +673,12 @@
       case 'signin': return [{ title: 'Sign in to the desktop', why: 'Open https://windows.cloud.microsoft (or the Windows App) as a member of ' + cfg.usersGroup + '. The next step, Verify access, checks this device can reach AVD.', command: '' },
         { title: 'Optional: validate sign-in with a demo host pool', why: 'Deploys a separate demo host pool and checks the host and your test user.', command: cmd.demo(cfg) },
         { title: 'Optional: Well-Architected review', why: 'Reviews the deployed landing zone by pillar. Findings are warnings; no Graph sign-in needed.', command: cmd.wellArchitected(cfg) }];
-      case 'verify': return [{ title: 'Open the desktop', why: 'After the reachability check, open https://windows.cloud.microsoft (or the Windows App) and sign in as a member of ' + cfg.usersGroup +
-        '. New group members can take up to an hour to see the desktop. The first time you connect to a session host, a prompt asks you to allow the remote desktop connection: that is expected, choose Yes. ' +
-        'If the hosts are stopped, the first connection waits for one to start (a few minutes), so it isn\'t representative of later sign-ins.', command: '' }];
+      case 'verify': return [{ title: 'Open the desktop', why: 'After the reachability check, open ' + (launchTarget(cfg.launch) ? 'the desktop with the link above' : 'https://windows.cloud.microsoft') + ' (or the Windows App) and sign in as a member of ' + cfg.usersGroup +
+        '. New group members can take up to an hour to see the desktop. The notes above say what to expect on the first connection.', command: '' }];
       default: return [firstStep(cfg)];
     }
   }
 
   return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, powerDefaults: powerDefaults, effectivePower: effectivePower, hostHours: hostHours, repriceEstimate: repriceEstimate, pricedHours: pricedHours, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote,
-    REACHABILITY_HOSTS: REACHABILITY_HOSTS, rateLatency: rateLatency, classifyReachability: classifyReachability };
+    REACHABILITY_HOSTS: REACHABILITY_HOSTS, rateLatency: rateLatency, classifyReachability: classifyReachability, launchTarget: launchTarget, launchUrl: launchUrl };
 });

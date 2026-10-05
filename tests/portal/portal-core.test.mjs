@@ -567,3 +567,43 @@ test('page: Verify access comes after Sign in, holds the probe, and the page fet
     assert.doesNotMatch(readFileSync(new URL(`../../docs/portal/${f}`, import.meta.url), 'utf8'), /\bfetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource/, f);
   }
 });
+
+// ---------------------------------------------------------------- verify access: launch link (decision 0014)
+const LAUNCH = { workspaceObjectId: 'a0a0a0a0-0000-4000-8000-000000000001', desktopObjectId: 'b0b0b0b0-0000-4000-8000-000000000001', tenantId: '55555555-5555-5555-5555-555555555555', workspace: 'vdws-avdlz-dev' };
+
+test('launch: direct web client link from the two object IDs; tenant only when asked, login hint last', () => {
+  const base = 'https://windows.cloud.microsoft/webclient/avd/a0a0a0a0-0000-4000-8000-000000000001/b0b0b0b0-0000-4000-8000-000000000001';
+  assert.equal(P.launchUrl(LAUNCH), base);
+  assert.equal(P.launchUrl(LAUNCH, { tenant: true }), base + '?tenant=55555555-5555-5555-5555-555555555555');
+  assert.equal(P.launchUrl(LAUNCH, { tenant: true, loginHint: 'alex@contoso.com' }), base + '?tenant=55555555-5555-5555-5555-555555555555#loginHint=alex@contoso.com');
+  assert.equal(P.launchUrl({ ...LAUNCH, tenantId: undefined }, { tenant: true }), base, 'no tenant ID, no tenant parameter');
+});
+
+test('launch: a pasted state line is untrusted: only GUIDs, only windows.cloud.microsoft, no injected URL parts', () => {
+  for (const bad of [null, undefined, 'x', {}, { ...LAUNCH, workspaceObjectId: '../../evil' }, { ...LAUNCH, desktopObjectId: 'b0b0b0b0-0000-4000-8000-000000000001/../x' },
+    { ...LAUNCH, workspaceObjectId: 'javascript:alert(1)' }, { ...LAUNCH, desktopObjectId: '' }]) {
+    assert.equal(P.launchUrl(bad), null, JSON.stringify(bad));
+  }
+  for (const hint of ['x@evil.com#/../', 'a b@c.d', 'x@y.z?tenant=1', 'x@y.z&a=b', 'no-at-sign', "x'@y.z", 'x@y']) {
+    assert.doesNotMatch(P.launchUrl(LAUNCH, { loginHint: hint }), /loginHint/, hint);
+  }
+  assert.equal(P.launchUrl({ ...LAUNCH, tenantId: 'evil.com' }, { tenant: true }).includes('tenant='), false);
+  assert.equal(P.launchTarget({ ...LAUNCH, workspace: '<img src=x>' }).workspace, undefined, 'names are plain resource names or dropped');
+});
+
+test('state: post-deployment ready with launch IDs -> kept in the config the page saves; Verify access points at the link', () => {
+  const r = analyze('state-postdeploy-ready-launch.txt');
+  assert.equal(r.step, 'signin');
+  assert.deepEqual(P.launchTarget(r.config.launch), { workspaceObjectId: LAUNCH.workspaceObjectId, desktopObjectId: LAUNCH.desktopObjectId, tenantId: LAUNCH.tenantId, workspace: 'vdws-avdlz-dev', appGroup: 'vdag-avdlz-dev-desktop' });
+  assert.match(P.actionsForStep('verify', r.config)[0].why, /the link above/);
+  // Older output without launch IDs: the plain web client.
+  const old = analyze('state-postdeploy-ready.txt');
+  assert.equal(P.launchTarget(old.config.launch), null);
+  assert.match(P.actionsForStep('verify', old.config)[0].why, /https:\/\/windows\.cloud\.microsoft/);
+});
+
+test('page: the launch link opens in a new tab without a referrer and defaults to the web client', () => {
+  const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<a id="launch-link"[^>]*href="https:\/\/windows\.cloud\.microsoft"[^>]*target="_blank" rel="noopener noreferrer"/);
+  assert.match(html, /P\.launchUrl\(/);
+});

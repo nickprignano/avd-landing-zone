@@ -237,7 +237,11 @@ if ($TestUserUpn) {
 }
 
 $summary = Write-AvdSummary
-$portalState = Get-AvdPortalState -Stage demo -Context @{ namePrefix = $NamePrefix; environment = $Environment; testUserUpn = $TestUserUpn; workspace = "vdws-$($lz.BaseName)-demo" }
+$demoContext = @{ namePrefix = $NamePrefix; environment = $Environment; testUserUpn = $TestUserUpn; workspace = "vdws-$($lz.BaseName)-demo" }
+# The demo desktop's direct launch link for the portal's Verify access step (decision 0014).
+$launch = Get-AvdLaunchTarget -ResourceGroupId $lz.ResourceGroupIds.Demo -TenantId $lz.TenantId
+if ($launch) { $demoContext.launch = $launch }
+$portalState = Get-AvdPortalState -Stage demo -Context $demoContext
 if ($summary.Failed) {
   Write-Host "Demo deployed, but $($summary.Failed) readiness check(s) failed; fix them before testing sign-in." -ForegroundColor Red
   Write-AvdPortalState $portalState

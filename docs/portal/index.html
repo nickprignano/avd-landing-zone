@@ -52,6 +52,7 @@
   button.secondary { background: transparent; color: var(--accent); }
   button.linkbtn { background: none; border: 0; padding: 4px 0; color: var(--accent); text-decoration: underline; font-weight: 600; }
   button:disabled { opacity: .5; cursor: default; }
+  a.btnlink { display: inline-block; font-weight: 600; border: 1px solid var(--accent); border-radius: 6px; padding: 7px 14px; background: var(--accent); color: var(--accent-text); text-decoration: none; }
   .status, .muted { color: var(--muted); }
   .status { font-size: .9rem; }
   .hidden { display: none !important; }
@@ -266,6 +267,16 @@
         </div>
         <p class="status" id="reach-limits" style="margin:8px 0 0"></p>
       </div>
+      <div class="pool">
+        <h3>Open the desktop</h3>
+        <p class="status" id="launch-status" style="margin:0 0 8px"></p>
+        <div class="row">
+          <a id="launch-link" class="btnlink" href="https://windows.cloud.microsoft" target="_blank" rel="noopener noreferrer">Open the web client</a>
+          <label id="launch-tenant-label" class="hidden"><input type="checkbox" id="launch-tenant"> Add the tenant (for a guest account)</label>
+          <label id="launch-hint-label" class="hidden"><input type="checkbox" id="launch-hint"> Prefill the sign-in with <span id="launch-hint-upn"></span></label>
+        </div>
+        <p class="status" style="margin:8px 0 0">Sign in as a member of the users group. Expect a one-time prompt to allow the remote desktop connection the first time you reach each session host (Microsoft Entra single sign-on): choose Yes. A stopped host starts on the first connection, which then takes a few minutes and isn't representative. To test the Windows App and its RDP path, open the Windows App and choose the same desktop. There's no direct Windows App link: its parameters aren't confirmed yet.</p>
+      </div>
       <div class="slot"></div>
     </section>
   </div>
@@ -332,7 +343,7 @@
   $('repo-link').href = repoUrl;
   $('issues-link').href = repoUrl + '/issues';
 
-  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null), power: load('power', null), hoursWorkedPerWeek: load('hoursWorked', 50) });
+  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null), power: load('power', null), hoursWorkedPerWeek: load('hoursWorked', 50), launch: P.launchTarget(load('launch', null)) });
   var step = load('step', null);
   // Furthest step reached, by id: later steps stay hidden until the deployment gets there. (Saved as an
   // index before the Cost step existed; those indexes are read against the old step list.)
@@ -351,6 +362,9 @@
     if (patch && patch.sizing && patch.sizing.hosts) { cfg.sizing = patch.sizing; save('sizing', cfg.sizing); }
     // ... and which power settings it priced.
     if (patch && patch.power && patch.power.autoShutdownTime) { cfg.power = { startVmOnConnect: patch.power.startVmOnConnect !== false, autoShutdownTime: patch.power.autoShutdownTime }; save('power', cfg.power); }
+    // ... and, after the post-deployment setup or the demo, the desktop to launch (decision 0014).
+    var launch = patch && P.launchTarget(patch.launch);
+    if (launch) { cfg.launch = launch; save('launch', launch); }
     var keep = {}; FIELDS.forEach(function (k) { keep[k] = cfg[k]; }); save('config', keep);
     FIELDS.forEach(function (k) { var el = $(k); if (el && el.value !== cfg[k]) el.value = cfg[k] || ''; });
     $('region-summary').textContent = cfg.location + (ranked && ranked.length ? (ranked[0] === cfg.location ? ' (closest measured)' : '') : ' (not measured yet)');
@@ -496,7 +510,7 @@
   }
 
   function render() {
-    renderSteps(); renderSlides();
+    renderSteps(); renderSlides(); renderLaunch();
     var chip = $('next-chip'), head = $('next-headline');
     if (lastAnalysis) {
       var r = lastAnalysis;
@@ -539,7 +553,7 @@
   $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); refreshReport(true); });
   $('reset').addEventListener('click', function () {
     try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
-    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null, power: null, hoursWorkedPerWeek: 50 }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
+    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null, power: null, hoursWorkedPerWeek: 50, launch: null }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
     pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)]; estimate = null; renderPools(); renderCost();
     reach = null; $('reach-results').classList.add('hidden'); renderReachability();
     $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render(); showStep();
@@ -868,6 +882,22 @@
     });
   }
   $('reach-run').addEventListener('click', runReachability);
+
+  // ---------------------------------------------------------------- verify access: launch link (decision 0014)
+  function renderLaunch() {
+    var t = cfg.launch, hint = cfg.testUserUpn && $('launch-hint').checked ? cfg.testUserUpn : '';
+    var url = P.launchUrl(t, { tenant: $('launch-tenant').checked, loginHint: hint });
+    $('launch-link').href = url || 'https://windows.cloud.microsoft';
+    $('launch-link').textContent = url ? 'Open the desktop' : 'Open the web client';
+    $('launch-status').textContent = url
+      ? 'Opens the Desktop' + (t.workspace ? ' in workspace ' + t.workspace : '') + ' directly in the web client, from the IDs the last post-deployment or demo run reported.'
+      : 'Paste the post-deployment setup\'s output to get a direct link to this landing zone\'s desktop. Until then, this opens the web client, where you choose the desktop.';
+    $('launch-tenant-label').classList.toggle('hidden', !(t && t.tenantId));
+    $('launch-hint-label').classList.toggle('hidden', !cfg.testUserUpn);
+    $('launch-hint-upn').textContent = cfg.testUserUpn || '';
+  }
+  $('launch-tenant').addEventListener('change', renderLaunch);
+  $('launch-hint').addEventListener('change', renderLaunch);
 
   // ---------------------------------------------------------------- start
   if (/^#(region|size|cost)$/.test(location.hash) && stepIndex(location.hash.slice(1)) <= reached) step = location.hash.slice(1);

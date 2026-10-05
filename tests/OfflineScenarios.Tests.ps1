@@ -77,6 +77,16 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     $s[5].context.includeLandingZone | Should -BeTrue
     $s[6].context.environment | Should -Be 'test'   # remove-test-beside-dev
   }
+  It 'reports the launch link IDs for the landing zone desktop and the demo desktop (decision 0014)' {
+    $s = Get-PortalState $out
+    $s[1].context.launch.workspaceObjectId | Should -Be 'a0a0a0a0-0000-4000-8000-000000000001'
+    $s[1].context.launch.desktopObjectId | Should -Be 'b0b0b0b0-0000-4000-8000-000000000001'
+    $s[1].context.launch.tenantId | Should -Be '55555555-5555-5555-5555-555555555555'
+    $s[1].context.launch.workspace | Should -Be 'vdws-avdlz-dev'
+    $s[3].context.launch.workspaceObjectId | Should -Be 'a0a0a0a0-0000-4000-8000-00000000d0d0'
+    $s[3].context.launch.workspace | Should -Be 'vdws-avdlz-dev-demo'
+  }
+  It 'leaves the launch link out when ARM returns no objectId' { $out | Should -Match 'RESULT launch-missing hasLaunch=False' }
 }
 
 Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {

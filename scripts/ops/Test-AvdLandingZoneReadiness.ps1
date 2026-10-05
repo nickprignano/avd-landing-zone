@@ -194,7 +194,13 @@ if ($PreDeployment) {
   $portalState = Get-AvdPortalState -Stage predeploy -Fix:$Fix -Context $portalContext
 }
 else {
-  $portalState = Get-AvdPortalState -Stage postdeploy -Fix:$Fix -Context @{ namePrefix = $NamePrefix; environment = $Environment; wellArchitected = [bool]$WellArchitected }
+  $postContext = @{ namePrefix = $NamePrefix; environment = $Environment; wellArchitected = [bool]$WellArchitected }
+  # The web client's direct launch link for the portal's Verify access step (decision 0014).
+  if ($lz -and $lz.RgExists.ControlPlane) {
+    $launch = Get-AvdLaunchTarget -ResourceGroupId $lz.ResourceGroupIds.ControlPlane -TenantId $lz.TenantId
+    if ($launch) { $postContext.launch = $launch }
+  }
+  $portalState = Get-AvdPortalState -Stage postdeploy -Fix:$Fix -Context $postContext
 }
 if ($summary.Failed) {
   Write-Host "Not ready: $($summary.Failed) failure(s).$(if (-not $Fix) { ' Rerun with -Fix to remediate what can be fixed automatically.' })" -ForegroundColor Red

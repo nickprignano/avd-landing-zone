@@ -9,7 +9,11 @@
 5. **Deploy the landing zone.**
 6. **Post-deployment setup.**
 7. **Sign in** (and optionally the demo host pool).
-8. **Verify access.** From the operator's own device: a reachability probe to the AVD sign-in and client hosts, timed like the latency step ([decision 0014](../decisions/0014-verify-access.md)). It's a warning, never a stop, and the page says what it doesn't prove. The launch link and the confirmation from telemetry follow in later phases ([verify-access-spec.md](../verify-access-spec.md)).
+8. **Verify access.** From the operator's own device ([decision 0014](../decisions/0014-verify-access.md)):
+   - a reachability probe to the AVD sign-in and client hosts, timed like the latency step. It's a warning, never a stop, and the page says what it doesn't prove;
+   - a direct link to the desktop in the web client, built from the workspace and desktop object IDs the post-deployment setup or the demo reports (`launchUrl`). The IDs must be GUIDs and the link always points at `windows.cloud.microsoft`. There's no Windows App (`ms-avd:`) link yet: its parameter names aren't confirmed (TODO, [verify-access-spec.md](../verify-access-spec.md) §6.3).
+
+   The confirmation from telemetry follows in a later phase.
 
 The steps sit side by side and scroll horizontally (swipe, trackpad, or Back and Next); a step stays hidden until the deployment reaches it, so the page opens on the latency check. A pasted output moves to the step it leads to. Next skips a step without running it, for an operator who did it earlier or elsewhere.
 
@@ -35,7 +39,7 @@ Written by `Write-AvdPortalState` (PowerShell scripts) and `portal_state` (`depl
 | `stage` | `predeploy`, `deploy`, `postdeploy`, `demo` or `cleanup`. |
 | `status` | `ready` / `notready` (preflight, demo, cleanup); `started` / `succeeded` / `failed` / `whatif` (`deploy.sh`). A deployment prints `started` before it begins, so output cut off by a disconnect still says what is running. |
 | `fix` | Whether the run used `-Fix`. |
-| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `power` (`autoShutdownTime`: `HH:mm` or `none`, `startVmOnConnect`: the power settings a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`) (whichever apply). |
+| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `power` (`autoShutdownTime`: `HH:mm` or `none`, `startVmOnConnect`: the power settings a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`), `launch` (post-deployment and demo: `workspaceObjectId`, `desktopObjectId`, `tenantId`, `workspace`, `appGroup`: what the Verify access step's direct launch link needs; left out when an ID is missing) (whichever apply). |
 | `counts` | `pass`, `fail`, `warn`, `fixed`, `skip`. |
 | `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognize the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
 

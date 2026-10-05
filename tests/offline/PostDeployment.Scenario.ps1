@@ -8,6 +8,13 @@ Invoke-ScenarioStep 'fix' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @lz
 Write-Host "RESULT fix-state consent=$(@($global:St.grants).Count -gt 0) tagged=$(@($global:St.tags).Count -gt 0) caExcluded=$(@($global:St.caExclude).Count -gt 0) aclApplied=$($global:St.aclApplied) leftoverRoles=$(@($global:St.roleAssignments).Count)"
 Invoke-ScenarioStep 'recheck' { & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @lz }
 
+# The launch link's IDs are read through REST; a desktop or workspace without objectId (ARM leaves out
+# empty properties) means no launch context, never a malformed link. Not in the state-line list below.
+$global:St.launchNoObjectId = $true
+$noLaunch = & ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 @lz 6>&1 | Out-String
+$global:St.launchNoObjectId = $false
+Write-Host "RESULT launch-missing hasLaunch=$($noLaunch -match '"launch":')"
+
 Invoke-ScenarioStep 'demo' { & ./scripts/ops/Deploy-AvdDemo.ps1 @lz -TestUserUpn alex@contoso.com }
 Invoke-ScenarioStep 'remove-demo' { & ./scripts/ops/Remove-AvdDemo.ps1 @lz -Force }
 

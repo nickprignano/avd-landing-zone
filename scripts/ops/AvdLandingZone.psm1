@@ -1067,6 +1067,35 @@ function Get-AvdArmList {
   }
 }
 
+function Get-AvdLaunchTarget {
+  <#
+    What the web client's direct launch link needs (decision 0014): the object IDs of the desktop in a
+    resource group's desktop application group and of the workspace that publishes it, read from
+    properties.objectId through REST (the Get-AzWvd* cmdlet help doesn't document an ObjectId property).
+    Returns $null when either ID is missing or not a GUID: the portal then links to the plain web client.
+  #>
+  param([Parameter(Mandatory)][string] $ResourceGroupId, [string] $TenantId)
+  $api = '2024-04-03'
+  $guid = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
+  try {
+    $ag = @(Get-AvdArmList -Path "$ResourceGroupId/providers/Microsoft.DesktopVirtualization/applicationGroups?api-version=$api" |
+        Where-Object { $_.properties.applicationGroupType -eq 'Desktop' }) | Select-Object -First 1
+    if (-not $ag) { return $null }
+    $desktop = @(Get-AvdArmList -Path "$($ag.id)/desktops?api-version=$api") | Select-Object -First 1
+    # The workspace that references the app group (ARM leaves out an empty reference list, lesson 0021).
+    $ws = @(Get-AvdArmList -Path "$ResourceGroupId/providers/Microsoft.DesktopVirtualization/workspaces?api-version=$api" |
+        Where-Object { @($_.properties.applicationGroupReferences | Where-Object { $_ -and $_ -eq $ag.id }).Count }) | Select-Object -First 1
+  }
+  catch {
+    Write-Host "  Launch link: couldn't read the workspace and desktop: $($_.Exception.Message)" -ForegroundColor DarkGray
+    return $null
+  }
+  if (-not $ws -or -not $desktop -or "$($ws.properties.objectId)" -notmatch $guid -or "$($desktop.properties.objectId)" -notmatch $guid) { return $null }
+  $t = [ordered]@{ workspaceObjectId = $ws.properties.objectId; desktopObjectId = $desktop.properties.objectId; workspace = $ws.name; appGroup = $ag.name }
+  if ($TenantId -match $guid) { $t.tenantId = $TenantId }
+  $t
+}
+
 function Add-AvdWafResult {
   <#
     One Well-Architected finding: Pass, or Warn with id waf-<Key> and data { pillar, accepted }.

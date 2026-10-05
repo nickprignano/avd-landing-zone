@@ -133,3 +133,11 @@ test('issueUrl: short reports go whole; long ones keep the start and the state l
   assert.match(sent, /lines cut to fit a GitHub link/);
   assert.match(sent, /AVDLZ-STATE>>>$/);
 });
+
+test('redact: the launch link IDs and names in a post-deployment state line (decision 0014)', () => {
+  // An adopter's own prefix (the repo default, avdlz, is public and kept).
+  const t = R.redact(fixture('state-postdeploy-ready-launch.txt').replace(/avdlz/g, 'fabx')).text;
+  for (const v of ['a0a0a0a0-0000-4000-8000-000000000001', 'b0b0b0b0-0000-4000-8000-000000000001', '55555555-5555-5555-5555-555555555555', 'fabx'])
+    assert.ok(!t.includes(v), `still contains ${v}`);
+  assert.match(t, /"launch":\{"workspaceObjectId":"<id-\d+>"/);
+});

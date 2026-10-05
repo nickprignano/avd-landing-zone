@@ -1,6 +1,6 @@
 # Spec: verify access from the operator's device, and an optional computer-use agent
 
-- **Status:** Proposed. The owner agreed with every proposal in §12 (2026-10-05); Phase A1 is built. Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B).
+- **Status:** Proposed. The owner agreed with every proposal in §12 (2026-10-05); Phases A1 and A2 are built. Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B).
 - **Date:** 2026-10-05
 - **Scope:** landing zones built from this repo. Track A changes the deployment portal and the ops scripts, not the deployed resources. Track B is a separate, optional deployment, off by default.
 
