@@ -398,3 +398,25 @@ Describe 'Get-AvdCostEstimate' {
     ($e.unpriced | ForEach-Object { $_.item }) | Should -Contain 'Private endpoints (2)'  # no AVD Private Link: storage + Key Vault
   }
 }
+
+Describe 'Get-AvdUserConnectionOutcome (decision 0014)' {
+  It 'fails closed: nothing is "none", never verified' {
+    (Get-AvdUserConnectionOutcome -Row @()).Status | Should -Be 'none'
+    (Get-AvdUserConnectionOutcome -Row @($null)).Status | Should -Be 'none'
+  }
+  It 'reads the dynamic columns the query API returns as JSON strings' {
+    $row = [pscustomobject]@{ CorrelationId = 'c1'; StartedAt = 't0'; ConnectedAt = $null; Errors = '[{"code":"X","message":"m","source":"s","serviceError":false}]'; Checkpoints = '["a","b"]' }
+    $o = Get-AvdUserConnectionOutcome -Row @($row)
+    $o.Status | Should -Be 'failed'
+    $o.Connections[0].errors[0].code | Should -Be 'X'
+    $o.Connections[0].checkpoints | Should -Be @('a', 'b')
+  }
+  It 'a connection with no errors and no Connected time is in progress; Connected anywhere is verified' {
+    $started = [pscustomobject]@{ CorrelationId = 'c1'; StartedAt = 't0' }
+    (Get-AvdUserConnectionOutcome -Row @($started)).Status | Should -Be 'inprogress'
+    $ok = [pscustomobject]@{ CorrelationId = 'c2'; StartedAt = 't0'; ConnectedAt = 't1'; ConnectionSetupSeconds = 3.14159; Errors = '[]' }
+    $o = Get-AvdUserConnectionOutcome -Row @($started, $ok)
+    $o.Status | Should -Be 'verified'
+    $o.Connected[0].connectionSetupSeconds | Should -Be 3.1
+  }
+}

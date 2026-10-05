@@ -515,7 +515,7 @@
     if (lastAnalysis) {
       var r = lastAnalysis;
       $('next-title').textContent = r.recognized ? 'What to do next' : 'Not recognized';
-      var good = /^(ready|succeeded|done|resumed|stopped)$/.test(r.status || '');
+      var good = /^(ready|succeeded|done|resumed|stopped|verified)$/.test(r.status || '');
       chip.textContent = r.status ? (good ? 'Done' : r.status === 'started' ? 'Running' : 'Action needed') : 'Action needed';
       chip.className = 'chip ' + (good ? 'good' : r.status === 'started' ? 'ok' : 'poor');
       head.textContent = r.headline; head.classList.remove('hidden');

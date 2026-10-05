@@ -213,7 +213,7 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   if ($Path -match 'Microsoft.Consumption/budgets\?') { return & $ok @{ value=@(if ($g) { @{ name='budget-avdlz-prod' } }) } }
   if ($Path -match 'scalingPlans\?') { return & $ok @{ value=@(@{ name='vdscaling-avdlz-dev'; properties=@{ hostPoolReferences=@(@{ hostPoolArmPath=$hpId; scalingPlanEnabled=$true }) } }) } }
   if ($Path -match 'hostPools/vdpool-avdlz-dev/providers/Microsoft.Insights/diagnosticSettings\?') { return & $ok @{ value=@(@{ name='diag-vdpool'; properties=@{ workspaceId=$lawId } }) } }
-  if ($Path -match 'workspaces/log-avdlz-dev\?api-version') { return & $ok @{ properties=@{ retentionInDays=$(if ($g) { 90 } else { 30 }) } } }
+  if ($Path -match 'workspaces/log-avdlz-dev\?api-version') { return & $ok @{ properties=@{ customerId='66666666-6666-6666-6666-666666666666'; retentionInDays=$(if ($g) { 90 } else { 30 }) } } }
   if ($Path -match 'policyStates/latest/summarize') {
     $nc = if (-not $g -and $Path -match 'rg-avdlz-dev-hosts') { 1 } else { 0 }
     return & $ok @{ value=@(@{ results=@{ nonCompliantResources=$nc }; policyAssignments=@(@{ policyAssignmentId="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-guest-attestation"; results=@{ nonCompliantResources=$nc } }) }) }
@@ -372,6 +372,25 @@ function Invoke-RestMethod { param($Uri,$Method,$Headers,$Body,$ContentType,$Err
       $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($r.Content); throw $e
     }
     if ($r.Content) { return ($r.Content | ConvertFrom-Json) } else { return }
+  }
+  # ---- Log Analytics query API (Invoke-AvdLogQuery, Test-AvdUserConnection.ps1). Each call takes the
+  # next response from $global:St.logPolls (the last one repeats): rows of user-connection.kql, or
+  # @{ status = 403 } for an error. Shape from the API spec: tables[].columns[{name,type}], rows[[...]];
+  # dynamic columns (Errors, Checkpoints) come back as JSON strings, and ARM-style empty values as null.
+  if ($Uri -match '^https://api\.loganalytics\.io/v1/workspaces/([^/]+)/query$') {
+    if ($Headers.Authorization -ne 'Bearer cs-token') { throw "no bearer token for $Uri" }
+    $q = ($Body | ConvertFrom-Json).query
+    Log "LAQUERY $($Matches[1]) $(if ($q -match "let upn = '([^']+)'") { $Matches[1] }) $(if ($q -match "let rg = '([^']+)'") { $Matches[1] })"
+    $global:St.logQueries++
+    $polls = @($global:St.logPolls)
+    $resp = if ($polls.Count) { $polls[[math]::Min($global:St.logQueries, $polls.Count) - 1] } else { @() }
+    if ($resp -is [hashtable] -and $resp.status) {
+      $e = [System.Management.Automation.ErrorRecord]::new([Exception]::new("Response status code does not indicate success: $($resp.status) (Forbidden)."), 'HttpError', 'InvalidOperation', $null)
+      $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('{"error":{"message":"The provided credentials have insufficient access to perform the requested operation","code":"InsufficientAccessError"}}'); throw $e
+    }
+    $cols = 'CorrelationId','StartedAt','ConnectedAt','CompletedAt','ConnectionSetupSeconds','SessionHost','ClientType','ClientOS','GatewayRegion','TransportType','Errors','Checkpoints','FirstErrorAt'
+    $rows = @(@($resp) | Where-Object { $_ } | ForEach-Object { $r = $_; ,@($cols | ForEach-Object { $v = $r[$_]; if ($_ -in 'Errors','Checkpoints' -and $null -ne $v) { ConvertTo-Json -InputObject @($v) -Compress -Depth 5 } else { $v } }) })
+    return [pscustomobject]@{ tables = @([pscustomobject]@{ name = 'PrimaryResult'; columns = @($cols | ForEach-Object { [pscustomobject]@{ name = $_; type = 'string' } }); rows = $rows }) }
   }
   if ($Uri -notmatch '^https://prices\.azure\.com/api/retail/prices') { throw "unmocked REST $Uri" }
   Log "PRICE $Uri"

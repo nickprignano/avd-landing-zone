@@ -244,6 +244,13 @@
       return block(cfg, ['./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
         (cfg.testUserUpn ? ' -TestUserUpn ' + psQuote(cfg.testUserUpn) : '')]);
     },
+    // Verify access (decision 0014): confirm from Azure telemetry that a sign-in reached the desktop.
+    // opts: user (default: the signed-in Azure user), demo, timeout (minutes).
+    verify: function (cfg, opts) {
+      opts = opts || {};
+      return block(cfg, ['./scripts/ops/Test-AvdUserConnection.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
+        (opts.user ? ' -UserPrincipalName ' + psQuote(opts.user) : '') + (opts.demo ? ' -Demo' : '') + (opts.timeout ? ' -TimeoutMinutes ' + opts.timeout : '')]);
+    },
     removeDemo: function (cfg) {
       return block(cfg, ['./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment]);
     },
@@ -364,13 +371,14 @@
   function commandInText(text) {
     var lines = text.split('\n'), i, m;
     for (i = lines.length - 1; i >= 0; i--) {
-      m = /^PS (?:<[a-z]+-\d+>|[^>])*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo)\b.*)$/.exec(lines[i]);
+      m = /^PS (?:<[a-z]+-\d+>|[^>])*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo|Test-AvdUserConnection)\b.*)$/.exec(lines[i]);
       if (!m) continue;
       var c = m[1], fix = /\s-Fix\b/.test(c);
       if (/Test-AvdLandingZoneReadiness/.test(c)) return { step: /-PreDeployment\b/.test(c) ? 'predeploy' : 'postdeploy', fix: fix };
       if (/deploy\.sh/.test(c)) return { step: 'deploy', fix: false };
       if (/Deploy-AvdDemo/.test(c)) return { step: 'signin', fix: false };
       if (/Remove-AvdDemo/.test(c)) return { step: 'signin', removeDemo: true };
+      if (/Test-AvdUserConnection/.test(c)) return { step: 'verify', fix: false };
     }
     return null;
   }
@@ -493,6 +501,48 @@
       return { step: 'signin', actions: a };
     }
 
+    if (S === 'verify') {
+      // Test-AvdUserConnection.ps1 (decision 0014). It fails closed: only "verified" is a pass.
+      var vc = state.context || {}, conns = vc.connections || [], again = { user: vc.user, demo: vc.demo };
+      var connected = conns.filter(function (c) { return c && c.connectedAt; })[0];
+      var who = vc.user || 'you';
+      if (state.status === 'verified') {
+        var how = connected ? ['on ' + (connected.sessionHost || 'a session host'), connected.clientType ? 'with the ' + connected.clientType + ' client' + (connected.clientOS ? ' on ' + connected.clientOS : '') : '',
+          connected.gatewayRegion ? 'through gateway ' + connected.gatewayRegion : ''].filter(Boolean).join(', ') : '';
+        note('Access verified', 'Azure recorded a connection by ' + who + ' that reached Connected' + (how ? ' (' + how + ')' : '') + '.' +
+          (connected && typeof connected.connectionSetupSeconds === 'number' ? ' Connection setup took ' + connected.connectionSetupSeconds + ' s (Started to Connected). That is connection setup, not the time to a usable desktop, and a first connection to a stopped host includes it starting.' : '') +
+          ' This proves a real sign-in reached the desktop; it doesn\'t prove the desktop is usable or that other users will get in.', '');
+        byId(warnings, 'connect-errors').forEach(function (w) { note('Another attempt failed', w.detail || '', ''); });
+        return { step: 'verify', actions: a };
+      }
+      if (state.status === 'failed') {
+        byId(failures, 'connect-errors').forEach(function (f) {
+          var service = f.data && f.data.serviceError;
+          note('The connection failed', (f.detail ? 'AVD logged: ' + f.detail + '. ' : '') + (service
+            ? 'AVD marked it a service error: try again in a few minutes, and check Azure Service Health.'
+            : 'Check the landing zone: the post-deployment check covers the host pool, the session hosts and the group assignments. Then open the desktop again.'), service ? '' : cmd.postdeploy(cfg, false));
+        });
+        note('Then check the connection again', 'After signing in again.', cmd.verify(cfg, again));
+        return { step: 'verify', actions: a };
+      }
+      var qf = byId(failures, 'query-failed')[0], lzm = byId(failures, 'no-landing-zone')[0], inprog = byId(failures, 'in-progress')[0];
+      if (qf) {
+        note('The connection logs couldn\'t be read', (qf.data && qf.data.status === 403
+          ? 'Your account can\'t read the Log Analytics workspace\'s data. ' + (qf.remediation || '') : (qf.detail || '') + ' ' + (qf.remediation || '')).trim(), '');
+        note('Then check again', '', cmd.verify(cfg, again));
+      }
+      else if (lzm) {
+        note('Landing zone not found', [lzm.check, lzm.remediation].filter(Boolean).join('. '), cmd.postdeploy(cfg, false));
+      }
+      else {
+        note(inprog ? 'The connection hasn\'t reached Connected yet' : 'No connection found yet',
+          (inprog ? 'A connection started and logged no errors. The host may still be starting (Start VM on Connect), or the rest of the connection hasn\'t reached Log Analytics. '
+            : 'Nothing is logged for ' + who + ' in the last ' + (vc.windowMinutes || 60) + ' minutes. Open the desktop and sign in as ' + who + ' first. If you just did, the data can take several minutes to arrive. ') +
+          'This is not a pass. Check again and wait longer:', cmd.verify(cfg, { user: again.user, demo: again.demo, timeout: 30 }));
+      }
+      return { step: 'verify', actions: a };
+    }
+
     if (S === 'power') {
       var pw = state.power || {};
       if (state.status === 'locked') {
@@ -514,8 +564,8 @@
     return { step: null, actions: a };
   }
 
-  var STAGE_LABEL = { predeploy: 'Pre-deployment preflight', deploy: 'Deployment', postdeploy: 'Post-deployment setup', demo: 'Demo validation', cleanup: 'Cleanup', power: 'Auto shutdown' };
-  var STATUS_LABEL = { done: 'Done', ready: 'Ready', notready: 'Not ready', succeeded: 'Succeeded', failed: 'Failed', started: 'Still running (or disconnected)', whatif: 'What-if only', locked: 'Locked', resumed: 'Resumed', stopped: 'Stopped' };
+  var STAGE_LABEL = { predeploy: 'Pre-deployment preflight', deploy: 'Deployment', postdeploy: 'Post-deployment setup', demo: 'Demo validation', cleanup: 'Cleanup', power: 'Auto shutdown', verify: 'Access check' };
+  var STATUS_LABEL = { done: 'Done', ready: 'Ready', notready: 'Not ready', succeeded: 'Succeeded', failed: 'Failed', started: 'Still running (or disconnected)', whatif: 'What-if only', locked: 'Locked', resumed: 'Resumed', stopped: 'Stopped', verified: 'Verified', notverified: 'Not verified' };
 
   /*
    * analyze(text, config, options) -> {
@@ -572,6 +622,7 @@
       case 'deploy': return cmd.deploy(cfg);
       case 'postdeploy': return cmd.postdeploy(cfg, fix === undefined ? true : fix);
       case 'signin': return cmd.demo(cfg);
+      case 'verify': return cmd.verify(cfg);
       default: return cmd.predeploy(cfg, !!fix);
     }
   }
@@ -674,7 +725,8 @@
         { title: 'Optional: validate sign-in with a demo host pool', why: 'Deploys a separate demo host pool and checks the host and your test user.', command: cmd.demo(cfg) },
         { title: 'Optional: Well-Architected review', why: 'Reviews the deployed landing zone by pillar. Findings are warnings; no Graph sign-in needed.', command: cmd.wellArchitected(cfg) }];
       case 'verify': return [{ title: 'Open the desktop', why: 'After the reachability check, open ' + (launchTarget(cfg.launch) ? 'the desktop with the link above' : 'https://windows.cloud.microsoft') + ' (or the Windows App) and sign in as a member of ' + cfg.usersGroup +
-        '. New group members can take up to an hour to see the desktop. The notes above say what to expect on the first connection.', command: '' }];
+        '. New group members can take up to an hour to see the desktop. The notes above say what to expect on the first connection.', command: '' },
+        { title: 'Then confirm it from Azure telemetry', why: 'Once you see the desktop, or the client gives up, run this. It reads the connection logs for your account, waits up to 15 minutes for them to arrive, and says Verified, Failed or Not verified. Only Verified is a pass.', command: cmd.verify(cfg) }];
       default: return [firstStep(cfg)];
     }
   }

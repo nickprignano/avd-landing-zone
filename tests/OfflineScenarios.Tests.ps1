@@ -406,3 +406,38 @@ Describe 'Golden image build' {
     $out | Should -Match 'InvalidTemplateDeployment'
   }
 }
+
+Describe 'Verify access: the connection check fails closed (decision 0014)' {
+  BeforeAll { $script:out = Invoke-OfflineScenario 'VerifyConnection' }
+  It 'verifies a connection that reached Connected, after waiting for it to arrive' {
+    Get-StepExit $out 'verified' | Should -Be 0
+    $out | Should -Match 'RESULT verified-calls queries=3 first=LAQUERY 66666666-6666-6666-6666-666666666666 admin@contoso\.com /subscriptions/[^ ]+/resourceGroups/rg-avdlz-dev-avd'
+    $out | Should -Match 'Connection setup \(Started to Connected\): 12\.4 s'
+  }
+  It 'reports errors without a connection as failed, after a second look' {
+    Get-StepExit $out 'failed' | Should -Be 1
+    $out | Should -Match 'RESULT failed-calls queries=2 '
+  }
+  It 'never passes on no rows, a connection still in progress or a failed query' {
+    foreach ($case in 'none', 'inprogress', 'forbidden') { Get-StepExit $out $case | Should -Be 1 -Because $case }
+    $out | Should -Match 'RESULT none-calls queries=3 '
+    $out | Should -Match 'RESULT forbidden-calls queries=1 '
+    $out | Should -Match 'Log Analytics query failed \(403\)'
+  }
+  It 'checks the demo desktop for another user' {
+    Get-StepExit $out 'demo' | Should -Be 0
+    $out | Should -Match 'RESULT demo-calls queries=1 first=LAQUERY \S+ alex@contoso\.com /subscriptions/[^ ]+/resourceGroups/rg-avdlz-dev-demo'
+  }
+  It 'ends every run with a verify state line the portal reads' {
+    $s = Get-PortalState $out
+    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' |
+      Should -Be 'verify:verified verify:failed verify:notverified verify:notverified verify:notverified verify:verified'
+    $s[0].context.connections[0].connectionSetupSeconds | Should -Be 12.4
+    $s[0].warnings[0].id | Should -Be 'connect-errors'
+    $s[1].failures[0].id | Should -Be 'connect-errors'
+    $s[2].failures[0].id | Should -Be 'no-connection'
+    $s[3].failures[0].id | Should -Be 'in-progress'
+    $s[4].failures[0].id | Should -Be 'query-failed'
+    $s[4].failures[0].data.status | Should -Be 403
+  }
+}

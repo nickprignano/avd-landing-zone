@@ -1,6 +1,6 @@
 # Operations scripts (Cloud Shell)
 
-Three PowerShell scripts in [`scripts/ops/`](../scripts/ops) that run against a **deployed** landing zone from Azure Cloud Shell:
+PowerShell scripts in [`scripts/ops/`](../scripts/ops) that run against a **deployed** landing zone from Azure Cloud Shell:
 
 | Script | What it does |
 |---|---|
@@ -8,6 +8,7 @@ Three PowerShell scripts in [`scripts/ops/`](../scripts/ops) that run against a 
 | `Test-AvdLandingZoneReadiness.ps1` | Preflight **after** deploying: is the landing zone ready for session hosts and users, **including the three post-deployment tenant steps**? Check mode by default; `-Fix` remediates. |
 | `Deploy-AvdDemo.ps1` | Deploys a demo host pool and session host into the landing zone, then validates that a user can sign in. |
 | `Remove-AvdDemo.ps1` | Removes the demo. `-IncludeLandingZone` tears down the whole landing zone. |
+| `Test-AvdUserConnection.ps1` | After you open the desktop: confirms from Azure telemetry that your sign-in reached it (Verified, Failed or Not verified). The deployment portal's Verify access step ([decision 0014](decisions/0014-verify-access.md)). |
 
 They share `AvdLandingZone.psm1`. The landing zone's resources, Entra groups and AVD service principal are discovered from its naming convention and the role assignments it created, so the only required inputs are `-NamePrefix` and `-Environment`.
 
@@ -33,6 +34,9 @@ bash ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus -
 ./scripts/ops/Test-AvdLandingZoneReadiness.ps1 -NamePrefix avdlz -Environment dev -WellArchitected -SkipTenant -SkipNtfs   # Well-Architected review
 ./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix avdlz -Environment dev -TestUserUpn alex@contoso.com
 ./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix avdlz -Environment dev
+
+# 4. After opening the desktop: did the connection reach it? (waits up to 15 minutes for the logs)
+./scripts/ops/Test-AvdUserConnection.ps1 -NamePrefix avdlz -Environment dev
 ```
 
 Microsoft Graph sign-in uses a device code in Cloud Shell: the script prints a code and waits until you enter it at https://microsoft.com/devicelogin. To sign in up front instead (the scripts reuse an existing sign-in that has the scopes they need):
@@ -232,3 +236,20 @@ If the portal gives the wrong advice or you are stuck, use **Report a problem** 
 ## Exit codes
 
 Preflight and demo return **0** when nothing failed and **1** otherwise, so you can use them in pipelines. Warnings don't fail the run. `-PassThru` on the preflight returns the result objects instead.
+
+## Verify access: `Test-AvdUserConnection.ps1`
+
+Confirms from the connection logs that a real sign-in reached the desktop ([decision 0014](decisions/0014-verify-access.md), [spec](verify-access-spec.md) §6.5). Open the desktop first, as yourself, then run it in Cloud Shell:
+
+```powershell
+if (-not (Test-Path ~/avd-landing-zone)) { git clone https://github.com/nickprignano/avd-landing-zone.git ~/avd-landing-zone }
+Set-Location ~/avd-landing-zone; git checkout -q master; git pull -q --ff-only
+./scripts/ops/Test-AvdUserConnection.ps1 -NamePrefix avdlz -Environment dev
+```
+
+- **What it reads:** `WVDConnections`, `WVDErrors` and `WVDCheckpoints` in the landing zone's Log Analytics workspace, for one user (`-UserPrincipalName`, default: you) in the last `-SinceMinutes` (60). The query is [`scripts/ops/kql/user-connection.kql`](../scripts/ops/kql/user-connection.kql), commented column by column. `-Demo` checks the demo host pool's desktop.
+- **Waiting:** connection logs usually reach Log Analytics 3 to 10 minutes after the connection. The script checks every `-PollSeconds` (60) until `-TimeoutMinutes` (15); `0` checks once.
+- **Results:** *Verified* when a connection reached Connected. *Failed* when AVD logged errors and nothing connected; the codes and messages are shown. *Not verified* when nothing is logged yet, a connection hasn't reached Connected, or the query couldn't run. Only *Verified* exits 0. A missing row is never a pass.
+- **The time it shows** is connection setup (Started to Connected). It isn't AVD Insights' "time to connect", which includes logon, and it isn't the time to a usable desktop. A first connection to a stopped host includes the host starting (Start VM on Connect), so it isn't steady state.
+- **Permissions:** read access to the workspace's data, for example Log Analytics Reader on the management resource group. Owner or Contributor on it also works. A 403 says which role to grant.
+

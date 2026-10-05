@@ -61,9 +61,11 @@ function Get-AvdPortalState {
     warning with its stable Id and Data. Schema: docs/portal/README.md.
   #>
   param(
-    [Parameter(Mandatory)][ValidateSet('predeploy', 'postdeploy', 'demo', 'cleanup')][string] $Stage,
+    [Parameter(Mandatory)][ValidateSet('predeploy', 'postdeploy', 'demo', 'cleanup', 'verify')][string] $Stage,
     [switch] $Fix,
-    [hashtable] $Context = @{}
+    [hashtable] $Context = @{},
+    # A stage-specific outcome (verify: verified, failed, notverified) instead of ready/notready.
+    [string] $Status
   )
   $all = @(Get-AvdCheckResult | ForEach-Object { $_ })
   $trim = { param($t) if ($t -and $t.Length -gt 400) { $t.Substring(0, 400) + '...' } else { $t } }
@@ -79,7 +81,7 @@ function Get-AvdPortalState {
   [ordered]@{
     v        = 1
     stage    = $Stage
-    status   = if ($failed.Count) { 'notready' } else { 'ready' }
+    status   = if ($Status) { $Status } elseif ($failed.Count) { 'notready' } else { 'ready' }
     fix      = [bool]$Fix
     context  = $Context
     counts   = $counts
@@ -1094,6 +1096,72 @@ function Get-AvdLaunchTarget {
   $t = [ordered]@{ workspaceObjectId = $ws.properties.objectId; desktopObjectId = $desktop.properties.objectId; workspace = $ws.name; appGroup = $ag.name }
   if ($TenantId -match $guid) { $t.tenantId = $TenantId }
   $t
+}
+
+function Invoke-AvdLogQuery {
+  <#
+    Runs KQL against a Log Analytics workspace through the Log Analytics query API, with the signed-in
+    user's Entra token: POST https://api.loganalytics.io/v1/workspaces/{customerId}/query, scope
+    https://api.loganalytics.io/.default (route, auth and response shape from the API spec:
+    Azure/azure-rest-api-specs specification/monitor/data-plane/OperationalInsights/stable/v1).
+    Emits the first table's rows as objects. On an error it throws with the HTTP status and the body
+    (lesson 0012).
+  #>
+  param([Parameter(Mandatory)][string] $WorkspaceCustomerId, [Parameter(Mandatory)][string] $Query)
+  $token = (Get-AzAccessToken -ResourceUrl 'https://api.loganalytics.io' -ErrorAction Stop).Token
+  if ($token -is [securestring]) { $token = ConvertFrom-SecureString $token -AsPlainText }
+  $uri = "https://api.loganalytics.io/v1/workspaces/$WorkspaceCustomerId/query"
+  try {
+    $r = Invoke-RestMethod -Uri $uri -Method Post -Headers @{ Authorization = "Bearer $token" } -Body (@{ query = $Query } | ConvertTo-Json -Compress) -ContentType 'application/json' -ErrorAction Stop
+  }
+  catch {
+    $code = if ($_.Exception.Response -and $_.Exception.Response.StatusCode) { [int]$_.Exception.Response.StatusCode } elseif ($_.Exception.Message -match '\b([45]\d\d)\b') { [int]$Matches[1] } else { 0 }
+    $body = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
+    throw "Log Analytics query failed ($code): $($_.Exception.Message) $body".Trim()
+  }
+  $table = @($r.tables | Where-Object { $_ }) | Select-Object -First 1
+  if (-not $table) { return }
+  $names = @($table.columns | ForEach-Object name)
+  foreach ($row in @($table.rows | Where-Object { $null -ne $_ })) {
+    $o = [ordered]@{}
+    for ($i = 0; $i -lt $names.Count; $i++) { $o[$names[$i]] = $row[$i] }
+    [pscustomobject]$o
+  }
+}
+
+function Get-AvdUserConnectionOutcome {
+  <#
+    Classifies the rows of scripts/ops/kql/user-connection.kql (decision 0014). Fails closed: only a
+    connection with a Connected time is verified, and no rows at all is "none", never a pass.
+      verified    at least one connection reached Connected
+      failed      none reached Connected, and there are errors
+      inprogress  rows without Connected and without errors (still connecting, or rows still arriving)
+      none        no rows for the user in the window
+    Dynamic columns (Errors, Checkpoints) arrive from the query API as JSON strings.
+  #>
+  param([object[]] $Row)
+  $fromJson = { param($v) if ($v -is [string] -and $v) { @($v | ConvertFrom-Json -NoEnumerate) | ForEach-Object { $_ } } elseif ($v) { @($v) | ForEach-Object { $_ } } }
+  $connections = @(@($Row | Where-Object { $_ }) | ForEach-Object {
+      $errors = @(& $fromJson $_.Errors | Where-Object { $_ })
+      [pscustomobject][ordered]@{
+        correlationId          = $_.CorrelationId
+        startedAt              = $_.StartedAt
+        connectedAt            = $_.ConnectedAt
+        completedAt            = $_.CompletedAt
+        connectionSetupSeconds = if ("$($_.ConnectionSetupSeconds)" -match '^\d+(\.\d+)?$') { [math]::Round([double]$_.ConnectionSetupSeconds, 1) } else { $null }
+        sessionHost            = $_.SessionHost
+        clientType             = $_.ClientType
+        clientOS               = $_.ClientOS
+        gatewayRegion          = $_.GatewayRegion
+        transportType          = $_.TransportType
+        errors                 = @($errors | ForEach-Object { [ordered]@{ code = $_.code; message = $_.message; source = $_.source; serviceError = $_.serviceError } })
+        checkpoints            = @(& $fromJson $_.Checkpoints | Where-Object { $_ })
+      }
+    })
+  $connected = @($connections | Where-Object { $_.connectedAt })
+  $errored = @($connections | Where-Object { @($_.errors).Count })
+  $status = if ($connected.Count) { 'verified' } elseif ($errored.Count) { 'failed' } elseif ($connections.Count) { 'inprogress' } else { 'none' }
+  [pscustomobject]@{ Status = $status; Connections = $connections; Connected = $connected; Errored = $errored }
 }
 
 function Add-AvdWafResult {

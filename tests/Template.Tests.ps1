@@ -190,3 +190,27 @@ Describe 'Golden image pipeline templates' {
     (($o.parametersJson | ConvertFrom-Json).parameters.buildTimeoutInMinutes.value) | Should -Be 360
   }
 }
+
+Describe 'Connection logs for Verify access (decision 0014)' {
+  # Test-AvdUserConnection.ps1 reads WVDConnections (host pool), WVDErrors and WVDCheckpoints (host pool,
+  # app group, workspace). They arrive only while each diagnostic setting sends allLogs: the AVM default
+  # when logCategoriesAndGroups is left out.
+  BeforeAll {
+    $t = Get-CompiledTemplate 'parameters/dev.bicepparam'
+    $script:cp = Find-Deployment $t 'avdlz-control-plane'
+  }
+  It 'sends every log category of the host pool, app group and workspace to Log Analytics' {
+    $diag = @($cp['properties']['template']['variables']['diagnostics'])
+    $diag.Count | Should -Be 1
+    $diag[0].Keys | Should -Contain 'workspaceResourceId'
+    $diag[0].Keys | Should -Not -Contain 'logCategoriesAndGroups'
+    foreach ($name in 'host-pool', 'app-group', 'workspace') {
+      $d = Find-Deployment $cp['properties']['template'] $name
+      $d['properties']['parameters']['diagnosticSettings']['value'] | Should -Be "[variables('diagnostics')]" -Because $name
+      $setting = @($d['properties']['template']['resources'].Values + $d['properties']['template']['resources'] |
+          Where-Object { $_ -is [System.Collections.IDictionary] -and "$($_['type'])" -like '*/diagnosticSettings' })[0]
+      # The logs are a copy loop over logCategoriesAndGroups, defaulting to allLogs.
+      ($setting['properties'] | ConvertTo-Json -Depth 20 -Compress) | Should -Match "logCategoriesAndGroups'\), createArray\(createObject\('categoryGroup', 'allLogs'\)\)" -Because $name
+    }
+  }
+}

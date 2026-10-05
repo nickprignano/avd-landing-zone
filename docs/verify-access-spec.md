@@ -1,6 +1,6 @@
 # Spec: verify access from the operator's device, and an optional computer-use agent
 
-- **Status:** Proposed. The owner agreed with every proposal in §12 (2026-10-05); Phases A1 and A2 are built. Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B).
+- **Status:** Proposed. The owner agreed with every proposal in §12 (2026-10-05); Track A (Phases A1–A3) is built. Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B).
 - **Date:** 2026-10-05
 - **Scope:** landing zones built from this repo. Track A changes the deployment portal and the ops scripts, not the deployed resources. Track B is a separate, optional deployment, off by default.
 
@@ -175,24 +175,23 @@ https://windows.cloud.microsoft/webclient/avd/<workspaceObjectId>/<desktopObject
 
 **The query call**
 - It goes through Log Analytics' REST query API with the operator's Entra token. The workspace has local auth disabled, and Entra queries are unaffected.
-- **To verify at build:** the exact ARM-proxied or `api.loganalytics.io` route and the API version (Q3). The offline mock needs one stable path.
+- **Route (built, Q3):** `POST https://api.loganalytics.io/v1/workspaces/{customerId}/query` with a token for `https://api.loganalytics.io/.default`, confirmed from the API spec (§11 A11). The workspace's `customerId` comes from ARM.
 - The operator needs read access to the workspace. Owner or Contributor on the management resource group covers it. Otherwise a failure says which role to grant.
 
 **State line: `stage: "verify"`** with `status` from the table above, and:
 - `context`: `user`, `windowMinutes`, `hostPool`, `waitedSeconds`
-- `data.connections[]`: `correlationId`, `sessionHost`, `clientType`, `clientOS`, `gatewayRegion`, `transportType`, `startedAt`, `connectedAt`, `connectionSetupSeconds`, `coldStart`, `errors[]`, `checkpoints[]`
-- `failures`/`warnings` with ids: `connect-errors`, `no-connection`, `query-failed`, `cold-start`
+- `context.connections[]` (the latest 5): `correlationId`, `sessionHost`, `clientType`, `clientOS`, `gatewayRegion`, `transportType`, `startedAt`, `connectedAt`, `completedAt`, `connectionSetupSeconds`, `errors[]`, `checkpoints[]`
+- `failures`/`warnings` with ids: `connect-errors`, `no-connection`, `in-progress`, `query-failed`, `no-landing-zone`
 
-`coldStart` is true when the host's power state changed in the window, read from the host pool's session host `lastHeartBeat` or a Start VM on Connect checkpoint. Which signal is reliable is to be confirmed at build. Until then the field is omitted, and the guidance always says "the first connection may include boot".
+**Cold start (built as text only):** no reliable signal was confirmed for "this connection started a stopped host", so there is no `coldStart` field. The script and the portal always say a first connection to a stopped host includes it starting. A field can follow once a real run shows which checkpoint marks it.
 
 **`portal-core.js`**
 - `extractStates` already reads any stage. `analyze` gains a `verify` branch:
 
 | Result | Next action shown |
 |---|---|
-| `verified` | Done; shows connection setup time with its definition, the client type, and a "not steady state" note when `coldStart` |
-| `failed`, known `CodeSymbolic` | Specific guidance (table `CONNECT_ERRORS`, filled from real fixtures: user not assigned, no available host, host not healthy, sign-in or consent declined) and the post-deployment check command |
-| `failed`, unknown code | The code and message, the post-deployment check, Report a problem |
+| `verified` | Done; shows connection setup time with its definition, the client type, the not-steady-state note, and other failed attempts |
+| `failed` | The code and message as logged. With `serviceError`, retry and check Service Health; otherwise the post-deployment check, then check again. Code-specific guidance (`CodeSymbolic` → advice) is added only from real fixtures: no error code was confirmed in the docs this session could read |
 | `notverified`, no rows | "Did the sign-in complete? Rerun to wait longer", the same command with a longer `-TimeoutMinutes` |
 | `notverified`, `query-failed` | The HTTP status and the role to grant |
 
@@ -440,7 +439,7 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 | A8 | AVM host pool, app group and workspace default to `categoryGroup: allLogs` | Verified (compiled `main.bicep`, AVM source) | `bicep build bicep/main.bicep` |
 | A9 | Resource logs usually 3–10 minutes end to end; collection stage 30 s–20 min | Verified | [Ingestion time](https://learn.microsoft.com/azure/azure-monitor/logs/data-ingestion-time) |
 | A10 | AVD Insights "time to connect" includes logon, up to the desktop being ready | Summary | [Insights glossary](https://learn.microsoft.com/azure/virtual-desktop/insights-glossary) |
-| A11 | Log Analytics query REST route and API version for the script | **Not verified** (Q3) | — |
+| A11 | Log Analytics query route `POST {endpoint}/v1/workspaces/{workspaceId}/query`, default endpoint `https://api.loganalytics.io`, scope `https://api.loganalytics.io/.default`, response `tables[].columns/rows` | Verified (API spec) | [Azure/azure-rest-api-specs: monitor/data-plane/OperationalInsights](https://github.com/Azure/azure-rest-api-specs/tree/main/specification/monitor/data-plane/OperationalInsights) |
 | B1 | Agent Service computer use tool: `computer-use-preview` only, 3 regions, limited access, preview | Verified (doc source, ms.date 2026-08-21) | [Agent tool](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/computer-use) |
 | B2 | Responses API `computer` tool with `gpt-5.4`, registration at aka.ms/OAI/gpt54access, 1440x900/1600x900, scope `https://ai.azure.com/.default`, endpoint `/openai/v1/` | Verified (doc source, ms.date 2026-03-09) | [Responses API computer use](https://learn.microsoft.com/azure/foundry-classic/openai/how-to/computer-use) |
 | B3 | Models with "Computer use" capability; region and SKU matrix | Verified (doc source, 2026-09-21 / 2026-09-03) | [Models](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure), [regions](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure-region-availability) |

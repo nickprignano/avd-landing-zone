@@ -242,7 +242,8 @@ test('portal commands only use parameters the scripts define', () => {
     'Test-AvdLandingZoneReadiness.ps1': psParams('scripts/ops/Test-AvdLandingZoneReadiness.ps1'),
     'Deploy-AvdDemo.ps1': psParams('scripts/ops/Deploy-AvdDemo.ps1'),
     'Remove-AvdDemo.ps1': psParams('scripts/ops/Remove-AvdDemo.ps1'),
-    'Invoke-AvdPowerAction.ps1': psParams('scripts/automation/Invoke-AvdPowerAction.ps1')
+    'Invoke-AvdPowerAction.ps1': psParams('scripts/automation/Invoke-AvdPowerAction.ps1'),
+    'Test-AvdUserConnection.ps1': psParams('scripts/ops/Test-AvdUserConnection.ps1')
   };
   const cfg = { ...P.DEFAULTS, testUserUpn: 'alex@contoso.com' };
   const commands = [
@@ -253,6 +254,7 @@ test('portal commands only use parameters the scripts define', () => {
   const sizedCfg = { ...cfg, sizing: P.toSizing(P.computePool({ users: 120, workload: 'heavy', vmSize: '', hostCount: 'auto' }, 'prod')) };
   commands.push(P.commands.predeploy(sizedCfg, true), P.commands.deploy(sizedCfg), P.commands.postdeploy(sizedCfg, true));
   commands.push(P.commands.power(cfg, 'Resume'), P.commands.power(cfg, 'Lock'));
+  commands.push(P.commands.verify(cfg), P.commands.verify(cfg, { user: 'alex@contoso.com', demo: true, timeout: 30 }));
   let checked = 0;
   for (const c of commands) {
     const line = last(c);
@@ -606,4 +608,50 @@ test('page: the launch link opens in a new tab without a referrer and defaults t
   const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
   assert.match(html, /<a id="launch-link"[^>]*href="https:\/\/windows\.cloud\.microsoft"[^>]*target="_blank" rel="noopener noreferrer"/);
   assert.match(html, /P\.launchUrl\(/);
+});
+
+// ---------------------------------------------------------------- verify access: telemetry (decision 0014)
+test('state: access verified -> the connection, its setup time with what it means, and other failed attempts', () => {
+  const r = analyze('state-verify-verified.txt');
+  assert.equal(r.stage, 'verify');
+  assert.equal(r.status, 'verified');
+  assert.equal(r.step, 'verify');
+  assert.match(r.headline, /^Access check: Verified/);
+  assert.match(r.actions[0].why, /reached Connected .*avdlzdsh-001.*HTML client on Windows 11/);
+  assert.match(r.actions[0].why, /12\.4 s \(Started to Connected\)\. That is connection setup, not the time to a usable desktop/);
+  assert.match(r.actions[0].why, /doesn't prove the desktop is usable/);
+  assert.equal(r.actions[1].title, 'Another attempt failed');
+});
+
+test('state: connection failed -> the logged error, the post-deployment check, then check again', () => {
+  const r = analyze('state-verify-failed.txt');
+  assert.equal(r.status, 'failed');
+  assert.match(r.actions[0].why, /ExampleCodeForTests: Example failure message/);
+  assert.match(last(r.actions[0].command), /Test-AvdLandingZoneReadiness\.ps1 -NamePrefix avdlz -Environment dev$/);
+  assert.match(last(r.actions[1].command), /Test-AvdUserConnection\.ps1 -NamePrefix avdlz -Environment dev -UserPrincipalName 'admin@contoso\.com'$/);
+  assertSelfContained(r);
+});
+
+test('state: not verified is never a pass: no rows and in progress -> wait longer; a refused query -> the role', () => {
+  for (const [name, title] of [['none', /^No connection found yet/], ['inprogress', /hasn't reached Connected/]]) {
+    const r = analyze(`state-verify-${name}.txt`);
+    assert.equal(r.status, 'notverified', name);
+    assert.match(r.headline, /Not verified/);
+    assert.match(r.actions[0].title, title);
+    assert.match(r.actions[0].why, /This is not a pass/);
+    assert.match(last(r.actions[0].command), /Test-AvdUserConnection\.ps1 .* -TimeoutMinutes 30$/);
+    assertSelfContained(r);
+  }
+  const f = analyze('state-verify-forbidden.txt');
+  assert.equal(f.status, 'notverified');
+  assert.match(f.actions[0].why, /can't read the Log Analytics workspace's data.*Log Analytics Reader on rg-avdlz-dev-management/);
+  assert.match(last(f.actions[1].command), /Test-AvdUserConnection\.ps1/);
+});
+
+test('verify: the step offers the telemetry check, and a pasted run of it is recognized', () => {
+  const actions = P.actionsForStep('verify', {});
+  assert.match(last(actions[1].command), /^\.\/scripts\/ops\/Test-AvdUserConnection\.ps1 -NamePrefix avdlz -Environment dev$/);
+  assert.match(last(P.commands.verify(P.DEFAULTS, { demo: true, user: "o'neil@contoso.com", timeout: 30 })), / -UserPrincipalName 'o''neil@contoso\.com' -Demo -TimeoutMinutes 30$/);
+  const r = P.analyze('PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdUserConnection.ps1 -NamePrefix avdlz -Environment dev\nThe term \'./scripts/ops/Test-AvdUserConnection.ps1\' is not recognized as a name of a cmdlet', {}, { currentStep: 'verify' });
+  assert.equal(r.step, 'verify');
 });
