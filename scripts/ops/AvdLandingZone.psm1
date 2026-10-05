@@ -61,9 +61,11 @@ function Get-AvdPortalState {
     warning with its stable Id and Data. Schema: docs/portal/README.md.
   #>
   param(
-    [Parameter(Mandatory)][ValidateSet('predeploy', 'postdeploy', 'demo', 'cleanup')][string] $Stage,
+    [Parameter(Mandatory)][ValidateSet('predeploy', 'postdeploy', 'demo', 'cleanup', 'verify')][string] $Stage,
     [switch] $Fix,
-    [hashtable] $Context = @{}
+    [hashtable] $Context = @{},
+    # A stage-specific outcome (verify: verified, failed, notverified) instead of ready/notready.
+    [string] $Status
   )
   $all = @(Get-AvdCheckResult | ForEach-Object { $_ })
   $trim = { param($t) if ($t -and $t.Length -gt 400) { $t.Substring(0, 400) + '...' } else { $t } }
@@ -79,7 +81,7 @@ function Get-AvdPortalState {
   [ordered]@{
     v        = 1
     stage    = $Stage
-    status   = if ($failed.Count) { 'notready' } else { 'ready' }
+    status   = if ($Status) { $Status } elseif ($failed.Count) { 'notready' } else { 'ready' }
     fix      = [bool]$Fix
     context  = $Context
     counts   = $counts
@@ -1065,6 +1067,101 @@ function Get-AvdArmList {
     $r.value
     $next = if ($r.nextLink) { ([uri]$r.nextLink).PathAndQuery } else { $null }
   }
+}
+
+function Get-AvdLaunchTarget {
+  <#
+    What the web client's direct launch link needs (decision 0014): the object IDs of the desktop in a
+    resource group's desktop application group and of the workspace that publishes it, read from
+    properties.objectId through REST (the Get-AzWvd* cmdlet help doesn't document an ObjectId property).
+    Returns $null when either ID is missing or not a GUID: the portal then links to the plain web client.
+  #>
+  param([Parameter(Mandatory)][string] $ResourceGroupId, [string] $TenantId)
+  $api = '2024-04-03'
+  $guid = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
+  try {
+    $ag = @(Get-AvdArmList -Path "$ResourceGroupId/providers/Microsoft.DesktopVirtualization/applicationGroups?api-version=$api" |
+        Where-Object { $_.properties.applicationGroupType -eq 'Desktop' }) | Select-Object -First 1
+    if (-not $ag) { return $null }
+    $desktop = @(Get-AvdArmList -Path "$($ag.id)/desktops?api-version=$api") | Select-Object -First 1
+    # The workspace that references the app group (ARM leaves out an empty reference list, lesson 0021).
+    $ws = @(Get-AvdArmList -Path "$ResourceGroupId/providers/Microsoft.DesktopVirtualization/workspaces?api-version=$api" |
+        Where-Object { @($_.properties.applicationGroupReferences | Where-Object { $_ -and $_ -eq $ag.id }).Count }) | Select-Object -First 1
+  }
+  catch {
+    Write-Host "  Launch link: couldn't read the workspace and desktop: $($_.Exception.Message)" -ForegroundColor DarkGray
+    return $null
+  }
+  if (-not $ws -or -not $desktop -or "$($ws.properties.objectId)" -notmatch $guid -or "$($desktop.properties.objectId)" -notmatch $guid) { return $null }
+  $t = [ordered]@{ workspaceObjectId = $ws.properties.objectId; desktopObjectId = $desktop.properties.objectId; workspace = $ws.name; appGroup = $ag.name }
+  if ($TenantId -match $guid) { $t.tenantId = $TenantId }
+  $t
+}
+
+function Invoke-AvdLogQuery {
+  <#
+    Runs KQL against a Log Analytics workspace through the Log Analytics query API, with the signed-in
+    user's Entra token: POST https://api.loganalytics.io/v1/workspaces/{customerId}/query, scope
+    https://api.loganalytics.io/.default (route, auth and response shape from the API spec:
+    Azure/azure-rest-api-specs specification/monitor/data-plane/OperationalInsights/stable/v1).
+    Emits the first table's rows as objects. On an error it throws with the HTTP status and the body
+    (lesson 0012).
+  #>
+  param([Parameter(Mandatory)][string] $WorkspaceCustomerId, [Parameter(Mandatory)][string] $Query)
+  $token = (Get-AzAccessToken -ResourceUrl 'https://api.loganalytics.io' -ErrorAction Stop).Token
+  if ($token -is [securestring]) { $token = ConvertFrom-SecureString $token -AsPlainText }
+  $uri = "https://api.loganalytics.io/v1/workspaces/$WorkspaceCustomerId/query"
+  try {
+    $r = Invoke-RestMethod -Uri $uri -Method Post -Headers @{ Authorization = "Bearer $token" } -Body (@{ query = $Query } | ConvertTo-Json -Compress) -ContentType 'application/json' -ErrorAction Stop
+  }
+  catch {
+    $code = if ($_.Exception.Response -and $_.Exception.Response.StatusCode) { [int]$_.Exception.Response.StatusCode } elseif ($_.Exception.Message -match '\b([45]\d\d)\b') { [int]$Matches[1] } else { 0 }
+    $body = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
+    throw "Log Analytics query failed ($code): $($_.Exception.Message) $body".Trim()
+  }
+  $table = @($r.tables | Where-Object { $_ }) | Select-Object -First 1
+  if (-not $table) { return }
+  $names = @($table.columns | ForEach-Object name)
+  foreach ($row in @($table.rows | Where-Object { $null -ne $_ })) {
+    $o = [ordered]@{}
+    for ($i = 0; $i -lt $names.Count; $i++) { $o[$names[$i]] = $row[$i] }
+    [pscustomobject]$o
+  }
+}
+
+function Get-AvdUserConnectionOutcome {
+  <#
+    Classifies the rows of scripts/ops/kql/user-connection.kql (decision 0014). Fails closed: only a
+    connection with a Connected time is verified, and no rows at all is "none", never a pass.
+      verified    at least one connection reached Connected
+      failed      none reached Connected, and there are errors
+      inprogress  rows without Connected and without errors (still connecting, or rows still arriving)
+      none        no rows for the user in the window
+    Dynamic columns (Errors, Checkpoints) arrive from the query API as JSON strings.
+  #>
+  param([object[]] $Row)
+  $fromJson = { param($v) if ($v -is [string] -and $v) { @($v | ConvertFrom-Json -NoEnumerate) | ForEach-Object { $_ } } elseif ($v) { @($v) | ForEach-Object { $_ } } }
+  $connections = @(@($Row | Where-Object { $_ }) | ForEach-Object {
+      $errors = @(& $fromJson $_.Errors | Where-Object { $_ })
+      [pscustomobject][ordered]@{
+        correlationId          = $_.CorrelationId
+        startedAt              = $_.StartedAt
+        connectedAt            = $_.ConnectedAt
+        completedAt            = $_.CompletedAt
+        connectionSetupSeconds = if ("$($_.ConnectionSetupSeconds)" -match '^\d+(\.\d+)?$') { [math]::Round([double]$_.ConnectionSetupSeconds, 1) } else { $null }
+        sessionHost            = $_.SessionHost
+        clientType             = $_.ClientType
+        clientOS               = $_.ClientOS
+        gatewayRegion          = $_.GatewayRegion
+        transportType          = $_.TransportType
+        errors                 = @($errors | ForEach-Object { [ordered]@{ code = $_.code; message = $_.message; source = $_.source; serviceError = $_.serviceError } })
+        checkpoints            = @(& $fromJson $_.Checkpoints | Where-Object { $_ })
+      }
+    })
+  $connected = @($connections | Where-Object { $_.connectedAt })
+  $errored = @($connections | Where-Object { @($_.errors).Count })
+  $status = if ($connected.Count) { 'verified' } elseif ($errored.Count) { 'failed' } elseif ($connections.Count) { 'inprogress' } else { 'none' }
+  [pscustomobject]@{ Status = $status; Connections = $connections; Connected = $connected; Errored = $errored }
 }
 
 function Add-AvdWafResult {

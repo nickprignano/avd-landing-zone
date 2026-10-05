@@ -52,6 +52,7 @@
   button.secondary { background: transparent; color: var(--accent); }
   button.linkbtn { background: none; border: 0; padding: 4px 0; color: var(--accent); text-decoration: underline; font-weight: 600; }
   button:disabled { opacity: .5; cursor: default; }
+  a.btnlink { display: inline-block; font-weight: 600; border: 1px solid var(--accent); border-radius: 6px; padding: 7px 14px; background: var(--accent); color: var(--accent-text); text-decoration: none; }
   .status, .muted { color: var(--muted); }
   .status { font-size: .9rem; }
   .hidden { display: none !important; }
@@ -245,6 +246,39 @@
       <h2><span class="n"></span>Sign in</h2>
       <div class="slot"></div>
     </section>
+    <section class="slide" id="slide-verify" data-step="verify" aria-label="Verify access">
+      <h2><span class="n"></span>Verify access <span class="muted" style="font-weight:400">· <span id="reach-summary">not checked</span></span></h2>
+      <p class="status">Checks access to the desktop <strong>from this device and network</strong>, signed in as yourself. Run it where people will connect from. Each check says what it proves and what it doesn't.</p>
+      <div class="pool">
+        <h3>Can this device reach AVD?</h3>
+        <div class="row">
+          <button id="reach-run">Check reachability</button>
+          <span class="status" id="reach-status" role="status">A few seconds: each host gets a warm-up request and 5 timed ones. Nothing you paste or measure leaves this browser.</span>
+        </div>
+        <div id="reach-results" class="hidden" style="margin-top:12px">
+          <p id="reach-headline" style="margin:0 0 4px"><strong></strong></p>
+          <p class="status" id="reach-guidance" style="margin:0 0 8px"></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Host</th><th>Used for</th><th class="num">Median</th><th>Result</th></tr></thead>
+              <tbody id="reach-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <p class="status" id="reach-limits" style="margin:8px 0 0"></p>
+      </div>
+      <div class="pool">
+        <h3>Open the desktop</h3>
+        <p class="status" id="launch-status" style="margin:0 0 8px"></p>
+        <div class="row">
+          <a id="launch-link" class="btnlink" href="https://windows.cloud.microsoft" target="_blank" rel="noopener noreferrer">Open the web client</a>
+          <label id="launch-tenant-label" class="hidden"><input type="checkbox" id="launch-tenant"> Add the tenant (for a guest account)</label>
+          <label id="launch-hint-label" class="hidden"><input type="checkbox" id="launch-hint"> Prefill the sign-in with <span id="launch-hint-upn"></span></label>
+        </div>
+        <p class="status" style="margin:8px 0 0">Sign in as a member of the users group. Expect a one-time prompt to allow the remote desktop connection the first time you reach each session host (Microsoft Entra single sign-on): choose Yes. A stopped host starts on the first connection, which then takes a few minutes and isn't representative. To test the Windows App and its RDP path, open the Windows App and choose the same desktop. There's no direct Windows App link: its parameters aren't confirmed yet.</p>
+      </div>
+      <div class="slot"></div>
+    </section>
   </div>
   <nav class="stepnav" aria-label="Step navigation">
     <button type="button" class="secondary" id="prev-step">&larr; Back</button>
@@ -309,7 +343,7 @@
   $('repo-link').href = repoUrl;
   $('issues-link').href = repoUrl + '/issues';
 
-  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null), power: load('power', null), hoursWorkedPerWeek: load('hoursWorked', 50) });
+  var cfg = Object.assign({}, P.DEFAULTS, load('config', {}), { repoUrl: repoUrl, sizing: load('sizing', null), power: load('power', null), hoursWorkedPerWeek: load('hoursWorked', 50), launch: P.launchTarget(load('launch', null)) });
   var step = load('step', null);
   // Furthest step reached, by id: later steps stay hidden until the deployment gets there. (Saved as an
   // index before the Cost step existed; those indexes are read against the old step list.)
@@ -328,6 +362,9 @@
     if (patch && patch.sizing && patch.sizing.hosts) { cfg.sizing = patch.sizing; save('sizing', cfg.sizing); }
     // ... and which power settings it priced.
     if (patch && patch.power && patch.power.autoShutdownTime) { cfg.power = { startVmOnConnect: patch.power.startVmOnConnect !== false, autoShutdownTime: patch.power.autoShutdownTime }; save('power', cfg.power); }
+    // ... and, after the post-deployment setup or the demo, the desktop to launch (decision 0014).
+    var launch = patch && P.launchTarget(patch.launch);
+    if (launch) { cfg.launch = launch; save('launch', launch); }
     var keep = {}; FIELDS.forEach(function (k) { keep[k] = cfg[k]; }); save('config', keep);
     FIELDS.forEach(function (k) { var el = $(k); if (el && el.value !== cfg[k]) el.value = cfg[k] || ''; });
     $('region-summary').textContent = cfg.location + (ranked && ranked.length ? (ranked[0] === cfg.location ? ' (closest measured)' : '') : ' (not measured yet)');
@@ -473,12 +510,12 @@
   }
 
   function render() {
-    renderSteps(); renderSlides();
+    renderSteps(); renderSlides(); renderLaunch();
     var chip = $('next-chip'), head = $('next-headline');
     if (lastAnalysis) {
       var r = lastAnalysis;
       $('next-title').textContent = r.recognized ? 'What to do next' : 'Not recognized';
-      var good = /^(ready|succeeded|done|resumed|stopped)$/.test(r.status || '');
+      var good = /^(ready|succeeded|done|resumed|stopped|verified)$/.test(r.status || '');
       chip.textContent = r.status ? (good ? 'Done' : r.status === 'started' ? 'Running' : 'Action needed') : 'Action needed';
       chip.className = 'chip ' + (good ? 'good' : r.status === 'started' ? 'ok' : 'poor');
       head.textContent = r.headline; head.classList.remove('hidden');
@@ -516,8 +553,9 @@
   $('clear-paste').addEventListener('click', function () { $('paste').value = ''; $('paste-status').textContent = ''; lastAnalysis = null; render(); refreshReport(true); });
   $('reset').addEventListener('click', function () {
     try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
-    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null, power: null, hoursWorkedPerWeek: 50 }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
+    cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null, power: null, hoursWorkedPerWeek: 50, launch: null }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
     pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)]; estimate = null; renderPools(); renderCost();
+    reach = null; $('reach-results').classList.add('hidden'); renderReachability();
     $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render(); showStep();
   });
 
@@ -717,28 +755,26 @@
   var SAMPLES = 5, TIMEOUT_MS = 4000, CONCURRENCY = 3, TOP = 5;
   var latency = [], expanded = false;
 
-  function timeOnce(region) {
+  // https://<host>/ with a cache-busting query; the latency test times each region's endpoint, the
+  // reachability probe the AVD client hosts.
+  function timeOnce(host) {
     var ctrl = new AbortController(), timer = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
-    var url = 'https://' + region + '.api.cognitive.microsoft.com/?avdlz=' + Date.now() + Math.random().toString(36).slice(2);
+    var url = 'https://' + host + '/?avdlz=' + Date.now() + Math.random().toString(36).slice(2);
     var t0 = performance.now();
-    // no-cors: the response is opaque, but only the elapsed time is needed.
+    // no-cors: the response is opaque, but only the elapsed time is needed. A rejection means DNS,
+    // TLS, a block or the timeout.
     return fetch(url, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctrl.signal })
       .then(function () { return performance.now() - t0; }).finally(function () { clearTimeout(timer); });
   }
-  function measure(region) {
+  function measure(host) {
     // The warm-up pays for DNS, TCP and TLS; the timed requests reuse the connection.
-    return timeOnce(region).then(function () {
+    return timeOnce(host).then(function () {
       var times = [], chain = Promise.resolve();
-      for (var i = 0; i < SAMPLES; i++) chain = chain.then(function () { return timeOnce(region).then(function (t) { times.push(t); }); });
+      for (var i = 0; i < SAMPLES; i++) chain = chain.then(function () { return timeOnce(host).then(function (t) { times.push(t); }); });
       return chain.then(function () { times.sort(function (a, b) { return a - b; }); return times[Math.floor(times.length / 2)]; });
     });
   }
-  function rating(ms) {
-    if (ms === null) return ['No answer', 'muted'];
-    if (ms < 100) return ['Good', 'good'];
-    if (ms <= 150) return ['Usable', 'ok'];
-    return ['Sluggish', 'poor'];
-  }
+  function rating(ms) { var r = P.rateLatency(ms); return [r.label, r.cls]; }
   function runLatency() {
     var geos = Array.prototype.map.call(document.querySelectorAll('#geos input:checked'), function (c) { return c.value; });
     var todo = REGIONS.filter(function (r) { return geos.indexOf(r[2]) >= 0; });
@@ -750,7 +786,7 @@
     function worker() {
       if (next >= todo.length) return Promise.resolve();
       var r = todo[next++];
-      return measure(r[0]).then(
+      return measure(r[0] + '.api.cognitive.microsoft.com').then(
         function (m) { latency.push({ name: r[0], display: r[1], geo: r[2], median: m }); },
         function () { latency.push({ name: r[0], display: r[1], geo: r[2], median: null }); }
       ).then(function () { bar.value = ++done; }).then(worker);
@@ -804,10 +840,69 @@
   $('run').addEventListener('click', runLatency);
   $('more').addEventListener('click', function () { expanded = !expanded; renderLatency(); });
 
+  // ---------------------------------------------------------------- verify access: reachability (decision 0014)
+  // Same method as the latency test; portal-core.js classifies the result. Only a summary is kept.
+  var reach = null;
+  function runReachability() {
+    $('reach-run').disabled = true;
+    $('reach-status').textContent = 'Checking ' + P.REACHABILITY_HOSTS.length + ' hosts...';
+    var results = [];
+    Promise.all(P.REACHABILITY_HOSTS.map(function (h) {
+      return measure(h.host).then(function (m) { results.push({ host: h.host, median: m }); }, function () { results.push({ host: h.host, median: null }); });
+    })).then(function () {
+      reach = P.classifyReachability(results);
+      save('reachability', { status: reach.status, checkedAt: new Date().toISOString() });
+      $('reach-run').disabled = false; $('reach-run').textContent = 'Check again';
+      $('reach-status').textContent = 'Checked just now.';
+      renderReachability();
+    });
+  }
+  function renderReachability() {
+    var r = reach || P.classifyReachability([]), last = load('reachability', null);
+    var label = { reachable: 'reachable', partial: 'partly reachable', blocked: 'blocked', unknown: 'not checked' };
+    $('reach-summary').textContent = reach ? label[r.status] : (last && label[last.status] ? label[last.status] + ' (last check)' : 'not checked');
+    $('reach-limits').textContent = r.limits;
+    if (!reach) return;
+    $('reach-results').classList.remove('hidden');
+    var strong = $('reach-headline').querySelector('strong');
+    strong.textContent = r.headline;
+    strong.className = r.status === 'reachable' ? 'good' : r.status === 'partial' ? 'ok' : 'poor';
+    $('reach-guidance').textContent = r.guidance;
+    var tbody = $('reach-rows'); tbody.textContent = '';
+    r.hosts.forEach(function (h) {
+      var tr = document.createElement('tr');
+      [h.host, h.purpose, h.median === null ? '–' : Math.round(h.median) + ' ms', h.reached ? 'Reached' : h.reached === false ? 'No answer' : 'Not tested'].forEach(function (t, c) {
+        var td = document.createElement('td'); td.textContent = t;
+        if (c === 1) td.style.whiteSpace = 'normal';
+        if (c === 2) td.className = 'num';
+        if (c === 3) td.className = h.reached ? 'good' : 'poor';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+  }
+  $('reach-run').addEventListener('click', runReachability);
+
+  // ---------------------------------------------------------------- verify access: launch link (decision 0014)
+  function renderLaunch() {
+    var t = cfg.launch, hint = cfg.testUserUpn && $('launch-hint').checked ? cfg.testUserUpn : '';
+    var url = P.launchUrl(t, { tenant: $('launch-tenant').checked, loginHint: hint });
+    $('launch-link').href = url || 'https://windows.cloud.microsoft';
+    $('launch-link').textContent = url ? 'Open the desktop' : 'Open the web client';
+    $('launch-status').textContent = url
+      ? 'Opens the Desktop' + (t.workspace ? ' in workspace ' + t.workspace : '') + ' directly in the web client, from the IDs the last post-deployment or demo run reported.'
+      : 'Paste the post-deployment setup\'s output to get a direct link to this landing zone\'s desktop. Until then, this opens the web client, where you choose the desktop.';
+    $('launch-tenant-label').classList.toggle('hidden', !(t && t.tenantId));
+    $('launch-hint-label').classList.toggle('hidden', !cfg.testUserUpn);
+    $('launch-hint-upn').textContent = cfg.testUserUpn || '';
+  }
+  $('launch-tenant').addEventListener('change', renderLaunch);
+  $('launch-hint').addEventListener('change', renderLaunch);
+
   // ---------------------------------------------------------------- start
   if (/^#(region|size|cost)$/.test(location.hash) && stepIndex(location.hash.slice(1)) <= reached) step = location.hash.slice(1);
   setConfig({});
-  renderPools(); renderCost();
+  renderPools(); renderCost(); renderReachability();
   render(); showStep('instant');
 })();
 </script>

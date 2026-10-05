@@ -1,0 +1,59 @@
+// Connections by one user to one landing zone's AVD control plane, in a recent window.
+// Run by scripts/ops/Test-AvdUserConnection.ps1 (decision 0014); one row per connection (CorrelationId).
+//
+// Placeholders, filled by the script (values are validated there, then quoted):
+//   {{UserPrincipalName}}  the user, matched case-insensitively against UserName
+//   {{ResourceGroupId}}    the control plane resource group (host pool, app group, workspace), matched
+//                          as a prefix of _ResourceId so errors from the feed and app group count too
+//   {{WindowMinutes}}      how far back to look
+//
+// What each column means:
+//   StartedAt, ConnectedAt, CompletedAt
+//       TimeGenerated of the WVDConnections rows with that State. The documented states are Started,
+//       Connected and Completed; there is no Failed state. A connection that fails shows up as
+//       WVDErrors rows on the same CorrelationId, so failure is read from Errors, never from a missing row.
+//   ConnectionSetupSeconds = ConnectedAt - StartedAt
+//       From the service starting the connection to the session being connected. This is connection
+//       setup time. It is NOT AVD Insights' "time to connect", which runs until the desktop is loaded
+//       and ready (logon included), and it is NOT time to a usable desktop. A first connection to a
+//       stopped host can include the host starting (Start VM on Connect), so it isn't steady state.
+//   SessionHost, ClientType, ClientOS, GatewayRegion, TransportType
+//       From the connection's WVDConnections rows (the first non-empty value).
+//   Errors       WVDErrors on the CorrelationId: CodeSymbolic, Message, Source, ServiceError (up to 20).
+//   Checkpoints  WVDCheckpoints names on the CorrelationId (up to 50).
+//   FirstErrorAt When the first error was logged: errors with no WVDConnections rows (for example,
+//                before the service chose a host) still produce a row.
+//
+// Not run against a real workspace yet: verify on the first real run (verify-access-spec.md §11).
+let upn = '{{UserPrincipalName}}';
+let rg = '{{ResourceGroupId}}';
+let window = {{WindowMinutes}}m;
+let conns = WVDConnections
+    | where TimeGenerated > ago(window) and UserName =~ upn and _ResourceId startswith rg
+    | summarize StartedAt = minif(TimeGenerated, State == 'Started'),
+        ConnectedAt = minif(TimeGenerated, State == 'Connected'),
+        CompletedAt = maxif(TimeGenerated, State == 'Completed'),
+        SessionHost = take_anyif(SessionHostName, isnotempty(SessionHostName)),
+        ClientType = take_anyif(ClientType, isnotempty(ClientType)),
+        ClientOS = take_anyif(ClientOS, isnotempty(ClientOS)),
+        GatewayRegion = take_anyif(GatewayRegion, isnotempty(GatewayRegion)),
+        TransportType = take_anyif(TransportType, isnotempty(TransportType))
+        by CorrelationId;
+let errs = WVDErrors
+    | where TimeGenerated > ago(window) and UserName =~ upn and _ResourceId startswith rg
+    | summarize Errors = make_list(bag_pack('code', CodeSymbolic, 'message', Message, 'source', Source, 'serviceError', ServiceError), 20),
+        FirstErrorAt = min(TimeGenerated)
+        by ErrCorrelationId = CorrelationId;
+let cps = WVDCheckpoints
+    | where TimeGenerated > ago(window) and UserName =~ upn and _ResourceId startswith rg
+    | order by TimeGenerated asc
+    | summarize Checkpoints = make_list(Name, 50) by CpCorrelationId = CorrelationId;
+conns
+| join kind=fullouter errs on $left.CorrelationId == $right.ErrCorrelationId
+| extend CorrelationId = coalesce(CorrelationId, ErrCorrelationId)
+| join kind=leftouter cps on $left.CorrelationId == $right.CpCorrelationId
+| extend ConnectionSetupSeconds = iff(isnotnull(StartedAt) and isnotnull(ConnectedAt), (ConnectedAt - StartedAt) / 1s, real(null))
+| project CorrelationId, StartedAt, ConnectedAt, CompletedAt, ConnectionSetupSeconds, SessionHost, ClientType, ClientOS,
+    GatewayRegion, TransportType, Errors, Checkpoints, FirstErrorAt
+| order by coalesce(StartedAt, FirstErrorAt) desc
+| take 20

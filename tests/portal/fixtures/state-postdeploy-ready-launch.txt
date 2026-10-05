@@ -1,0 +1,5 @@
+PS /home/admin/avd-landing-zone> (command)
+...
+Deployment portal: paste this output into https://nickprignano.github.io/avd-landing-zone/portal/ for the next step.
+<<<AVDLZ-STATE {"v":1,"stage":"postdeploy","status":"ready","fix":true,"context":{"wellArchitected":false,"environment":"dev","namePrefix":"avdlz","launch":{"workspaceObjectId":"a0a0a0a0-0000-4000-8000-000000000001","desktopObjectId":"b0b0b0b0-0000-4000-8000-000000000001","workspace":"vdws-avdlz-dev","appGroup":"vdag-avdlz-dev-desktop","tenantId":"55555555-5555-5555-5555-555555555555"}},"counts":{"pass":40,"fail":0,"warn":1,"fixed":5,"skip":0},"failures":[],"warnings":[{"id":"","area":"Step 2: Conditional Access","check":"Policy 'Admins MFA' excludes the storage app","detail":"Requires MFA for all apps for specific users/roles; review whether AVD users are in scope.","remediation":"Exclude the storage app if AVD users are covered."}]} AVDLZ-STATE>>>
+PS /home/admin/avd-landing-zone>

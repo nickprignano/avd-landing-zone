@@ -242,7 +242,8 @@ test('portal commands only use parameters the scripts define', () => {
     'Test-AvdLandingZoneReadiness.ps1': psParams('scripts/ops/Test-AvdLandingZoneReadiness.ps1'),
     'Deploy-AvdDemo.ps1': psParams('scripts/ops/Deploy-AvdDemo.ps1'),
     'Remove-AvdDemo.ps1': psParams('scripts/ops/Remove-AvdDemo.ps1'),
-    'Invoke-AvdPowerAction.ps1': psParams('scripts/automation/Invoke-AvdPowerAction.ps1')
+    'Invoke-AvdPowerAction.ps1': psParams('scripts/automation/Invoke-AvdPowerAction.ps1'),
+    'Test-AvdUserConnection.ps1': psParams('scripts/ops/Test-AvdUserConnection.ps1')
   };
   const cfg = { ...P.DEFAULTS, testUserUpn: 'alex@contoso.com' };
   const commands = [
@@ -253,6 +254,7 @@ test('portal commands only use parameters the scripts define', () => {
   const sizedCfg = { ...cfg, sizing: P.toSizing(P.computePool({ users: 120, workload: 'heavy', vmSize: '', hostCount: 'auto' }, 'prod')) };
   commands.push(P.commands.predeploy(sizedCfg, true), P.commands.deploy(sizedCfg), P.commands.postdeploy(sizedCfg, true));
   commands.push(P.commands.power(cfg, 'Resume'), P.commands.power(cfg, 'Lock'));
+  commands.push(P.commands.verify(cfg), P.commands.verify(cfg, { user: 'alex@contoso.com', demo: true, timeout: 30 }));
   let checked = 0;
   for (const c of commands) {
     const line = last(c);
@@ -506,4 +508,150 @@ test('real: deployment failed on the data collection rule (workspace tables not 
   assert.match(r.actions[0].title, /^InvalidOutputTable: /);
   assert.match(last(r.actions[0].command), /deploy\.sh -p parameters\/dev\.bicepparam -l northcentralus .* --hosts 1 --vm-size Standard_E4as_v5 --max-sessions 16 --profile-quota 100$/);
   assertSelfContained(r);
+});
+
+// ---------------------------------------------------------------- verify access: reachability probe (decision 0014)
+test('reachability: every host reached -> reachable, with the latency step\'s ratings', () => {
+  const r = P.classifyReachability([{ host: 'login.microsoftonline.com', median: 42 }, { host: 'windows.cloud.microsoft', median: 160 }]);
+  assert.equal(r.status, 'reachable');
+  assert.deepEqual(r.hosts.map((h) => [h.host, h.reached, h.rating.label]), [['login.microsoftonline.com', true, 'Good'], ['windows.cloud.microsoft', true, 'Sluggish']]);
+  assert.match(r.guidance, /doesn't show you can sign in/);
+});
+
+test('reachability: one host failed -> partial, names it, still a warning to try the desktop', () => {
+  const r = P.classifyReachability([{ host: 'login.microsoftonline.com', median: 30 }, { host: 'windows.cloud.microsoft', median: null }]);
+  assert.equal(r.status, 'partial');
+  assert.match(r.headline, /windows\.cloud\.microsoft/);
+  assert.doesNotMatch(r.headline, /login\.microsoftonline\.com/);
+  assert.match(r.guidance, /warning, not a stop/);
+});
+
+test('reachability: fails closed: nothing reached -> blocked; untested or malformed is never reached', () => {
+  const blocked = P.classifyReachability([{ host: 'login.microsoftonline.com', median: null }, { host: 'windows.cloud.microsoft', median: null }]);
+  assert.equal(blocked.status, 'blocked');
+  assert.match(blocked.guidance, /warning, not a stop/);
+  // A host missing from the results was not tested, so the rest can't be "reachable".
+  const missing = P.classifyReachability([{ host: 'login.microsoftonline.com', median: 20 }]);
+  assert.equal(missing.status, 'partial');
+  assert.equal(missing.hosts[1].reached, null);
+  assert.equal(P.classifyReachability([{ host: 'login.microsoftonline.com', median: NaN }, { host: 'windows.cloud.microsoft', median: '12' }]).status, 'blocked');
+  // Results for other hosts are ignored.
+  assert.equal(P.classifyReachability([{ host: 'example.com', median: 5 }]).status, 'unknown');
+  for (const x of [[], null, undefined, 'x']) assert.equal(P.classifyReachability(x).status, 'unknown');
+});
+
+test('reachability: says what it does not prove', () => {
+  const { limits } = P.classifyReachability([]);
+  for (const s of [/sign-in/, /\*\.wvd\.microsoft\.com/, /UDP/, /block page/, /front door/]) assert.match(limits, s);
+});
+
+test('reachability: probes only concrete hosts from the AVD end-user list', () => {
+  assert.deepEqual(P.REACHABILITY_HOSTS.map((h) => h.host), ['login.microsoftonline.com', 'windows.cloud.microsoft']);
+  for (const h of P.REACHABILITY_HOSTS) assert.doesNotMatch(h.host, /\*/);
+});
+
+test('rating: the latency step\'s thresholds (under 100 good, to 150 usable, above sluggish)', () => {
+  assert.deepEqual([99, 100, 150, 151, null].map((ms) => P.rateLatency(ms).label), ['Good', 'Usable', 'Usable', 'Sluggish', 'No answer']);
+});
+
+test('page: Verify access comes after Sign in, holds the probe, and the page fetches only through the timed probe', () => {
+  const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
+  assert.deepEqual(P.STEPS.slice(-2).map((s) => s.id), ['signin', 'verify']);
+  const verify = html.slice(html.indexOf('data-step="verify"'), html.indexOf('</section>', html.indexOf('data-step="verify"')));
+  assert.match(verify, /id="reach-run"/);
+  assert.match(verify, /class="slot"/, 'the shared next-step box and paste box can sit in it');
+  // Nothing pasted or measured leaves the browser: one fetch, no-cors, no credentials, no referrer, no body.
+  const fetches = [...html.matchAll(/\bfetch\(([^)]*)\)/g)];
+  assert.equal(fetches.length, 1);
+  assert.match(fetches[0][1], /mode: 'no-cors'.*credentials: 'omit'.*referrerPolicy: 'no-referrer'/);
+  assert.doesNotMatch(html, /XMLHttpRequest|sendBeacon|new WebSocket|new EventSource/);
+  for (const f of ['portal-core.js', 'report.js']) {
+    assert.doesNotMatch(readFileSync(new URL(`../../docs/portal/${f}`, import.meta.url), 'utf8'), /\bfetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource/, f);
+  }
+});
+
+// ---------------------------------------------------------------- verify access: launch link (decision 0014)
+const LAUNCH = { workspaceObjectId: 'a0a0a0a0-0000-4000-8000-000000000001', desktopObjectId: 'b0b0b0b0-0000-4000-8000-000000000001', tenantId: '55555555-5555-5555-5555-555555555555', workspace: 'vdws-avdlz-dev' };
+
+test('launch: direct web client link from the two object IDs; tenant only when asked, login hint last', () => {
+  const base = 'https://windows.cloud.microsoft/webclient/avd/a0a0a0a0-0000-4000-8000-000000000001/b0b0b0b0-0000-4000-8000-000000000001';
+  assert.equal(P.launchUrl(LAUNCH), base);
+  assert.equal(P.launchUrl(LAUNCH, { tenant: true }), base + '?tenant=55555555-5555-5555-5555-555555555555');
+  assert.equal(P.launchUrl(LAUNCH, { tenant: true, loginHint: 'alex@contoso.com' }), base + '?tenant=55555555-5555-5555-5555-555555555555#loginHint=alex@contoso.com');
+  assert.equal(P.launchUrl({ ...LAUNCH, tenantId: undefined }, { tenant: true }), base, 'no tenant ID, no tenant parameter');
+});
+
+test('launch: a pasted state line is untrusted: only GUIDs, only windows.cloud.microsoft, no injected URL parts', () => {
+  for (const bad of [null, undefined, 'x', {}, { ...LAUNCH, workspaceObjectId: '../../evil' }, { ...LAUNCH, desktopObjectId: 'b0b0b0b0-0000-4000-8000-000000000001/../x' },
+    { ...LAUNCH, workspaceObjectId: 'javascript:alert(1)' }, { ...LAUNCH, desktopObjectId: '' }]) {
+    assert.equal(P.launchUrl(bad), null, JSON.stringify(bad));
+  }
+  for (const hint of ['x@evil.com#/../', 'a b@c.d', 'x@y.z?tenant=1', 'x@y.z&a=b', 'no-at-sign', "x'@y.z", 'x@y']) {
+    assert.doesNotMatch(P.launchUrl(LAUNCH, { loginHint: hint }), /loginHint/, hint);
+  }
+  assert.equal(P.launchUrl({ ...LAUNCH, tenantId: 'evil.com' }, { tenant: true }).includes('tenant='), false);
+  assert.equal(P.launchTarget({ ...LAUNCH, workspace: '<img src=x>' }).workspace, undefined, 'names are plain resource names or dropped');
+});
+
+test('state: post-deployment ready with launch IDs -> kept in the config the page saves; Verify access points at the link', () => {
+  const r = analyze('state-postdeploy-ready-launch.txt');
+  assert.equal(r.step, 'signin');
+  assert.deepEqual(P.launchTarget(r.config.launch), { workspaceObjectId: LAUNCH.workspaceObjectId, desktopObjectId: LAUNCH.desktopObjectId, tenantId: LAUNCH.tenantId, workspace: 'vdws-avdlz-dev', appGroup: 'vdag-avdlz-dev-desktop' });
+  assert.match(P.actionsForStep('verify', r.config)[0].why, /the link above/);
+  // Older output without launch IDs: the plain web client.
+  const old = analyze('state-postdeploy-ready.txt');
+  assert.equal(P.launchTarget(old.config.launch), null);
+  assert.match(P.actionsForStep('verify', old.config)[0].why, /https:\/\/windows\.cloud\.microsoft/);
+});
+
+test('page: the launch link opens in a new tab without a referrer and defaults to the web client', () => {
+  const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<a id="launch-link"[^>]*href="https:\/\/windows\.cloud\.microsoft"[^>]*target="_blank" rel="noopener noreferrer"/);
+  assert.match(html, /P\.launchUrl\(/);
+});
+
+// ---------------------------------------------------------------- verify access: telemetry (decision 0014)
+test('state: access verified -> the connection, its setup time with what it means, and other failed attempts', () => {
+  const r = analyze('state-verify-verified.txt');
+  assert.equal(r.stage, 'verify');
+  assert.equal(r.status, 'verified');
+  assert.equal(r.step, 'verify');
+  assert.match(r.headline, /^Access check: Verified/);
+  assert.match(r.actions[0].why, /reached Connected .*avdlzdsh-001.*HTML client on Windows 11/);
+  assert.match(r.actions[0].why, /12\.4 s \(Started to Connected\)\. That is connection setup, not the time to a usable desktop/);
+  assert.match(r.actions[0].why, /doesn't prove the desktop is usable/);
+  assert.equal(r.actions[1].title, 'Another attempt failed');
+});
+
+test('state: connection failed -> the logged error, the post-deployment check, then check again', () => {
+  const r = analyze('state-verify-failed.txt');
+  assert.equal(r.status, 'failed');
+  assert.match(r.actions[0].why, /ExampleCodeForTests: Example failure message/);
+  assert.match(last(r.actions[0].command), /Test-AvdLandingZoneReadiness\.ps1 -NamePrefix avdlz -Environment dev$/);
+  assert.match(last(r.actions[1].command), /Test-AvdUserConnection\.ps1 -NamePrefix avdlz -Environment dev -UserPrincipalName 'admin@contoso\.com'$/);
+  assertSelfContained(r);
+});
+
+test('state: not verified is never a pass: no rows and in progress -> wait longer; a refused query -> the role', () => {
+  for (const [name, title] of [['none', /^No connection found yet/], ['inprogress', /hasn't reached Connected/]]) {
+    const r = analyze(`state-verify-${name}.txt`);
+    assert.equal(r.status, 'notverified', name);
+    assert.match(r.headline, /Not verified/);
+    assert.match(r.actions[0].title, title);
+    assert.match(r.actions[0].why, /This is not a pass/);
+    assert.match(last(r.actions[0].command), /Test-AvdUserConnection\.ps1 .* -TimeoutMinutes 30$/);
+    assertSelfContained(r);
+  }
+  const f = analyze('state-verify-forbidden.txt');
+  assert.equal(f.status, 'notverified');
+  assert.match(f.actions[0].why, /can't read the Log Analytics workspace's data.*Log Analytics Reader on rg-avdlz-dev-management/);
+  assert.match(last(f.actions[1].command), /Test-AvdUserConnection\.ps1/);
+});
+
+test('verify: the step offers the telemetry check, and a pasted run of it is recognized', () => {
+  const actions = P.actionsForStep('verify', {});
+  assert.match(last(actions[1].command), /^\.\/scripts\/ops\/Test-AvdUserConnection\.ps1 -NamePrefix avdlz -Environment dev$/);
+  assert.match(last(P.commands.verify(P.DEFAULTS, { demo: true, user: "o'neil@contoso.com", timeout: 30 })), / -UserPrincipalName 'o''neil@contoso\.com' -Demo -TimeoutMinutes 30$/);
+  const r = P.analyze('PS /home/admin/avd-landing-zone> ./scripts/ops/Test-AvdUserConnection.ps1 -NamePrefix avdlz -Environment dev\nThe term \'./scripts/ops/Test-AvdUserConnection.ps1\' is not recognized as a name of a cmdlet', {}, { currentStep: 'verify' });
+  assert.equal(r.step, 'verify');
 });

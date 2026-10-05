@@ -23,7 +23,8 @@
     { id: 'predeploy', title: 'Pre-deployment preflight' },
     { id: 'deploy', title: 'Deploy the landing zone' },
     { id: 'postdeploy', title: 'Post-deployment setup' },
-    { id: 'signin', title: 'Sign in' }
+    { id: 'signin', title: 'Sign in' },
+    { id: 'verify', title: 'Verify access' }
   ];
 
   var DEFAULTS = {
@@ -243,6 +244,13 @@
       return block(cfg, ['./scripts/ops/Deploy-AvdDemo.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
         (cfg.testUserUpn ? ' -TestUserUpn ' + psQuote(cfg.testUserUpn) : '')]);
     },
+    // Verify access (decision 0014): confirm from Azure telemetry that a sign-in reached the desktop.
+    // opts: user (default: the signed-in Azure user), demo, timeout (minutes).
+    verify: function (cfg, opts) {
+      opts = opts || {};
+      return block(cfg, ['./scripts/ops/Test-AvdUserConnection.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment +
+        (opts.user ? ' -UserPrincipalName ' + psQuote(opts.user) : '') + (opts.demo ? ' -Demo' : '') + (opts.timeout ? ' -TimeoutMinutes ' + opts.timeout : '')]);
+    },
     removeDemo: function (cfg) {
       return block(cfg, ['./scripts/ops/Remove-AvdDemo.ps1 -NamePrefix ' + cfg.namePrefix + ' -Environment ' + cfg.environment]);
     },
@@ -363,13 +371,14 @@
   function commandInText(text) {
     var lines = text.split('\n'), i, m;
     for (i = lines.length - 1; i >= 0; i--) {
-      m = /^PS (?:<[a-z]+-\d+>|[^>])*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo)\b.*)$/.exec(lines[i]);
+      m = /^PS (?:<[a-z]+-\d+>|[^>])*> (.*\b(Test-AvdLandingZoneReadiness|deploy\.sh|Deploy-AvdDemo|Remove-AvdDemo|Test-AvdUserConnection)\b.*)$/.exec(lines[i]);
       if (!m) continue;
       var c = m[1], fix = /\s-Fix\b/.test(c);
       if (/Test-AvdLandingZoneReadiness/.test(c)) return { step: /-PreDeployment\b/.test(c) ? 'predeploy' : 'postdeploy', fix: fix };
       if (/deploy\.sh/.test(c)) return { step: 'deploy', fix: false };
       if (/Deploy-AvdDemo/.test(c)) return { step: 'signin', fix: false };
       if (/Remove-AvdDemo/.test(c)) return { step: 'signin', removeDemo: true };
+      if (/Test-AvdUserConnection/.test(c)) return { step: 'verify', fix: false };
     }
     return null;
   }
@@ -492,6 +501,48 @@
       return { step: 'signin', actions: a };
     }
 
+    if (S === 'verify') {
+      // Test-AvdUserConnection.ps1 (decision 0014). It fails closed: only "verified" is a pass.
+      var vc = state.context || {}, conns = vc.connections || [], again = { user: vc.user, demo: vc.demo };
+      var connected = conns.filter(function (c) { return c && c.connectedAt; })[0];
+      var who = vc.user || 'you';
+      if (state.status === 'verified') {
+        var how = connected ? ['on ' + (connected.sessionHost || 'a session host'), connected.clientType ? 'with the ' + connected.clientType + ' client' + (connected.clientOS ? ' on ' + connected.clientOS : '') : '',
+          connected.gatewayRegion ? 'through gateway ' + connected.gatewayRegion : ''].filter(Boolean).join(', ') : '';
+        note('Access verified', 'Azure recorded a connection by ' + who + ' that reached Connected' + (how ? ' (' + how + ')' : '') + '.' +
+          (connected && typeof connected.connectionSetupSeconds === 'number' ? ' Connection setup took ' + connected.connectionSetupSeconds + ' s (Started to Connected). That is connection setup, not the time to a usable desktop, and a first connection to a stopped host includes it starting.' : '') +
+          ' This proves a real sign-in reached the desktop; it doesn\'t prove the desktop is usable or that other users will get in.', '');
+        byId(warnings, 'connect-errors').forEach(function (w) { note('Another attempt failed', w.detail || '', ''); });
+        return { step: 'verify', actions: a };
+      }
+      if (state.status === 'failed') {
+        byId(failures, 'connect-errors').forEach(function (f) {
+          var service = f.data && f.data.serviceError;
+          note('The connection failed', (f.detail ? 'AVD logged: ' + f.detail + '. ' : '') + (service
+            ? 'AVD marked it a service error: try again in a few minutes, and check Azure Service Health.'
+            : 'Check the landing zone: the post-deployment check covers the host pool, the session hosts and the group assignments. Then open the desktop again.'), service ? '' : cmd.postdeploy(cfg, false));
+        });
+        note('Then check the connection again', 'After signing in again.', cmd.verify(cfg, again));
+        return { step: 'verify', actions: a };
+      }
+      var qf = byId(failures, 'query-failed')[0], lzm = byId(failures, 'no-landing-zone')[0], inprog = byId(failures, 'in-progress')[0];
+      if (qf) {
+        note('The connection logs couldn\'t be read', (qf.data && qf.data.status === 403
+          ? 'Your account can\'t read the Log Analytics workspace\'s data. ' + (qf.remediation || '') : (qf.detail || '') + ' ' + (qf.remediation || '')).trim(), '');
+        note('Then check again', '', cmd.verify(cfg, again));
+      }
+      else if (lzm) {
+        note('Landing zone not found', [lzm.check, lzm.remediation].filter(Boolean).join('. '), cmd.postdeploy(cfg, false));
+      }
+      else {
+        note(inprog ? 'The connection hasn\'t reached Connected yet' : 'No connection found yet',
+          (inprog ? 'A connection started and logged no errors. The host may still be starting (Start VM on Connect), or the rest of the connection hasn\'t reached Log Analytics. '
+            : 'Nothing is logged for ' + who + ' in the last ' + (vc.windowMinutes || 60) + ' minutes. Open the desktop and sign in as ' + who + ' first. If you just did, the data can take several minutes to arrive. ') +
+          'This is not a pass. Check again and wait longer:', cmd.verify(cfg, { user: again.user, demo: again.demo, timeout: 30 }));
+      }
+      return { step: 'verify', actions: a };
+    }
+
     if (S === 'power') {
       var pw = state.power || {};
       if (state.status === 'locked') {
@@ -513,8 +564,8 @@
     return { step: null, actions: a };
   }
 
-  var STAGE_LABEL = { predeploy: 'Pre-deployment preflight', deploy: 'Deployment', postdeploy: 'Post-deployment setup', demo: 'Demo validation', cleanup: 'Cleanup', power: 'Auto shutdown' };
-  var STATUS_LABEL = { done: 'Done', ready: 'Ready', notready: 'Not ready', succeeded: 'Succeeded', failed: 'Failed', started: 'Still running (or disconnected)', whatif: 'What-if only', locked: 'Locked', resumed: 'Resumed', stopped: 'Stopped' };
+  var STAGE_LABEL = { predeploy: 'Pre-deployment preflight', deploy: 'Deployment', postdeploy: 'Post-deployment setup', demo: 'Demo validation', cleanup: 'Cleanup', power: 'Auto shutdown', verify: 'Access check' };
+  var STATUS_LABEL = { done: 'Done', ready: 'Ready', notready: 'Not ready', succeeded: 'Succeeded', failed: 'Failed', started: 'Still running (or disconnected)', whatif: 'What-if only', locked: 'Locked', resumed: 'Resumed', stopped: 'Stopped', verified: 'Verified', notverified: 'Not verified' };
 
   /*
    * analyze(text, config, options) -> {
@@ -571,8 +622,85 @@
       case 'deploy': return cmd.deploy(cfg);
       case 'postdeploy': return cmd.postdeploy(cfg, fix === undefined ? true : fix);
       case 'signin': return cmd.demo(cfg);
+      case 'verify': return cmd.verify(cfg);
       default: return cmd.predeploy(cfg, !!fix);
     }
+  }
+
+  // ---------------------------------------------------------------- verify access: reachability (decision 0014)
+  // Concrete hosts from Microsoft's required endpoints for end-user devices
+  // (https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint). Most of that list is
+  // wildcards, which a browser can't probe; *.wvd.microsoft.com (feed, broker, gateway) is the important one.
+  // UNVERIFIED wording: confirmed from a search summary of the page, not its text (verify-access-spec.md §11 A1).
+  var REACHABILITY_HOSTS = [
+    { host: 'login.microsoftonline.com', purpose: 'Microsoft Entra ID sign-in' },
+    { host: 'windows.cloud.microsoft', purpose: 'Web client and Windows App service' }
+  ];
+  var REACHABILITY_LIMITS = 'Reached means this browser, on this network, completed DNS, a connection and TLS to the host and got a response. ' +
+    'It doesn\'t test sign-in, your access to the desktop, the feed and gateway hosts (*.wvd.microsoft.com, which can\'t be probed by name), ' +
+    'UDP (RDP Shortpath), or the session host. A proxy that answers with its own block page also counts as reached. ' +
+    'The time is to Microsoft\'s nearest front door, not to your session host\'s region.';
+
+  // The latency step's rating, shared with the reachability probe.
+  function rateLatency(ms) {
+    if (ms === null || ms === undefined || isNaN(ms)) return { label: 'No answer', cls: 'muted' };
+    if (ms < 100) return { label: 'Good', cls: 'good' };
+    if (ms <= 150) return { label: 'Usable', cls: 'ok' };
+    return { label: 'Sluggish', cls: 'poor' };
+  }
+
+  // results: [{ host, median }] from the page's probe; median is null when every request failed.
+  // A host missing from results was not tested. Only all hosts reached is "reachable" (fail closed).
+  function classifyReachability(results) {
+    var list = Array.isArray(results) ? results : [];
+    var hosts = REACHABILITY_HOSTS.map(function (h) {
+      var r = list.filter(function (x) { return x && x.host === h.host; })[0];
+      var tested = !!r, reached = tested && typeof r.median === 'number' && !isNaN(r.median);
+      return { host: h.host, purpose: h.purpose, reached: tested ? reached : null, median: reached ? r.median : null, rating: rateLatency(reached ? r.median : null) };
+    });
+    var ok = hosts.filter(function (h) { return h.reached === true; }), tested = hosts.filter(function (h) { return h.reached !== null; });
+    var failed = hosts.filter(function (h) { return h.reached !== true; }).map(function (h) { return h.host; });
+    var o = { hosts: hosts, limits: REACHABILITY_LIMITS };
+    if (!tested.length) {
+      o.status = 'unknown'; o.headline = 'Not checked yet';
+      o.guidance = 'Run the check from the device and network people will connect from.';
+    } else if (ok.length === hosts.length) {
+      o.status = 'reachable'; o.headline = 'This device reaches AVD\'s sign-in and client hosts';
+      o.guidance = 'Next, open the desktop. A result here is a network check only; it doesn\'t show you can sign in.';
+    } else if (ok.length) {
+      o.status = 'partial'; o.headline = 'Some hosts didn\'t answer: ' + failed.join(', ');
+      o.guidance = 'A warning, not a stop: you can still try the desktop. A firewall, proxy, DNS filter or content blocker may be stopping these hosts. If the desktop fails, your network must allow the AVD end-user endpoints: https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint';
+    } else {
+      o.status = 'blocked'; o.headline = 'No AVD host answered';
+      o.guidance = 'A warning, not a stop: you can still try the desktop. A firewall, proxy, DNS filter, captive portal or content blocker is stopping requests to AVD from this browser. Try another network or turn off the blocker for this page. Your network must allow the AVD end-user endpoints: https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint';
+    }
+    return o;
+  }
+
+  // ---------------------------------------------------------------- verify access: launch link (decision 0014)
+  // The web client's direct launch URL, from the workspace and desktop object IDs in the post-deployment
+  // or demo state line (context.launch). UNVERIFIED wording: the path, ?tenant= (for external identities)
+  // and #loginHint= (must come last) come from a search summary of
+  // https://learn.microsoft.com/windows-app/direct-launch-urls, not its text (verify-access-spec.md §11 A2).
+  // A pasted state line is untrusted input: the IDs must be GUIDs, so the link can only point at
+  // windows.cloud.microsoft, and a login hint must look like a UPN with nothing that could end the URL part.
+  var GUID = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  var WEB_CLIENT = 'https://windows.cloud.microsoft';
+  function launchTarget(launch) {
+    if (!launch || typeof launch !== 'object' || !GUID.test(launch.workspaceObjectId || '') || !GUID.test(launch.desktopObjectId || '')) return null;
+    var t = { workspaceObjectId: launch.workspaceObjectId, desktopObjectId: launch.desktopObjectId };
+    if (GUID.test(launch.tenantId || '')) t.tenantId = launch.tenantId;
+    ['workspace', 'appGroup'].forEach(function (k) { if (typeof launch[k] === 'string' && /^[A-Za-z0-9._-]{1,80}$/.test(launch[k])) t[k] = launch[k]; });
+    return t;
+  }
+  function launchUrl(launch, opts) {
+    opts = opts || {};
+    var t = launchTarget(launch);
+    if (!t) return null;
+    var url = WEB_CLIENT + '/webclient/avd/' + t.workspaceObjectId + '/' + t.desktopObjectId;
+    if (opts.tenant && t.tenantId) url += '?tenant=' + t.tenantId;
+    if (opts.loginHint && /^[^\s@#?&\/%'"<>]+@[^\s@#?&\/%'"<>]+\.[^\s@#?&\/%'"<>]+$/.test(opts.loginHint)) url += '#loginHint=' + opts.loginHint;
+    return url;
   }
 
   // The first command for someone who has not run anything yet.
@@ -593,12 +721,16 @@
       case 'deploy': return [{ title: 'Deploy the landing zone', why: 'Run this once the pre-deployment preflight is Ready. It takes 30-45 minutes and keeps running in Azure if Cloud Shell disconnects.', command: cmd.deploy(cfg) },
         { title: 'Already started? Check on it', why: 'Shows the latest deployment and any failed resources.', command: cmd.deployStatus(cfg) }];
       case 'postdeploy': return [{ title: 'Run the post-deployment setup', why: 'Admin consent for the storage app, the Conditional Access exclusion and the profile share permissions. It asks for a Microsoft Graph device code.', command: cmd.postdeploy(cfg, true) }];
-      case 'signin': return [{ title: 'Sign in to the desktop', why: 'Open https://windows.cloud.microsoft (or the Windows App) as a member of ' + cfg.usersGroup + '.', command: '' },
+      case 'signin': return [{ title: 'Sign in to the desktop', why: 'Open https://windows.cloud.microsoft (or the Windows App) as a member of ' + cfg.usersGroup + '. The next step, Verify access, checks this device can reach AVD.', command: '' },
         { title: 'Optional: validate sign-in with a demo host pool', why: 'Deploys a separate demo host pool and checks the host and your test user.', command: cmd.demo(cfg) },
         { title: 'Optional: Well-Architected review', why: 'Reviews the deployed landing zone by pillar. Findings are warnings; no Graph sign-in needed.', command: cmd.wellArchitected(cfg) }];
+      case 'verify': return [{ title: 'Open the desktop', why: 'After the reachability check, open ' + (launchTarget(cfg.launch) ? 'the desktop with the link above' : 'https://windows.cloud.microsoft') + ' (or the Windows App) and sign in as a member of ' + cfg.usersGroup +
+        '. New group members can take up to an hour to see the desktop. The notes above say what to expect on the first connection.', command: '' },
+        { title: 'Then confirm it from Azure telemetry', why: 'Once you see the desktop, or the client gives up, run this. It reads the connection logs for your account, waits up to 15 minutes for them to arrive, and says Verified, Failed or Not verified. Only Verified is a pass.', command: cmd.verify(cfg) }];
       default: return [firstStep(cfg)];
     }
   }
 
-  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, powerDefaults: powerDefaults, effectivePower: effectivePower, hostHours: hostHours, repriceEstimate: repriceEstimate, pricedHours: pricedHours, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
+  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, powerDefaults: powerDefaults, effectivePower: effectivePower, hostHours: hostHours, repriceEstimate: repriceEstimate, pricedHours: pricedHours, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote,
+    REACHABILITY_HOSTS: REACHABILITY_HOSTS, rateLatency: rateLatency, classifyReachability: classifyReachability, launchTarget: launchTarget, launchUrl: launchUrl };
 });

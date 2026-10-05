@@ -9,10 +9,15 @@
 5. **Deploy the landing zone.**
 6. **Post-deployment setup.**
 7. **Sign in** (and optionally the demo host pool).
+8. **Verify access.** From the operator's own device ([decision 0014](../decisions/0014-verify-access.md)):
+   - a reachability probe to the AVD sign-in and client hosts, timed like the latency step. It's a warning, never a stop, and the page says what it doesn't prove;
+   - a direct link to the desktop in the web client, built from the workspace and desktop object IDs the post-deployment setup or the demo reports (`launchUrl`). The IDs must be GUIDs and the link always points at `windows.cloud.microsoft`. There's no Windows App (`ms-avd:`) link yet: its parameter names aren't confirmed (TODO, [verify-access-spec.md](../verify-access-spec.md) §6.3).
+
+   - confirmation from telemetry: the step's command runs `Test-AvdUserConnection.ps1`, and a pasted result shows *Verified*, *Failed* or *Not verified* with what to do next. Only *Verified* is a pass. Error codes get specific guidance only once a real run shows them (`decide`, stage `verify`); until then the portal shows the code, the message and whether AVD marked it a service error.
 
 The steps sit side by side and scroll horizontally (swipe, trackpad, or Back and Next); a step stays hidden until the deployment reaches it, so the page opens on the latency check. A pasted output moves to the step it leads to. Next skips a step without running it, for an operator who did it earlier or elsewhere.
 
-At each step it gives a self-contained Cloud Shell block (clone or update the repo, move into it, run the command). The operator pastes the output back and the portal works out what happened and what to run next. The **Deployment settings** link in the header opens the settings the commands use (parameter file, region, groups, name prefix, environment, test user) and *Start over*. It keeps progress and settings in the browser's local storage. **Pasted output is never sent anywhere**: the only network requests are the latency test's.
+At each step it gives a self-contained Cloud Shell block (clone or update the repo, move into it, run the command). The operator pastes the output back and the portal works out what happened and what to run next. The **Deployment settings** link in the header opens the settings the commands use (parameter file, region, groups, name prefix, environment, test user) and *Start over*. It keeps progress and settings in the browser's local storage. **Pasted output is never sent anywhere**: the only network requests are the latency test's and the reachability probe's (`no-cors`, no credentials, no referrer). A test keeps it that way.
 
 **Report a problem** opens a GitHub issue with the pasted output and the portal's analysis. [`report.js`](report.js) redacts it in the browser first (decision [0008](../decisions/0008-portal-issue-reports.md)). The reporter reviews it and submits it on GitHub.
 
@@ -31,12 +36,12 @@ Written by `Write-AvdPortalState` (PowerShell scripts) and `portal_state` (`depl
 | Field | Meaning |
 |---|---|
 | `v` | Schema version (1). |
-| `stage` | `predeploy`, `deploy`, `postdeploy`, `demo` or `cleanup`. |
-| `status` | `ready` / `notready` (preflight, demo, cleanup); `started` / `succeeded` / `failed` / `whatif` (`deploy.sh`). A deployment prints `started` before it begins, so output cut off by a disconnect still says what is running. |
+| `stage` | `predeploy`, `deploy`, `postdeploy`, `demo`, `cleanup` or `verify` (`Test-AvdUserConnection.ps1`). |
+| `status` | `ready` / `notready` (preflight, demo, cleanup); `started` / `succeeded` / `failed` / `whatif` (`deploy.sh`); `verified` / `failed` / `notverified` (`verify`: only `verified` is a pass). A deployment prints `started` before it begins, so output cut off by a disconnect still says what is running. |
 | `fix` | Whether the run used `-Fix`. |
-| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `power` (`autoShutdownTime`: `HH:mm` or `none`, `startVmOnConnect`: the power settings a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`) (whichever apply). |
+| `context` | What the next command needs: `parameterFile`, `location`, `usersGroup`, `adminsGroup`, `namePrefix`, `environment`, `deploymentName`, `storageAccount`, `testUserUpn`, `workspace`, `includeLandingZone`, `wellArchitected`, `sizing` (`hosts`, `vmSize`, `maxSessions`, `profileQuotaGiB`, `activeHoursPerWeek`: the sizing a preflight or `deploy.sh` was given), `power` (`autoShutdownTime`: `HH:mm` or `none`, `startVmOnConnect`: the power settings a preflight or `deploy.sh` was given), `estimate` (`currency`, `location`, `total`, `alwaysOnTotal`, `lines[]` with `key`, `item`, `quantity`, `unit`, `unitPrice`, `monthly`, `meter`; `unpriced[]` with the meters seen; `excluded[]`), `launch` (post-deployment and demo: `workspaceObjectId`, `desktopObjectId`, `tenantId`, `workspace`, `appGroup`: what the Verify access step's direct launch link needs; left out when an ID is missing), and for `verify`: `user`, `windowMinutes`, `resourceGroup`, `demo`, `waitedSeconds`, `connections[]` (`correlationId`, `startedAt`, `connectedAt`, `completedAt`, `connectionSetupSeconds`, `sessionHost`, `clientType`, `clientOS`, `gatewayRegion`, `transportType`, `errors[]` with `code`, `message`, `source`, `serviceError`, `checkpoints[]`; the latest 5) (whichever apply). |
 | `counts` | `pass`, `fail`, `warn`, `fixed`, `skip`. |
-| `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognize the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
+| `failures`, `warnings` | `{ id, area, check, detail, remediation, data }` for each. `id` is set where the portal needs to recognize the check: `quota` (data: `location`, `quotaName`, `limit`, `used`, `needed`), `hostpool-region` (`regions`), `lz-region` (`deployedIn`), `lz-missing` (`found`), `kv-softdeleted` (`vaults`), `registering`, the access check's `connect-errors` (`codes`, `serviceError`), `no-connection`, `in-progress`, `query-failed` (`status`: the HTTP status) and `no-landing-zone`, and `waf-<check>` for the Well-Architected review (`pillar`, and `accepted` when the parameter file makes that trade-off on purpose). |
 
 Add fields; don't rename or remove them without bumping `v` and keeping the old reading in `portal-core.js`.
 
@@ -61,6 +66,10 @@ The same value always gets the same placeholder. Reports carry `<!-- avdlz-porta
 ## Sizing
 
 `portal-core.js` keeps sizing per host pool: `HOST_POOL_DEFAULTS` describes one entry (name, type, users, `concurrencyPercent`, workload, `vmSize`, `hostCount` (a number, or `'auto'`), `spareHost` (Automatic only), `profileGiBPerUser`, `activeHoursPerWeek`), `computePool()` sizes it, and `toSizing()` turns the result into the object the commands use. The page stores a list (`avdlz.portal.hostPools`) with one entry while `MAX_HOST_POOLS` is 1. To add host pools: raise the limit, give each entry its own commands, and extend the templates. The single-pool commands don't change.
+
+## Reachability probe
+
+`REACHABILITY_HOSTS` in `portal-core.js` lists the probed hosts: concrete names from Microsoft's [required endpoints for end-user devices](https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint). Most of that list is wildcards, which a browser can't probe. `classifyReachability()` turns the page's medians into `reachable`, `partial`, `blocked` or `unknown`. Only every host reached is `reachable`, and an untested host never counts as reached. A resolved `no-cors` request means DNS, a connection and TLS succeeded. It says nothing about sign-in, the feed and gateway hosts, UDP or the session host, and a proxy's block page also resolves. The page shows that text (`limits`) beside the result.
 
 ## Changing it
 

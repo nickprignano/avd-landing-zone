@@ -19,7 +19,7 @@ $agId="$S/resourceGroups/rg-avdlz-dev-avd/providers/Microsoft.DesktopVirtualizat
 $vnetId="$S/resourceGroups/rg-avdlz-dev-network/providers/Microsoft.Network/virtualNetworks/vnet-avdlz-dev"
 $lawId="$S/resourceGroups/rg-avdlz-dev-management/providers/Microsoft.OperationalInsights/workspaces/log-avdlz-dev"
 
-function Get-AzContext { [pscustomobject]@{ Subscription=[pscustomobject]@{Id=$sub;Name='AVD LZ Dev'}; Tenant=[pscustomobject]@{Id='tenant-1'}; Environment=[pscustomobject]@{StorageEndpointSuffix='core.windows.net'} } }
+function Get-AzContext { [pscustomobject]@{ Subscription=[pscustomobject]@{Id=$sub;Name='AVD LZ Dev'}; Tenant=[pscustomobject]@{Id='55555555-5555-5555-5555-555555555555'}; Environment=[pscustomobject]@{StorageEndpointSuffix='core.windows.net'} } }
 function Set-AzContext { param($SubscriptionId,$ErrorAction) Get-AzContext }
 # Resource groups are in eastus2 unless created in the scenario with a location ($global:St.rgLocations).
 function Get-AzResourceGroup { param($Name,$ErrorAction) $list = $global:St.rgs | % { [pscustomobject]@{ResourceGroupName=$_;Location=$(if ($global:St.rgLocations -and $global:St.rgLocations[$_]) { $global:St.rgLocations[$_] } else { 'eastus2' })} }; if ($Name) { $list | ? ResourceGroupName -eq $Name } else { $list } }
@@ -135,6 +135,22 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
       @{ id="$S/pe-hp"; properties=@{ privateLinkServiceConnections=@(@{properties=@{privateLinkServiceId=$hpId}}); manualPrivateLinkServiceConnections=@() } }) } }
   if ($Path -match 'pe-st/privateDnsZoneGroups') { return & $ok @{ value=@(@{properties=@{privateDnsZoneConfigs=@(@{properties=@{privateDnsZoneId="$S/zones/privatelink.file.core.windows.net"}})}}) } }
   if ($Path -match 'pe-hp/privateDnsZoneGroups') { return & $ok @{ value=@(@{properties=@{privateDnsZoneConfigs=@(@{properties=@{privateDnsZoneId="$S/zones/privatelink.wvd.microsoft.com"}})}}) } }
+  # ---- Launch link (Get-AvdLaunchTarget, decision 0014): the desktop app group, its desktop and the
+  # workspace, in the landing zone's avd group and in the demo group. ARM leaves out empty properties
+  # (lesson 0021): $global:St.launchNoObjectId drops objectId the way an unexpected response would.
+  if ($Path -match '/resourceGroups/rg-avdlz-dev-(avd|demo)/providers/Microsoft.DesktopVirtualization/(applicationGroups|workspaces)\?') {
+    $suffix = if ($Matches[1] -eq 'demo') { '-demo' } else { '' }; $rgName = "rg-avdlz-dev-$($Matches[1])"
+    $ag = "$S/resourceGroups/$rgName/providers/Microsoft.DesktopVirtualization/applicationGroups/vdag-avdlz-dev$suffix-desktop"
+    if ($Matches[2] -eq 'applicationGroups') { return & $ok @{ value=@(@{ name="vdag-avdlz-dev$suffix-desktop"; id=$ag; properties=@{ applicationGroupType='Desktop' } }) } }
+    $ws = @{ name="vdws-avdlz-dev$suffix"; id="$S/resourceGroups/$rgName/providers/Microsoft.DesktopVirtualization/workspaces/vdws-avdlz-dev$suffix"; properties=@{ applicationGroupReferences=@($ag.ToLower()) } }
+    if (-not $global:St.launchNoObjectId) { $ws.properties.objectId = $(if ($suffix) { 'a0a0a0a0-0000-4000-8000-00000000d0d0' } else { 'a0a0a0a0-0000-4000-8000-000000000001' }) }
+    return & $ok @{ value=@($ws) }
+  }
+  if ($Path -match '/applicationGroups/vdag-avdlz-dev(-demo)?-desktop/desktops\?') {
+    $d = @{ name="vdag-avdlz-dev$($Matches[1])-desktop/SessionDesktop"; properties=@{} }
+    if (-not $global:St.launchNoObjectId) { $d.properties.objectId = $(if ($Matches[1]) { 'b0b0b0b0-0000-4000-8000-00000000d0d0' } else { 'b0b0b0b0-0000-4000-8000-000000000001' }) }
+    return & $ok @{ value=@($d) }
+  }
   # ---- Power runbook (scripts/automation/Invoke-AvdPowerAction.ps1): the landing zone host pool,
   # two hosts (001 with two user sessions, 002 idle), their VMs' power state and tags.
   $pw = $global:St.power
@@ -197,7 +213,7 @@ function Invoke-AzRestMethod { param($Path,$Method,$Payload,$ErrorAction)
   if ($Path -match 'Microsoft.Consumption/budgets\?') { return & $ok @{ value=@(if ($g) { @{ name='budget-avdlz-prod' } }) } }
   if ($Path -match 'scalingPlans\?') { return & $ok @{ value=@(@{ name='vdscaling-avdlz-dev'; properties=@{ hostPoolReferences=@(@{ hostPoolArmPath=$hpId; scalingPlanEnabled=$true }) } }) } }
   if ($Path -match 'hostPools/vdpool-avdlz-dev/providers/Microsoft.Insights/diagnosticSettings\?') { return & $ok @{ value=@(@{ name='diag-vdpool'; properties=@{ workspaceId=$lawId } }) } }
-  if ($Path -match 'workspaces/log-avdlz-dev\?api-version') { return & $ok @{ properties=@{ retentionInDays=$(if ($g) { 90 } else { 30 }) } } }
+  if ($Path -match 'workspaces/log-avdlz-dev\?api-version') { return & $ok @{ properties=@{ customerId='66666666-6666-6666-6666-666666666666'; retentionInDays=$(if ($g) { 90 } else { 30 }) } } }
   if ($Path -match 'policyStates/latest/summarize') {
     $nc = if (-not $g -and $Path -match 'rg-avdlz-dev-hosts') { 1 } else { 0 }
     return & $ok @{ value=@(@{ results=@{ nonCompliantResources=$nc }; policyAssignments=@(@{ policyAssignmentId="$S/providers/Microsoft.Authorization/policyAssignments/avdlz-guest-attestation"; results=@{ nonCompliantResources=$nc } }) }) }
@@ -356,6 +372,25 @@ function Invoke-RestMethod { param($Uri,$Method,$Headers,$Body,$ContentType,$Err
       $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($r.Content); throw $e
     }
     if ($r.Content) { return ($r.Content | ConvertFrom-Json) } else { return }
+  }
+  # ---- Log Analytics query API (Invoke-AvdLogQuery, Test-AvdUserConnection.ps1). Each call takes the
+  # next response from $global:St.logPolls (the last one repeats): rows of user-connection.kql, or
+  # @{ status = 403 } for an error. Shape from the API spec: tables[].columns[{name,type}], rows[[...]];
+  # dynamic columns (Errors, Checkpoints) come back as JSON strings, and ARM-style empty values as null.
+  if ($Uri -match '^https://api\.loganalytics\.io/v1/workspaces/([^/]+)/query$') {
+    if ($Headers.Authorization -ne 'Bearer cs-token') { throw "no bearer token for $Uri" }
+    $q = ($Body | ConvertFrom-Json).query
+    Log "LAQUERY $($Matches[1]) $(if ($q -match "let upn = '([^']+)'") { $Matches[1] }) $(if ($q -match "let rg = '([^']+)'") { $Matches[1] })"
+    $global:St.logQueries++
+    $polls = @($global:St.logPolls)
+    $resp = if ($polls.Count) { $polls[[math]::Min($global:St.logQueries, $polls.Count) - 1] } else { @() }
+    if ($resp -is [hashtable] -and $resp.status) {
+      $e = [System.Management.Automation.ErrorRecord]::new([Exception]::new("Response status code does not indicate success: $($resp.status) (Forbidden)."), 'HttpError', 'InvalidOperation', $null)
+      $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('{"error":{"message":"The provided credentials have insufficient access to perform the requested operation","code":"InsufficientAccessError"}}'); throw $e
+    }
+    $cols = 'CorrelationId','StartedAt','ConnectedAt','CompletedAt','ConnectionSetupSeconds','SessionHost','ClientType','ClientOS','GatewayRegion','TransportType','Errors','Checkpoints','FirstErrorAt'
+    $rows = @(@($resp) | Where-Object { $_ } | ForEach-Object { $r = $_; ,@($cols | ForEach-Object { $v = $r[$_]; if ($_ -in 'Errors','Checkpoints' -and $null -ne $v) { ConvertTo-Json -InputObject @($v) -Compress -Depth 5 } else { $v } }) })
+    return [pscustomobject]@{ tables = @([pscustomobject]@{ name = 'PrimaryResult'; columns = @($cols | ForEach-Object { [pscustomobject]@{ name = $_; type = 'string' } }); rows = $rows }) }
   }
   if ($Uri -notmatch '^https://prices\.azure\.com/api/retail/prices') { throw "unmocked REST $Uri" }
   Log "PRICE $Uri"

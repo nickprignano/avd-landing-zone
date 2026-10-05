@@ -77,6 +77,16 @@ Describe 'Post-deployment: preflight, demo and cleanup' {
     $s[5].context.includeLandingZone | Should -BeTrue
     $s[6].context.environment | Should -Be 'test'   # remove-test-beside-dev
   }
+  It 'reports the launch link IDs for the landing zone desktop and the demo desktop (decision 0014)' {
+    $s = Get-PortalState $out
+    $s[1].context.launch.workspaceObjectId | Should -Be 'a0a0a0a0-0000-4000-8000-000000000001'
+    $s[1].context.launch.desktopObjectId | Should -Be 'b0b0b0b0-0000-4000-8000-000000000001'
+    $s[1].context.launch.tenantId | Should -Be '55555555-5555-5555-5555-555555555555'
+    $s[1].context.launch.workspace | Should -Be 'vdws-avdlz-dev'
+    $s[3].context.launch.workspaceObjectId | Should -Be 'a0a0a0a0-0000-4000-8000-00000000d0d0'
+    $s[3].context.launch.workspace | Should -Be 'vdws-avdlz-dev-demo'
+  }
+  It 'leaves the launch link out when ARM returns no objectId' { $out | Should -Match 'RESULT launch-missing hasLaunch=False' }
 }
 
 Describe 'Pre-deployment: empty subscription, then a blocked prod deployment' {
@@ -394,5 +404,40 @@ Describe 'Golden image build' {
     Get-StepExit $out 'deploy-fails' | Should -Be 1
     Get-BuildLine 'deploy-fails' | Should -Match 'status=failed .* deploys=1 templatesLeft=0'
     $out | Should -Match 'InvalidTemplateDeployment'
+  }
+}
+
+Describe 'Verify access: the connection check fails closed (decision 0014)' {
+  BeforeAll { $script:out = Invoke-OfflineScenario 'VerifyConnection' }
+  It 'verifies a connection that reached Connected, after waiting for it to arrive' {
+    Get-StepExit $out 'verified' | Should -Be 0
+    $out | Should -Match 'RESULT verified-calls queries=3 first=LAQUERY 66666666-6666-6666-6666-666666666666 admin@contoso\.com /subscriptions/[^ ]+/resourceGroups/rg-avdlz-dev-avd'
+    $out | Should -Match 'Connection setup \(Started to Connected\): 12\.4 s'
+  }
+  It 'reports errors without a connection as failed, after a second look' {
+    Get-StepExit $out 'failed' | Should -Be 1
+    $out | Should -Match 'RESULT failed-calls queries=2 '
+  }
+  It 'never passes on no rows, a connection still in progress or a failed query' {
+    foreach ($case in 'none', 'inprogress', 'forbidden') { Get-StepExit $out $case | Should -Be 1 -Because $case }
+    $out | Should -Match 'RESULT none-calls queries=3 '
+    $out | Should -Match 'RESULT forbidden-calls queries=1 '
+    $out | Should -Match 'Log Analytics query failed \(403\)'
+  }
+  It 'checks the demo desktop for another user' {
+    Get-StepExit $out 'demo' | Should -Be 0
+    $out | Should -Match 'RESULT demo-calls queries=1 first=LAQUERY \S+ alex@contoso\.com /subscriptions/[^ ]+/resourceGroups/rg-avdlz-dev-demo'
+  }
+  It 'ends every run with a verify state line the portal reads' {
+    $s = Get-PortalState $out
+    ($s | ForEach-Object { "$($_.stage):$($_.status)" }) -join ' ' |
+      Should -Be 'verify:verified verify:failed verify:notverified verify:notverified verify:notverified verify:verified'
+    $s[0].context.connections[0].connectionSetupSeconds | Should -Be 12.4
+    $s[0].warnings[0].id | Should -Be 'connect-errors'
+    $s[1].failures[0].id | Should -Be 'connect-errors'
+    $s[2].failures[0].id | Should -Be 'no-connection'
+    $s[3].failures[0].id | Should -Be 'in-progress'
+    $s[4].failures[0].id | Should -Be 'query-failed'
+    $s[4].failures[0].data.status | Should -Be 403
   }
 }
