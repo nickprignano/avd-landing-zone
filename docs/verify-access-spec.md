@@ -465,7 +465,9 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 
 ## 12. Open questions for the owner
 
-**Answered 2026-10-05:** the owner agreed with every proposed answer below. Q1: only the confirmed hosts. Q2: document trusted devices. Q3: pick the route at A3 and mark it. Q5: no peering to the spoke. Q6: public access restricted to the NAT IP is the fallback. Q7: spike. Q8: PowerShell 5.1 + REST. Q11: its own template and run. Q10: CBA if a spike shows it works unattended, else TOTP. Q12: a 7-day blob container. Still open, because they ask for facts or a choice without a proposal: Q4 (which model access you hold, and where), Q9 (logoff rights) and Q10's license for the test user. They're needed before B1, B3 and B4.
+**Answered 2026-10-05:** the owner agreed with every proposed answer below. Q1: only the confirmed hosts. Q2: document trusted devices. Q3: pick the route at A3 and mark it. Q5: no peering to the spoke. Q6: public access restricted to the NAT IP is the fallback. Q7: spike. Q8: PowerShell 5.1 + REST. Q11: its own template and run. Q10: CBA if a spike shows it works unattended, else TOTP. Q12: a 7-day blob container. **Answered 2026-10-05 (later):** Q4: no model access is held yet. Q10: no license for a test user yet. Q9: deferred to a red-team review of Track B.
+
+**What that means for Track B.** It is **blocked on two prerequisites the repo can't supply**: approved access to a computer-use model (aka.ms/OAI/gpt54access, §7.4) and an AVD-eligible license for the test user (§10a). B1 could be written and compiled without them, but nothing in it could be checked against a real deployment, and every unverified fact in §11 (B4, B6, B10, B22) would stay unverified. So Track B waits for both. The next step that needs neither is the red-team review, which also settles Q9 (logoff rights), following the pattern of [image-pipeline-redteam.md](image-pipeline-redteam.md).
 
 1. **Q1, probe hosts:** add `rdweb.wvd.microsoft.com` and `client.wvd.microsoft.com` as informational and unconfirmed, or probe only the two confirmed hosts? *Proposed: only the confirmed ones.*
 2. **Q2, consent prompt:** document trusted devices only (proposed), or have the post-deployment `-Fix` create a device group of the session hosts and register it with `targetDeviceGroups`? The second needs a new Graph permission in the operator's sign-in, and a group that tracks hosts.
@@ -493,4 +495,4 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 | **B3** | Harness, offline-tested against a mocked Responses API (actions, safety check, budget, kill switch, logoff in every exit path) | Pester green. No real Foundry call has been made |
 | **B4** | Test identity as chosen, portal wiring, optional schedule | After the owner's B4 decision |
 
-Each phase is one commit. Track B starts only after the owner answers §12.
+Each phase is one commit. Track A (A1–A3) is built. Track B waits for model access and a test user license (§12), with a red-team review of §7–§10c first.
