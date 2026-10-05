@@ -1,6 +1,6 @@
 # Spec: verify access from the operator's device, and an optional computer-use agent
 
-- **Status:** Proposed. Phase 0 design record, waiting for the owner's review (§12). Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B).
+- **Status:** Proposed. The owner agreed with every proposal in §12 (2026-10-05); Phase A1 is built. Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B).
 - **Date:** 2026-10-05
 - **Scope:** landing zones built from this repo. Track A changes the deployment portal and the ops scripts, not the deployed resources. Track B is a separate, optional deployment, off by default.
 
@@ -465,6 +465,8 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 | B22 | Setting the console display resolution on an Azure VM without RDP; Windows App MSIX unattended install and its dependencies | **Not verified** (B2 spike) | — |
 
 ## 12. Open questions for the owner
+
+**Answered 2026-10-05:** the owner agreed with every proposed answer below. Q1: only the confirmed hosts. Q2: document trusted devices. Q3: pick the route at A3 and mark it. Q5: no peering to the spoke. Q6: public access restricted to the NAT IP is the fallback. Q7: spike. Q8: PowerShell 5.1 + REST. Q11: its own template and run. Q10: CBA if a spike shows it works unattended, else TOTP. Q12: a 7-day blob container. Still open, because they ask for facts or a choice without a proposal: Q4 (which model access you hold, and where), Q9 (logoff rights) and Q10's license for the test user. They're needed before B1, B3 and B4.
 
 1. **Q1, probe hosts:** add `rdweb.wvd.microsoft.com` and `client.wvd.microsoft.com` as informational and unconfirmed, or probe only the two confirmed hosts? *Proposed: only the confirmed ones.*
 2. **Q2, consent prompt:** document trusted devices only (proposed), or have the post-deployment `-Fix` create a device group of the session hosts and register it with `targetDeviceGroups`? The second needs a new Graph permission in the operator's sign-in, and a group that tracks hosts.

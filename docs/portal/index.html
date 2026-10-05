@@ -245,6 +245,29 @@
       <h2><span class="n"></span>Sign in</h2>
       <div class="slot"></div>
     </section>
+    <section class="slide" id="slide-verify" data-step="verify" aria-label="Verify access">
+      <h2><span class="n"></span>Verify access <span class="muted" style="font-weight:400">· <span id="reach-summary">not checked</span></span></h2>
+      <p class="status">Checks access to the desktop <strong>from this device and network</strong>, signed in as yourself. Run it where people will connect from. Each check says what it proves and what it doesn't.</p>
+      <div class="pool">
+        <h3>Can this device reach AVD?</h3>
+        <div class="row">
+          <button id="reach-run">Check reachability</button>
+          <span class="status" id="reach-status" role="status">A few seconds: each host gets a warm-up request and 5 timed ones. Nothing you paste or measure leaves this browser.</span>
+        </div>
+        <div id="reach-results" class="hidden" style="margin-top:12px">
+          <p id="reach-headline" style="margin:0 0 4px"><strong></strong></p>
+          <p class="status" id="reach-guidance" style="margin:0 0 8px"></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Host</th><th>Used for</th><th class="num">Median</th><th>Result</th></tr></thead>
+              <tbody id="reach-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <p class="status" id="reach-limits" style="margin:8px 0 0"></p>
+      </div>
+      <div class="slot"></div>
+    </section>
   </div>
   <nav class="stepnav" aria-label="Step navigation">
     <button type="button" class="secondary" id="prev-step">&larr; Back</button>
@@ -518,6 +541,7 @@
     try { Object.keys(localStorage).filter(function (k) { return k.indexOf('avdlz.portal.') === 0; }).forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { /* storage unavailable */ }
     cfg = Object.assign({}, P.DEFAULTS, { repoUrl: repoUrl, sizing: null, power: null, hoursWorkedPerWeek: 50 }); step = null; reached = 0; ranked = null; lastAnalysis = null; latency = [];
     pools = [Object.assign({}, P.HOST_POOL_DEFAULTS)]; estimate = null; renderPools(); renderCost();
+    reach = null; $('reach-results').classList.add('hidden'); renderReachability();
     $('results').classList.add('hidden'); $('paste').value = ''; setConfig({}); render(); showStep();
   });
 
@@ -717,28 +741,26 @@
   var SAMPLES = 5, TIMEOUT_MS = 4000, CONCURRENCY = 3, TOP = 5;
   var latency = [], expanded = false;
 
-  function timeOnce(region) {
+  // https://<host>/ with a cache-busting query; the latency test times each region's endpoint, the
+  // reachability probe the AVD client hosts.
+  function timeOnce(host) {
     var ctrl = new AbortController(), timer = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
-    var url = 'https://' + region + '.api.cognitive.microsoft.com/?avdlz=' + Date.now() + Math.random().toString(36).slice(2);
+    var url = 'https://' + host + '/?avdlz=' + Date.now() + Math.random().toString(36).slice(2);
     var t0 = performance.now();
-    // no-cors: the response is opaque, but only the elapsed time is needed.
+    // no-cors: the response is opaque, but only the elapsed time is needed. A rejection means DNS,
+    // TLS, a block or the timeout.
     return fetch(url, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctrl.signal })
       .then(function () { return performance.now() - t0; }).finally(function () { clearTimeout(timer); });
   }
-  function measure(region) {
+  function measure(host) {
     // The warm-up pays for DNS, TCP and TLS; the timed requests reuse the connection.
-    return timeOnce(region).then(function () {
+    return timeOnce(host).then(function () {
       var times = [], chain = Promise.resolve();
-      for (var i = 0; i < SAMPLES; i++) chain = chain.then(function () { return timeOnce(region).then(function (t) { times.push(t); }); });
+      for (var i = 0; i < SAMPLES; i++) chain = chain.then(function () { return timeOnce(host).then(function (t) { times.push(t); }); });
       return chain.then(function () { times.sort(function (a, b) { return a - b; }); return times[Math.floor(times.length / 2)]; });
     });
   }
-  function rating(ms) {
-    if (ms === null) return ['No answer', 'muted'];
-    if (ms < 100) return ['Good', 'good'];
-    if (ms <= 150) return ['Usable', 'ok'];
-    return ['Sluggish', 'poor'];
-  }
+  function rating(ms) { var r = P.rateLatency(ms); return [r.label, r.cls]; }
   function runLatency() {
     var geos = Array.prototype.map.call(document.querySelectorAll('#geos input:checked'), function (c) { return c.value; });
     var todo = REGIONS.filter(function (r) { return geos.indexOf(r[2]) >= 0; });
@@ -750,7 +772,7 @@
     function worker() {
       if (next >= todo.length) return Promise.resolve();
       var r = todo[next++];
-      return measure(r[0]).then(
+      return measure(r[0] + '.api.cognitive.microsoft.com').then(
         function (m) { latency.push({ name: r[0], display: r[1], geo: r[2], median: m }); },
         function () { latency.push({ name: r[0], display: r[1], geo: r[2], median: null }); }
       ).then(function () { bar.value = ++done; }).then(worker);
@@ -804,10 +826,53 @@
   $('run').addEventListener('click', runLatency);
   $('more').addEventListener('click', function () { expanded = !expanded; renderLatency(); });
 
+  // ---------------------------------------------------------------- verify access: reachability (decision 0014)
+  // Same method as the latency test; portal-core.js classifies the result. Only a summary is kept.
+  var reach = null;
+  function runReachability() {
+    $('reach-run').disabled = true;
+    $('reach-status').textContent = 'Checking ' + P.REACHABILITY_HOSTS.length + ' hosts...';
+    var results = [];
+    Promise.all(P.REACHABILITY_HOSTS.map(function (h) {
+      return measure(h.host).then(function (m) { results.push({ host: h.host, median: m }); }, function () { results.push({ host: h.host, median: null }); });
+    })).then(function () {
+      reach = P.classifyReachability(results);
+      save('reachability', { status: reach.status, checkedAt: new Date().toISOString() });
+      $('reach-run').disabled = false; $('reach-run').textContent = 'Check again';
+      $('reach-status').textContent = 'Checked just now.';
+      renderReachability();
+    });
+  }
+  function renderReachability() {
+    var r = reach || P.classifyReachability([]), last = load('reachability', null);
+    var label = { reachable: 'reachable', partial: 'partly reachable', blocked: 'blocked', unknown: 'not checked' };
+    $('reach-summary').textContent = reach ? label[r.status] : (last && label[last.status] ? label[last.status] + ' (last check)' : 'not checked');
+    $('reach-limits').textContent = r.limits;
+    if (!reach) return;
+    $('reach-results').classList.remove('hidden');
+    var strong = $('reach-headline').querySelector('strong');
+    strong.textContent = r.headline;
+    strong.className = r.status === 'reachable' ? 'good' : r.status === 'partial' ? 'ok' : 'poor';
+    $('reach-guidance').textContent = r.guidance;
+    var tbody = $('reach-rows'); tbody.textContent = '';
+    r.hosts.forEach(function (h) {
+      var tr = document.createElement('tr');
+      [h.host, h.purpose, h.median === null ? '–' : Math.round(h.median) + ' ms', h.reached ? 'Reached' : h.reached === false ? 'No answer' : 'Not tested'].forEach(function (t, c) {
+        var td = document.createElement('td'); td.textContent = t;
+        if (c === 1) td.style.whiteSpace = 'normal';
+        if (c === 2) td.className = 'num';
+        if (c === 3) td.className = h.reached ? 'good' : 'poor';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+  }
+  $('reach-run').addEventListener('click', runReachability);
+
   // ---------------------------------------------------------------- start
   if (/^#(region|size|cost)$/.test(location.hash) && stepIndex(location.hash.slice(1)) <= reached) step = location.hash.slice(1);
   setConfig({});
-  renderPools(); renderCost();
+  renderPools(); renderCost(); renderReachability();
   render(); showStep('instant');
 })();
 </script>

@@ -507,3 +507,63 @@ test('real: deployment failed on the data collection rule (workspace tables not 
   assert.match(last(r.actions[0].command), /deploy\.sh -p parameters\/dev\.bicepparam -l northcentralus .* --hosts 1 --vm-size Standard_E4as_v5 --max-sessions 16 --profile-quota 100$/);
   assertSelfContained(r);
 });
+
+// ---------------------------------------------------------------- verify access: reachability probe (decision 0014)
+test('reachability: every host reached -> reachable, with the latency step\'s ratings', () => {
+  const r = P.classifyReachability([{ host: 'login.microsoftonline.com', median: 42 }, { host: 'windows.cloud.microsoft', median: 160 }]);
+  assert.equal(r.status, 'reachable');
+  assert.deepEqual(r.hosts.map((h) => [h.host, h.reached, h.rating.label]), [['login.microsoftonline.com', true, 'Good'], ['windows.cloud.microsoft', true, 'Sluggish']]);
+  assert.match(r.guidance, /doesn't show you can sign in/);
+});
+
+test('reachability: one host failed -> partial, names it, still a warning to try the desktop', () => {
+  const r = P.classifyReachability([{ host: 'login.microsoftonline.com', median: 30 }, { host: 'windows.cloud.microsoft', median: null }]);
+  assert.equal(r.status, 'partial');
+  assert.match(r.headline, /windows\.cloud\.microsoft/);
+  assert.doesNotMatch(r.headline, /login\.microsoftonline\.com/);
+  assert.match(r.guidance, /warning, not a stop/);
+});
+
+test('reachability: fails closed: nothing reached -> blocked; untested or malformed is never reached', () => {
+  const blocked = P.classifyReachability([{ host: 'login.microsoftonline.com', median: null }, { host: 'windows.cloud.microsoft', median: null }]);
+  assert.equal(blocked.status, 'blocked');
+  assert.match(blocked.guidance, /warning, not a stop/);
+  // A host missing from the results was not tested, so the rest can't be "reachable".
+  const missing = P.classifyReachability([{ host: 'login.microsoftonline.com', median: 20 }]);
+  assert.equal(missing.status, 'partial');
+  assert.equal(missing.hosts[1].reached, null);
+  assert.equal(P.classifyReachability([{ host: 'login.microsoftonline.com', median: NaN }, { host: 'windows.cloud.microsoft', median: '12' }]).status, 'blocked');
+  // Results for other hosts are ignored.
+  assert.equal(P.classifyReachability([{ host: 'example.com', median: 5 }]).status, 'unknown');
+  for (const x of [[], null, undefined, 'x']) assert.equal(P.classifyReachability(x).status, 'unknown');
+});
+
+test('reachability: says what it does not prove', () => {
+  const { limits } = P.classifyReachability([]);
+  for (const s of [/sign-in/, /\*\.wvd\.microsoft\.com/, /UDP/, /block page/, /front door/]) assert.match(limits, s);
+});
+
+test('reachability: probes only concrete hosts from the AVD end-user list', () => {
+  assert.deepEqual(P.REACHABILITY_HOSTS.map((h) => h.host), ['login.microsoftonline.com', 'windows.cloud.microsoft']);
+  for (const h of P.REACHABILITY_HOSTS) assert.doesNotMatch(h.host, /\*/);
+});
+
+test('rating: the latency step\'s thresholds (under 100 good, to 150 usable, above sluggish)', () => {
+  assert.deepEqual([99, 100, 150, 151, null].map((ms) => P.rateLatency(ms).label), ['Good', 'Usable', 'Usable', 'Sluggish', 'No answer']);
+});
+
+test('page: Verify access comes after Sign in, holds the probe, and the page fetches only through the timed probe', () => {
+  const html = readFileSync(new URL('../../docs/portal/index.html', import.meta.url), 'utf8');
+  assert.deepEqual(P.STEPS.slice(-2).map((s) => s.id), ['signin', 'verify']);
+  const verify = html.slice(html.indexOf('data-step="verify"'), html.indexOf('</section>', html.indexOf('data-step="verify"')));
+  assert.match(verify, /id="reach-run"/);
+  assert.match(verify, /class="slot"/, 'the shared next-step box and paste box can sit in it');
+  // Nothing pasted or measured leaves the browser: one fetch, no-cors, no credentials, no referrer, no body.
+  const fetches = [...html.matchAll(/\bfetch\(([^)]*)\)/g)];
+  assert.equal(fetches.length, 1);
+  assert.match(fetches[0][1], /mode: 'no-cors'.*credentials: 'omit'.*referrerPolicy: 'no-referrer'/);
+  assert.doesNotMatch(html, /XMLHttpRequest|sendBeacon|new WebSocket|new EventSource/);
+  for (const f of ['portal-core.js', 'report.js']) {
+    assert.doesNotMatch(readFileSync(new URL(`../../docs/portal/${f}`, import.meta.url), 'utf8'), /\bfetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource/, f);
+  }
+});

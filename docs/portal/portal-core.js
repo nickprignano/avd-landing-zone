@@ -23,7 +23,8 @@
     { id: 'predeploy', title: 'Pre-deployment preflight' },
     { id: 'deploy', title: 'Deploy the landing zone' },
     { id: 'postdeploy', title: 'Post-deployment setup' },
-    { id: 'signin', title: 'Sign in' }
+    { id: 'signin', title: 'Sign in' },
+    { id: 'verify', title: 'Verify access' }
   ];
 
   var DEFAULTS = {
@@ -575,6 +576,56 @@
     }
   }
 
+  // ---------------------------------------------------------------- verify access: reachability (decision 0014)
+  // Concrete hosts from Microsoft's required endpoints for end-user devices
+  // (https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint). Most of that list is
+  // wildcards, which a browser can't probe; *.wvd.microsoft.com (feed, broker, gateway) is the important one.
+  // UNVERIFIED wording: confirmed from a search summary of the page, not its text (verify-access-spec.md §11 A1).
+  var REACHABILITY_HOSTS = [
+    { host: 'login.microsoftonline.com', purpose: 'Microsoft Entra ID sign-in' },
+    { host: 'windows.cloud.microsoft', purpose: 'Web client and Windows App service' }
+  ];
+  var REACHABILITY_LIMITS = 'Reached means this browser, on this network, completed DNS, a connection and TLS to the host and got a response. ' +
+    'It doesn\'t test sign-in, your access to the desktop, the feed and gateway hosts (*.wvd.microsoft.com, which can\'t be probed by name), ' +
+    'UDP (RDP Shortpath), or the session host. A proxy that answers with its own block page also counts as reached. ' +
+    'The time is to Microsoft\'s nearest front door, not to your session host\'s region.';
+
+  // The latency step's rating, shared with the reachability probe.
+  function rateLatency(ms) {
+    if (ms === null || ms === undefined || isNaN(ms)) return { label: 'No answer', cls: 'muted' };
+    if (ms < 100) return { label: 'Good', cls: 'good' };
+    if (ms <= 150) return { label: 'Usable', cls: 'ok' };
+    return { label: 'Sluggish', cls: 'poor' };
+  }
+
+  // results: [{ host, median }] from the page's probe; median is null when every request failed.
+  // A host missing from results was not tested. Only all hosts reached is "reachable" (fail closed).
+  function classifyReachability(results) {
+    var list = Array.isArray(results) ? results : [];
+    var hosts = REACHABILITY_HOSTS.map(function (h) {
+      var r = list.filter(function (x) { return x && x.host === h.host; })[0];
+      var tested = !!r, reached = tested && typeof r.median === 'number' && !isNaN(r.median);
+      return { host: h.host, purpose: h.purpose, reached: tested ? reached : null, median: reached ? r.median : null, rating: rateLatency(reached ? r.median : null) };
+    });
+    var ok = hosts.filter(function (h) { return h.reached === true; }), tested = hosts.filter(function (h) { return h.reached !== null; });
+    var failed = hosts.filter(function (h) { return h.reached !== true; }).map(function (h) { return h.host; });
+    var o = { hosts: hosts, limits: REACHABILITY_LIMITS };
+    if (!tested.length) {
+      o.status = 'unknown'; o.headline = 'Not checked yet';
+      o.guidance = 'Run the check from the device and network people will connect from.';
+    } else if (ok.length === hosts.length) {
+      o.status = 'reachable'; o.headline = 'This device reaches AVD\'s sign-in and client hosts';
+      o.guidance = 'Next, open the desktop. A result here is a network check only; it doesn\'t show you can sign in.';
+    } else if (ok.length) {
+      o.status = 'partial'; o.headline = 'Some hosts didn\'t answer: ' + failed.join(', ');
+      o.guidance = 'A warning, not a stop: you can still try the desktop. A firewall, proxy, DNS filter or content blocker may be stopping these hosts. If the desktop fails, your network must allow the AVD end-user endpoints: https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint';
+    } else {
+      o.status = 'blocked'; o.headline = 'No AVD host answered';
+      o.guidance = 'A warning, not a stop: you can still try the desktop. A firewall, proxy, DNS filter, captive portal or content blocker is stopping requests to AVD from this browser. Try another network or turn off the blocker for this page. Your network must allow the AVD end-user endpoints: https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint';
+    }
+    return o;
+  }
+
   // The first command for someone who has not run anything yet.
   function firstStep(config) {
     var cfg = merge(DEFAULTS, config);
@@ -593,12 +644,16 @@
       case 'deploy': return [{ title: 'Deploy the landing zone', why: 'Run this once the pre-deployment preflight is Ready. It takes 30-45 minutes and keeps running in Azure if Cloud Shell disconnects.', command: cmd.deploy(cfg) },
         { title: 'Already started? Check on it', why: 'Shows the latest deployment and any failed resources.', command: cmd.deployStatus(cfg) }];
       case 'postdeploy': return [{ title: 'Run the post-deployment setup', why: 'Admin consent for the storage app, the Conditional Access exclusion and the profile share permissions. It asks for a Microsoft Graph device code.', command: cmd.postdeploy(cfg, true) }];
-      case 'signin': return [{ title: 'Sign in to the desktop', why: 'Open https://windows.cloud.microsoft (or the Windows App) as a member of ' + cfg.usersGroup + '.', command: '' },
+      case 'signin': return [{ title: 'Sign in to the desktop', why: 'Open https://windows.cloud.microsoft (or the Windows App) as a member of ' + cfg.usersGroup + '. The next step, Verify access, checks this device can reach AVD.', command: '' },
         { title: 'Optional: validate sign-in with a demo host pool', why: 'Deploys a separate demo host pool and checks the host and your test user.', command: cmd.demo(cfg) },
         { title: 'Optional: Well-Architected review', why: 'Reviews the deployed landing zone by pillar. Findings are warnings; no Graph sign-in needed.', command: cmd.wellArchitected(cfg) }];
+      case 'verify': return [{ title: 'Open the desktop', why: 'After the reachability check, open https://windows.cloud.microsoft (or the Windows App) and sign in as a member of ' + cfg.usersGroup +
+        '. New group members can take up to an hour to see the desktop. The first time you connect to a session host, a prompt asks you to allow the remote desktop connection: that is expected, choose Yes. ' +
+        'If the hosts are stopped, the first connection waits for one to start (a few minutes), so it isn\'t representative of later sign-ins.', command: '' }];
       default: return [firstStep(cfg)];
     }
   }
 
-  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, powerDefaults: powerDefaults, effectivePower: effectivePower, hostHours: hostHours, repriceEstimate: repriceEstimate, pricedHours: pricedHours, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote };
+  return { STEPS: STEPS, DEFAULTS: DEFAULTS, WORKLOADS: WORKLOADS, VM_SIZES: VM_SIZES, HOST_POOL_DEFAULTS: HOST_POOL_DEFAULTS, MAX_HOST_POOLS: MAX_HOST_POOLS, MAX_HOSTS: MAX_HOSTS, computePool: computePool, toSizing: toSizing, powerDefaults: powerDefaults, effectivePower: effectivePower, hostHours: hostHours, repriceEstimate: repriceEstimate, pricedHours: pricedHours, analyze: analyze, extractStates: extractStates, firstStep: firstStep, actionsForStep: actionsForStep, commands: cmd, psQuote: psQuote,
+    REACHABILITY_HOSTS: REACHABILITY_HOSTS, rateLatency: rateLatency, classifyReachability: classifyReachability };
 });
