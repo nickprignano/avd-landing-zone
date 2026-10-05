@@ -190,6 +190,35 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
   }
 }
 
+Describe 'deploy.sh with session hosts that are not running (real run, 2026-10-05)' {
+  # Lesson 0026: Azure refuses to update the run commands of a host that isn't running.
+  BeforeAll {
+    $script:out = Invoke-OfflineScenario 'Deploy'
+    function Get-Result([string] $Key) { $m = [regex]::Match($out, "RESULT $([regex]::Escape($Key)) (.*)"); if (-not $m.Success) { throw "No RESULT line for '$Key'." }; $m.Groups[1].Value.Trim() }
+  }
+  It 'starts a deallocated host before the deployment and deallocates it after' {
+    Get-StepExit $out 'stopped' | Should -Be 0
+    Get-Result 'stopped-calls' | Should -Be 'group-exists,vm-list,vm-start,deployment-create,vm-deallocate'
+    Get-Result 'stopped-ids' | Should -Be 'avdlzdsh-001,avdlzdsh-001'
+  }
+  It 'deallocates it again when the deployment fails, and still fails' {
+    Get-StepExit $out 'stopped-fails' | Should -Be 1
+    Get-Result 'stopped-fails-calls' | Should -Be 'group-exists,vm-list,vm-start,deployment-create,vm-deallocate'
+  }
+  It 'only reports it on a what-if' {
+    Get-StepExit $out 'whatif' | Should -Be 0
+    Get-Result 'whatif-calls' | Should -Be 'group-exists,vm-list,deployment-what-if'
+    $out | Should -Match 'Not running: avdlzdsh-001'
+  }
+  It 'touches no host when all are running, or on a first deployment' {
+    Get-Result 'running-calls' | Should -Be 'group-exists,vm-list,deployment-create'
+    Get-Result 'first-calls' | Should -Be 'group-exists,deployment-create'
+  }
+  It 'makes no az call the fake does not know' {
+    foreach ($s in 'stopped', 'stopped-fails', 'whatif', 'running', 'first') { Get-Result "$s-unmocked" | Should -Be 'False' }
+  }
+}
+
 Describe 'Post-deployment quota on a deployed landing zone (real run, 2026-09-30)' {
   BeforeAll { $script:out = Invoke-OfflineScenario 'PostDeployQuota' }
 

@@ -31,6 +31,7 @@ Add a lesson whenever a real run fails for a reason the tests didn't catch. The 
 | 0023 | [Deleting a resource group only soft-deletes its Log Analytics workspace](0023-log-analytics-soft-delete.md) | Cleanup | after #29 | PostDeployment scenario (remove-lz-workspace) + portal fixture |
 | 0024 | [A deployed host's vCPUs are already in "used"; the quota check must not count them twice](0024-quota-counts-deployed-hosts.md) | Preflight | after #29 | PostDeployQuota scenario |
 | 0025 | [The price list gains lookalike meters; match the product, not just the SKU](0025-retail-price-lookalike-meters.md) | Preflight | after #32 | PreDeployment scenario (lookalike meters; Private Link and NAT Gateway under Global) |
+| 0026 | [A redeploy needs the session hosts running; power management keeps them stopped](0026-redeploy-stopped-hosts.md) | deploy.sh | #36 | Deploy scenario (fake az) |
 
 ## Template
 
