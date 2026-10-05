@@ -12,8 +12,14 @@ Track A (decision 0014) needs a person. An unattended, repeatable check would ca
   - Access is a prerequisite the preflight names.
   - The run deploys the model first, and rolls the account back when it fails, rather than leaving a half-built track.
 - **Isolation:** a workgroup Windows 11 VM in its own VNet, never peered to the landing zone spoke. No public IP, Trusted Launch, encryption at host, 443 egress only, keyless Foundry behind a private endpoint, and its own Key Vault.
-- **Credentials:** the harness types them itself through a function tool the model can call but never read. Safety checks are never acknowledged: the run stops with *needs review*.
-- **Bounds and evidence:** an iteration cap, a wall-clock limit, a token budget and a tag kill switch. It always logs off. Evidence is kept 7 days with restricted access. Timing still comes from telemetry, not the loop.
+- **Credentials and actions** (after the [red-team review](../verify-access-redteam.md)):
+  - Sign-in is deterministic, with no model involved, and certificate-based authentication is preferred.
+  - The model only observes the desktop afterwards (`screenshot` and `wait`). Any other action ends the run for review.
+  - A broker service in session 0 holds the identity, and the agent's session can't reach IMDS or launch anything outside an application allowlist.
+  - The agent signs in only to a dedicated check pool, where its identity alone may log sessions off (Q9).
+  - Safety checks are never acknowledged: the run stops with *needs review*.
+- **Bounds and evidence:** an iteration cap, a wall-clock limit, a token budget, a daily run cap with a resource-group budget, and kill switches (a tag, deallocation, role removal). It always logs off. Evidence is kept 7 days, write-once, with restricted access. Timing still comes from telemetry, not the loop.
+- **Not built yet:** it waits for model access and a test user license. When both exist, a deterministic visual check with no model is tried first (red-team S1, S2).
 
 ## Alternatives considered
 - **`computer-use-preview` through Foundry Agent Service:** preview, three regions, and its tool is listed as unsupported behind network isolation.
@@ -25,4 +31,4 @@ Track A (decision 0014) needs a person. An unattended, repeatable check would ca
 - Standing cost (NAT Gateway, private endpoints, disk) and per-run tokens, priced by the preflight and measured per run. A test user license is required.
 - Screenshots of the desktop go to the Foundry endpoint, processed per the deployment type (GlobalStandard: any region).
 - Proves only what an Azure-hosted client sees. It never replaces Track A.
-- Unverified until a real run: private endpoint support for the `computer` tool, the console display resolution, an unattended Windows App install, and mixing a function tool with the `computer` tool (spec §11).
+- Unverified until a real run: private endpoint support for the `computer` tool, the console display resolution, an unattended Windows App install, the IMDS firewall rule, the application allowlist, and sign-in through UI Automation (spec §11).
