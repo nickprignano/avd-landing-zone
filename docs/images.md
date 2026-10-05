@@ -31,8 +31,13 @@ The build VM and AIB's build container run in two subnets of one landing zone's 
 ```bash
 # Azure Cloud Shell (Bash)
 cd ~ && { [ -d avd-landing-zone ] && git -C avd-landing-zone pull --ff-only || git clone https://github.com/nickprignano/avd-landing-zone; } && cd avd-landing-zone
-AVD_IMAGE_BUILD_SUBNETS=true ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam
+export AVD_IMAGE_BUILD_SUBNETS=true
+./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
+  --users-group "AVD Users" --admins-group "AVD Admins" --what-if
+# Then the same command without --what-if.
 ```
+
+Use the region, groups, sizing and power flags of that landing zone's last deployment: a flag left out falls back to the parameter file's value. The what-if should show only the two subnets and their NSG being added; anything else means a flag differs from the last deployment.
 
 This adds `snet-image-build` (`10.100.2.128/27`) and `snet-image-aci` (`10.100.2.160/27`, delegated to Azure Container Instances), with an NSG and the hosts' NAT Gateway or hub route.
 
