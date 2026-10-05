@@ -1640,13 +1640,15 @@ function Get-AvdCostEstimate {
       filter = "serviceName eq 'Storage' and armRegionName eq '$loc' and productName eq 'Premium Files' and priceType eq 'Consumption'"
       pick = { $_.skuName -eq $fileSku -and $_.meterName -match 'Provisioned' -and $_.unitOfMeasure -match 'GB/Month|GiB/Month' } }
     @{ key = 'privateendpoints'; item = "Private endpoints ($pe)"; quantity = $pe * $script:HoursPerMonth; unit = 'endpoint-hours'
-      filter = "productName eq 'Virtual Network Private Link' and armRegionName eq '$loc' and priceType eq 'Consumption'"
-      pick = { $_.meterName -match 'Private Endpoint' -and $_.meterName -notmatch 'Data|Processed' -and $_.unitOfMeasure -eq '1 Hour' } }
+      # Listed once, under armRegionName 'Global', not per region (lesson 0025). 'Fixed Private Endpoint T1' is another hourly meter.
+      filter = "productName eq 'Virtual Network Private Link' and armRegionName eq 'Global' and priceType eq 'Consumption'"
+      pick = { $_.skuName -eq 'Standard' -and $_.meterName -eq 'Standard Private Endpoint' -and $_.unitOfMeasure -eq '1 Hour' } }
   )
   if ($Plan.connectivityMode -ne 'HubPeered') {
     $specs += @{ key = 'natgateway'; item = 'NAT Gateway'; quantity = $script:HoursPerMonth; unit = 'hours'
-      filter = "productName eq 'NAT Gateway' and armRegionName eq '$loc' and priceType eq 'Consumption'"
-      pick = { $_.unitOfMeasure -eq '1 Hour' -and $_.meterName -notmatch 'Data' } }
+      # Global, like Private Link (lesson 0025). StandardV2 has its own meters.
+      filter = "productName eq 'NAT Gateway' and armRegionName eq 'Global' and priceType eq 'Consumption'"
+      pick = { $_.skuName -eq 'Standard' -and $_.meterName -eq 'Standard Gateway' -and $_.unitOfMeasure -eq '1 Hour' } }
     $specs += @{ key = 'publicip'; item = 'NAT Gateway public IP'; quantity = $script:HoursPerMonth; unit = 'hours'
       filter = "productName eq 'IP Addresses' and armRegionName eq '$loc' and priceType eq 'Consumption'"
       pick = { $_.skuName -eq 'Standard' -and $_.meterName -match 'Static Public IP' -and $_.meterName -notmatch 'IPv6' -and $_.unitOfMeasure -eq '1 Hour' } }

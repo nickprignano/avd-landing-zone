@@ -166,6 +166,10 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
     ($e.lines | Where-Object key -eq 'compute').quantity | Should -Be 780        # 3 hosts x 60 h/week x 52 / 12
     ($e.lines | Where-Object key -eq 'osdisk').unitPrice | Should -Be 20         # 'P10 LRS Disk', not 'P10 LRS Disk Mount'
     ($e.lines | Where-Object key -eq 'profiles').monthly | Should -Be 120
+    # Listed under 'Global', not the region, beside lookalike hourly meters (lesson 0025).
+    ($e.lines | Where-Object key -eq 'privateendpoints').meter | Should -Be 'Virtual Network Private Link / Standard Private Endpoint'
+    ($e.lines | Where-Object key -eq 'privateendpoints').unitPrice | Should -Be 0.01
+    ($e.lines | Where-Object key -eq 'natgateway').meter | Should -Be 'NAT Gateway / Standard Gateway'
     $e.total | Should -Be 862.4
     $e.alwaysOnTotal | Should -Be 1990.4
   }
