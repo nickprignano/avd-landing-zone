@@ -7,10 +7,11 @@ parameters/*.local.bicepparam
 *.secret
 .env
 
-# Bicep build output
-*.json
-!.github/**/*.json
-!bicepconfig.json
+# Bicep build output (bicep build / build-params write <name>.json beside the source).
+# Only there: a repo-wide *.json rule once kept the image pipeline's JSON data files out
+# of a PR (docs/lessons/0027). Data files the templates load must be committed.
+bicep/**/*.json
+parameters/**/*.json
 
 # PSRule reports
 reports/

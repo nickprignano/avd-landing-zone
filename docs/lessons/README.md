@@ -32,6 +32,7 @@ Add a lesson whenever a real run fails for a reason the tests didn't catch. The 
 | 0024 | [A deployed host's vCPUs are already in "used"; the quota check must not count them twice](0024-quota-counts-deployed-hosts.md) | Preflight | after #29 | PostDeployQuota scenario |
 | 0025 | [The price list gains lookalike meters; match the product, not just the SKU](0025-retail-price-lookalike-meters.md) | Preflight | after #32 | PreDeployment scenario (lookalike meters; Private Link and NAT Gateway under Global) |
 | 0026 | [A redeploy needs the session hosts running; power management keeps them stopped](0026-redeploy-stopped-hosts.md) | deploy.sh | #36 | Deploy scenario (fake az) |
+| 0027 | [A repo-wide `*.json` ignore rule kept the image pipeline's data files out of git](0027-gitignore-json-data-files.md) | CI | #37 #39 | Template test: files the templates load are committed |
 
 ## Template
 
