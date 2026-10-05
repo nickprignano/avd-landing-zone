@@ -107,6 +107,8 @@ avd-landing-zone/
 - [`docs/deploy.md`](docs/deploy.md): prerequisites, deployment, post-deployment steps, scaling out, teardown
 - [`docs/operations.md`](docs/operations.md): preflight with fix mode, Well-Architected review, demo host pool with sign-in validation, cleanup
 - [`docs/rebuild-spec.md`](docs/rebuild-spec.md): one prompt to rebuild this from an empty repo, with the protocol to count the prompts it takes
+- [`docs/images.md`](docs/images.md): golden images, step 1: setting up and running the monthly image build
+- [`docs/image-pipeline-spec.md`](docs/image-pipeline-spec.md): proposed spec for a golden image pipeline (Azure Image Builder → Compute Gallery) and blue/green host rotation
 - [`docs/second-brain-spec.md`](docs/second-brain-spec.md): proposed spec for a self-healing, self-learning AVD estate on Azure and GitHub
 - [`docs/demo.md`](docs/demo.md): a live demo in a 30-minute slot (dev built the night before, test deployed live beside it)
 - [Deployment portal](https://nickprignano.github.io/avd-landing-zone/portal/) ([how it works](docs/portal/README.md)): region by latency, then the next command from each pasted Cloud Shell output

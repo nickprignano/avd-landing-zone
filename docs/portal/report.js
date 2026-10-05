@@ -35,7 +35,19 @@
     'ea3f2387-9b95-492a-a190-fcdc54f7b070',
     'fb879df8-f326-4884-b1cf-06f3ad86be52',
     '082f0a83-3be5-4ba1-904c-961cca79b387', // Desktop Virtualization Contributor
-    'd3881f73-407a-4167-8283-e981cbba0404'  // Automation Operator
+    'd3881f73-407a-4167-8283-e981cbba0404', // Automation Operator
+    'b24988ac-6180-42a0-ab88-20f7382dd24c', // Contributor
+    'acdd72a7-3385-48ef-bd42-f606fba81ae7', // Reader
+    '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1', // Storage Blob Data Reader
+    // Windows policy registry keys in WDOT's profile (scripts/image/wdot/profile/PolicyRegSettings.json)
+    '309dce9b-bef4-4119-9921-a851fb12f0f4',
+    '67144949-5132-4859-8036-a737b43825d8',
+    'eb73b633-3f4e-4ba0-8f60-8f3c6f53168f',
+    '9c5a40da-b965-4fc3-8781-88dd50a6299d',
+    '3af8b24a-c441-4fa4-8c5c-bed591bfa867',
+    '2698178d-fdad-40ae-9d3c-1371703adc5b',
+    'ffc42108-4920-4acf-a4fc-8abdcc68ada4',
+    'a7a5847a-7511-4e4e-90b1-45ad2a002f51'
   ];
   // Values the repo ships with: not private, and keeping them keeps reports readable.
   var DEFAULT_VALUES = ['avdlz', 'avd users', 'avd admins', 'dev', 'test', 'prod', 'northcentralus'];

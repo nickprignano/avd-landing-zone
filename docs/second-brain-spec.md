@@ -89,7 +89,7 @@ There are two roles, and the safety rules apply to each one differently.
 | Ships or holds | Code, templates, detections, playbooks, generic lessons; exception **templates**; conservative defaults (`maxLevel = 1`, EX-0003 with no playbooks) | Their active exceptions, their EX-0003 entries, their approvers, their episodes |
 | Approvals | The maintainer alone, in **solo mode** (§9.3) | Solo mode with one approver; **team mode** with two or more |
 
-**Upstream changes are guardrail changes.** An adopter syncs from a **release tag**, never from `master`. Releases carry GitHub artifact attestations. A sync PR runs `brain-guard` (§9.2) like any other PR, so an adopter sees every guardrail field that upstream changed before merging it. Upstream never ships an active exception beyond EX-0001, EX-0002 and EX-0004, so a release can't turn on self-healing in someone's tenant.
+**Upstream changes are guardrail changes.** An adopter syncs from a **release tag**, never from `master`. Releases carry GitHub artifact attestations. A sync PR runs `brain-guard` (§9.2) like any other PR, so an adopter sees every guardrail field that upstream changed before merging it. Upstream never ships an active exception beyond EX-0001, EX-0002, EX-0004 and EX-0005, so a release can't turn on self-healing in someone's tenant.
 
 ## 4. Architecture
 
@@ -306,7 +306,7 @@ Playbooks are actions in `scripts/automation/Invoke-AvdPlaybook.ps1`. Like decis
     - `restart-avd-agent`: `virtualMachines/read`, `virtualMachines/runCommands/read|write|delete`, `hostpools/sessionhosts/read`;
     - `recycle-empty-host`: `virtualMachines/read`, `virtualMachines/restart/action`, `hostpools/sessionhosts/read|write`, `sessionhosts/usersessions/read`;
   - **Run Command scripts are fixed files** in `scripts/ops/host/`, Windows PowerShell 5.1, with no parameters or only enumerated ones. The playbook pins each script's SHA-256. The executor hashes the file at the approved commit, refuses on a mismatch, sends the script inline, reads back its output and deletes the Run Command resource afterwards;
-  - an Activity Log alert fires on `runCommands/write` by anyone except the deploy identity or an executor. A write by an executor without a matching plan trips the kill switch (EX-0004);
+  - an Activity Log alert fires on `runCommands/write` by anyone except the deploy identity, an executor, or the image pipeline's `image-validate` identity on the QA resource groups (EX-0005). A write by an executor without a matching plan trips the kill switch (EX-0004);
   - decision 0011's runbook (EX-0001, EX-0002) is pinned by content hash as well (`publishContentLink.contentHash`; verify the property against the Automation API at build);
   - agents' identities are Reader plus Log Analytics Reader;
   - no identity can write role assignments, policy or Key Vault secrets.
@@ -350,6 +350,7 @@ There are three kinds:
 | EX-0002 | External | Scheduled **Stop**: deallocate idle hosts (decision 0011) | The auto-shutdown schedule (`AVD_AUTO_SHUTDOWN_TIME`) | The landing zone's hosts | Owner, 2026-10-04 | With the schedule parameters |
 | EX-0003 | Standing | **Self-healing**: the playbooks in the table below, each on one host at a time | Each playbook's own detection signature, computed by the detection, never by an agent | Per playbook | Owner, 2026-10-04 (as a category; each playbook enters by PR) | Every 180 days, and on any change to a listed playbook |
 | EX-0004 | Safety | **Kill switch**: halt the brain's actions, or all of it; cut the executors' credentials | A person (one is enough), or the watchdog's deterministic triggers | The brain's own resource group and identities only | Owner, 2026-10-04 | Every 180 days, and after every real trip |
+| EX-0005 | External | **Image validation**: rotate a QA pool to a new image version, and back to the last validated version on failure ([image-pipeline-spec.md](image-pipeline-spec.md) §6.3) | A successful image build, then the hourly validation schedule | The QA resource groups only (`rg-<prefix>-<env>-qa`) | Owner, 2026-10-04 | With the image pipeline parameters |
 
 Resume after a Lock is **not** an exception. It stays an approved plan (`budget-lock-review`, §8).
 
@@ -770,6 +771,11 @@ Branch protection in solo mode:
 
 The watchdog's "merged around the rules" trigger (§9.2 rule 5) accepts the solo path, and only that path.
 
+**AI reviews are advisory, in both modes.** No review by an app, a bot or a model ever satisfies a review requirement here. That includes the repo's own `claude-review.yml` (Claude Code in GitHub Actions), Claude Code Review, and any third-party reviewer.
+- `brain-guard` ignores reviews from any account that isn't a person, and only a person's approving review counts toward the team-mode and solo-mode rules above.
+- `claude-review.yml` posts comments only, on same-repo PRs and on demand. It points out guardrail changes and whether they raise or lower capability, but the 72-hour time-lock or the second person still decides.
+- An AI review that shares the author's blind spots adds little, and one that can be steered by PR text must never be the key that unlocks a guardrail change (red-team C4).
+
 
 ### 9.4 Pseudonymization and model data (red-team H7)
 
@@ -812,7 +818,7 @@ Each phase ships on its own, is useful on its own, and is validated by a real ru
 | Phase | Delivers | Max level | Exit criterion |
 |---|---|---|---|
 | **0 (done)** | Lessons and guards, state line, portal reports, WAF review, budget runbook | — | — |
-| **0b Image pipeline** (before phase 1; Q6) | A golden image built with Azure Image Builder or Packer into an Azure Compute Gallery, and host rotation onto new image versions. Specified separately, outside the brain | — | A host pool rebuilt from a gallery image passes the post-deployment preflight and a real sign-in |
+| **0b Image pipeline** (before phase 1; Q6) | A golden image built with Azure Image Builder or Packer into an Azure Compute Gallery, and host rotation onto new image versions. Specified in [image-pipeline-spec.md](image-pipeline-spec.md), outside the brain | — | A host pool rebuilt from a gallery image passes the post-deployment preflight and a real sign-in |
 | **1 Notice (Tier 1)** | Container Apps job, detections, episode issues, pseudonymization, the diagnosis workflow, digest, brain budget, kill switch and watchdog | 1 | A real incident appears as an issue with pseudonymized evidence, the changes before it and a cited diagnosis; a kill-switch drill passes; **a ranked list of signatures from at least 30 days of real data** (red-team S2) |
 | **2 Approved fixes (Tier 2)** | Plans, `brain-execute.yml`, per-playbook identities and custom roles, hash-pinned scripts; the first playbooks taken **from the top of the ranked list**, not from §8 | 2 | 10 approved, verified runs per playbook in `test` (two or more hosts, fault-injection drills allowed) without rollback, which is EX-0003's entry criterion |
 | **3 Memory and agents (Tier 3)** | Cosmos DB episodes and vector search, Foundry agents, orchestrator, eval harness with the offline mock | 2 | Diagnoses cite the right lesson or episode in ≥ 80% of eval cases |

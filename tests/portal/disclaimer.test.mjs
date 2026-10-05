@@ -33,7 +33,8 @@ test('the portal shows the disclaimer at the top and in the footer', () => {
 test('entry-point code carries the notice', () => {
   const files = ['scripts/deploy/deploy.sh', 'scripts/ops/Test-AvdLandingZoneReadiness.ps1', 'scripts/ops/Deploy-AvdDemo.ps1',
     'scripts/ops/Remove-AvdDemo.ps1', 'scripts/ops/AvdLandingZone.psm1', 'scripts/automation/Invoke-AvdPowerAction.ps1',
-    'bicep/main.bicep', 'bicep/demo/main.bicep', 'docs/portal/portal-core.js', 'docs/portal/report.js'];
+    'bicep/main.bicep', 'bicep/demo/main.bicep', 'docs/portal/portal-core.js', 'docs/portal/report.js',
+    'bicep/images/main.bicep', 'bicep/images/build.bicep', 'scripts/ops/Start-AvdImageBuild.ps1', 'scripts/image/Invoke-Wdot.ps1', 'scripts/image/Test-GoldenImage.ps1'];
   for (const f of files) {
     const head = read(f).split('\n').slice(0, 5).join('\n');
     assert.match(head, /Personal project, not for production use\. Provided as is, without warranty of any kind \(MIT License, see LICENSE\)\. Not affiliated with the author's employer or with Microsoft\./, f);

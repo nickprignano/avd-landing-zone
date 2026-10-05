@@ -68,6 +68,15 @@ param sessionHostSubnetPrefix string = '10.100.0.0/23'
 @description('Private endpoint subnet (inside the spoke).')
 param privateEndpointSubnetPrefix string = '10.100.2.0/27'
 
+@description('Add the golden image build subnets to this spoke (docs/image-pipeline-spec.md). Only the image build environment needs them; off by default.')
+param deployImageBuildSubnets bool = false
+
+@description('Image build VM subnet (inside the spoke).')
+param imageBuildSubnetPrefix string = '10.100.2.128/27'
+
+@description('Image build container subnet, delegated to Azure Container Instances (inside the spoke).')
+param imageBuildAciSubnetPrefix string = '10.100.2.160/27'
+
 @description('HubPeered only: resource ID of the hub VNet.')
 param hubVnetResourceId string = ''
 
@@ -370,6 +379,9 @@ module network 'modules/network.bicep' = {
     dnsServers: dnsServers
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
     availabilityZones: availabilityZones
+    deployImageBuildSubnets: deployImageBuildSubnets
+    imageBuildSubnetPrefix: imageBuildSubnetPrefix
+    imageBuildAciSubnetPrefix: imageBuildAciSubnetPrefix
   }
 }
 

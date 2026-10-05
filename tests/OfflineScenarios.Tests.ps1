@@ -166,6 +166,10 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
     ($e.lines | Where-Object key -eq 'compute').quantity | Should -Be 780        # 3 hosts x 60 h/week x 52 / 12
     ($e.lines | Where-Object key -eq 'osdisk').unitPrice | Should -Be 20         # 'P10 LRS Disk', not 'P10 LRS Disk Mount'
     ($e.lines | Where-Object key -eq 'profiles').monthly | Should -Be 120
+    # Listed under 'Global', not the region, beside lookalike hourly meters (lesson 0025).
+    ($e.lines | Where-Object key -eq 'privateendpoints').meter | Should -Be 'Virtual Network Private Link / Standard Private Endpoint'
+    ($e.lines | Where-Object key -eq 'privateendpoints').unitPrice | Should -Be 0.01
+    ($e.lines | Where-Object key -eq 'natgateway').meter | Should -Be 'NAT Gateway / Standard Gateway'
     $e.total | Should -Be 862.4
     $e.alwaysOnTotal | Should -Be 1990.4
   }
@@ -183,6 +187,35 @@ Describe 'Pre-deployment: sizing from the deployment portal, and its cost' {
   It 'still finishes (and is ready) when the price API is down' {
     Get-StepExit $out 'prices-down' | Should -Be 0
     ((Get-PortalState $out)[7].warnings | Where-Object id -eq 'cost-unavailable') | Should -Not -BeNullOrEmpty
+  }
+}
+
+Describe 'deploy.sh with session hosts that are not running (real run, 2026-10-05)' {
+  # Lesson 0026: Azure refuses to update the run commands of a host that isn't running.
+  BeforeAll {
+    $script:out = Invoke-OfflineScenario 'Deploy'
+    function Get-Result([string] $Key) { $m = [regex]::Match($out, "RESULT $([regex]::Escape($Key)) (.*)"); if (-not $m.Success) { throw "No RESULT line for '$Key'." }; $m.Groups[1].Value.Trim() }
+  }
+  It 'starts a deallocated host before the deployment and deallocates it after' {
+    Get-StepExit $out 'stopped' | Should -Be 0
+    Get-Result 'stopped-calls' | Should -Be 'group-exists,vm-list,vm-start,deployment-create,vm-deallocate'
+    Get-Result 'stopped-ids' | Should -Be 'avdlzdsh-001,avdlzdsh-001'
+  }
+  It 'deallocates it again when the deployment fails, and still fails' {
+    Get-StepExit $out 'stopped-fails' | Should -Be 1
+    Get-Result 'stopped-fails-calls' | Should -Be 'group-exists,vm-list,vm-start,deployment-create,vm-deallocate'
+  }
+  It 'only reports it on a what-if' {
+    Get-StepExit $out 'whatif' | Should -Be 0
+    Get-Result 'whatif-calls' | Should -Be 'group-exists,vm-list,deployment-what-if'
+    $out | Should -Match 'Not running: avdlzdsh-001'
+  }
+  It 'touches no host when all are running, or on a first deployment' {
+    Get-Result 'running-calls' | Should -Be 'group-exists,vm-list,deployment-create'
+    Get-Result 'first-calls' | Should -Be 'group-exists,deployment-create'
+  }
+  It 'makes no az call the fake does not know' {
+    foreach ($s in 'stopped', 'stopped-fails', 'whatif', 'running', 'first') { Get-Result "$s-unmocked" | Should -Be 'False' }
   }
 }
 
@@ -318,5 +351,48 @@ Describe 'Auto shutdown runbook' {
   It 'reports what ARM returned when a call fails' { $out | Should -Match 'RESULT error ARM PATCH .*vdpool-avdlz-dev.* failed: .*AuthorizationFailed' }
   It 'prints a portal state line for each action' {
     ((Get-PortalState $out | Where-Object stage -eq 'power') | ForEach-Object status) -join ' ' | Should -Be 'stopped locked locked resumed locked resumed'
+  }
+}
+
+Describe 'Golden image build' {
+  # docs/image-pipeline-spec.md section 5; red-team M1, M2, M3, M5, M7.
+  BeforeAll {
+    $script:out = Invoke-OfflineScenario 'ImageBuild'
+    $script:day = [regex]::Escape([regex]::Match($out, 'RESULT today (\S+)').Groups[1].Value)
+    function Get-BuildLine([string] $Step) { [regex]::Match($out, "RESULT $Step-summary (.*)").Groups[1].Value }
+  }
+
+  It 'removes a leftover template, builds from the newest source version compared as numbers, and removes its own template' {
+    Get-StepExit $out 'build' | Should -Be 0
+    Get-BuildLine 'build' | Should -Match "status=succeeded version=$day\.1 source=26100\.10000\.251104 runState=Succeeded validation=3 failedChecks=0 orphans=it-avdlz-2026-901-1 deploys=1 templatesLeft=0 log=True"
+  }
+  It 'stops when the source image and the commit are unchanged, and -Force builds the day''s next version' {
+    Get-StepExit $out 'unchanged' | Should -Be 0
+    Get-BuildLine 'unchanged' | Should -Match 'status=unchanged .* deploys=0'
+    Get-BuildLine 'force' | Should -Match "status=succeeded version=$day\.2 "
+    $out | Should -Match 'RESULT force-emergency-tag True'
+  }
+  It 'fails with the log''s validation evidence when the build-time validation fails, and still removes the template' {
+    Get-StepExit $out 'failed-run' | Should -Be 1
+    Get-BuildLine 'failed-run' | Should -Match 'status=failed .* runState=Failed validation=2 failedChecks=1 .* templatesLeft=0 log=True'
+  }
+  It 'reports a failed run even when the customization log can''t be read' {
+    Get-StepExit $out 'log-unreadable' | Should -Be 1
+    Get-BuildLine 'log-unreadable' | Should -Match 'status=failed .* runState=Failed .* log=False'
+  }
+  It 'fails safe when AIB reports success but a validation line failed, marks that version, and lets the same inputs be retried' {
+    Get-StepExit $out 'inconsistent' | Should -Be 1
+    Get-BuildLine 'inconsistent' | Should -Match 'status=failed .* runState=Inconsistent'
+    $out | Should -Match 'RESULT inconsistent-tag failed:build'
+    Get-BuildLine 'retry-after-inconsistent' | Should -Match 'status=succeeded '
+  }
+  It 'stops before deploying anything when the gallery is missing or the build VM has no quota' {
+    Get-BuildLine 'no-definition' | Should -Match 'status=failed .* deploys=0'
+    Get-BuildLine 'quota' | Should -Match 'status=failed .* deploys=0'
+  }
+  It 'reports ARM''s error when the template deployment fails, and leaves no template behind' {
+    Get-StepExit $out 'deploy-fails' | Should -Be 1
+    Get-BuildLine 'deploy-fails' | Should -Match 'status=failed .* deploys=1 templatesLeft=0'
+    $out | Should -Match 'InvalidTemplateDeployment'
   }
 }

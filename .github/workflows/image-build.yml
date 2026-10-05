@@ -1,0 +1,135 @@
+name: image-build
+
+# Builds the month's golden image with Azure Image Builder (docs/image-pipeline-spec.md section 5,
+# docs/images.md). A new version is excluded from "latest", and no landing zone uses it until a
+# person promotes it, so a scheduled build needs no approval.
+#
+# Setup (docs/images.md): deploy bicep/images/main.bicep, then create the GitHub Environment
+# "images" with the variables AZURE_CLIENT_ID (the output buildIdentityClientId),
+# AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID. The identity is federated to that environment only.
+on:
+  schedule:
+    # About a week after Patch Tuesday, on the third Monday. Cron combines a day-of-month
+    # range and a day-of-week as OR, so this runs daily on days 15-21 and the job skips
+    # every day but Monday.
+    - cron: '0 6 15-21 * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even when the source image and the commit haven't changed (an out-of-band update)
+        type: boolean
+        default: false
+      emergency:
+        description: A security build (recorded on the version; spec section 5.7)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: image-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: images
+    timeout-minutes: 480
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    steps:
+      - name: Third Monday only (scheduled runs)
+        id: gate
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ] && [ "$(date -u +%u)" != "1" ]; then
+            echo "Not Monday; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          persist-credentials: false
+
+      - name: Install Bicep
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/bicep" https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x "$RUNNER_TEMP/bin/bicep"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Azure login (OIDC, the images environment's identity)
+        if: steps.gate.outputs.skip != 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          enable-AzPSSession: true
+
+      - name: Build
+        if: steps.gate.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          FORCE: ${{ inputs.force }}
+          EMERGENCY: ${{ inputs.emergency }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $p = @{
+            Commit       = $env:GITHUB_SHA
+            RunUrl       = $env:RUN_URL
+            SummaryPath  = Join-Path $env:RUNNER_TEMP 'image-summary.json'
+            LogDirectory = Join-Path $env:RUNNER_TEMP 'image-logs'
+          }
+          if ($env:FORCE -eq 'true') { $p.Force = $true }
+          if ($env:EMERGENCY -eq 'true') { $p.Emergency = $true }
+          ./scripts/ops/Start-AvdImageBuild.ps1 @p
+
+      - name: Keep the customization logs
+        if: always() && steps.gate.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-build-logs
+          path: ${{ runner.temp }}/image-logs
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Open an issue with the result
+        if: always() && steps.gate.outputs.skip != 'true'
+        uses: actions/github-script@v7
+        env:
+          SUMMARY: ${{ runner.temp }}/image-summary.json
+        with:
+          script: |
+            const fs = require('fs');
+            try { await github.rest.issues.getLabel({ ...context.repo, name: 'image-build' }); }
+            catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.issues.createLabel({ ...context.repo, name: 'image-build', color: '5319e7', description: 'Golden image build results (image-build.yml)' });
+            }
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            if (!fs.existsSync(process.env.SUMMARY)) {
+              await github.rest.issues.create({ ...context.repo, title: 'Image build: failed before a summary', labels: ['image-build'],
+                body: `The build stopped before writing its summary. See the run: ${run}\n\n---\n_Opened by image-build.yml_` });
+              return;
+            }
+            const s = JSON.parse(fs.readFileSync(process.env.SUMMARY, 'utf8'));
+            if (s.status === 'unchanged') { core.info(`Nothing changed: ${s.version}`); return; }
+            const rows = (s.validation || []).map(v => `| ${v.check} | ${v.status} | ${String(v.detail).replace(/\|/g, '\\|')} |`).join('\n');
+            const body = [
+              `**Status:** ${s.status}${s.emergency ? ' (emergency build)' : ''}`,
+              `**Version:** \`${s.version}\` (excluded from latest until automated validation passes; spec section 6.3)`,
+              `**Source image:** \`${s.sourceImageVersion}\`  **Commit:** \`${s.commit}\``,
+              s.message ? `**Run status:** ${s.runState}: ${s.message}` : `**Run status:** ${s.runState}`,
+              s.removedOrphans && s.removedOrphans.length ? `**Removed leftover templates:** ${s.removedOrphans.join(', ')}` : '',
+              '', '### Build-time validation (Test-GoldenImage.ps1)', '',
+              rows ? `| Check | Result | Detail |\n|---|---|---|\n${rows}` : '_No validation lines in the log (see the run and its artifacts)._',
+              '', `Run and customization log: ${run}`,
+              '', '---', '_Opened by image-build.yml_'
+            ].join('\n');
+            await github.rest.issues.create({ ...context.repo, title: `Image build ${s.version}: ${s.status}`, body, labels: ['image-build'] });

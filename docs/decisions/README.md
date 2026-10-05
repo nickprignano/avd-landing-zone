@@ -16,3 +16,4 @@ Short records of choices that shape this repo, so they are not reopened without 
 | 0010 | [Size in the portal, validate and price in the preflight](0010-sizing-and-cost.md) | Accepted |
 | 0011 | [Auto shutdown: one runbook, started by a schedule and by the budget](0011-auto-shutdown.md) | Accepted |
 | 0012 | [A second brain that heals by tested playbooks and evolves by pull request](0012-second-brain.md) | Proposed |
+| 0013 | [A generic golden image built by Azure Image Builder, promoted by a person, rotated blue/green](0013-image-pipeline.md) | Proposed |

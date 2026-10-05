@@ -1640,13 +1640,15 @@ function Get-AvdCostEstimate {
       filter = "serviceName eq 'Storage' and armRegionName eq '$loc' and productName eq 'Premium Files' and priceType eq 'Consumption'"
       pick = { $_.skuName -eq $fileSku -and $_.meterName -match 'Provisioned' -and $_.unitOfMeasure -match 'GB/Month|GiB/Month' } }
     @{ key = 'privateendpoints'; item = "Private endpoints ($pe)"; quantity = $pe * $script:HoursPerMonth; unit = 'endpoint-hours'
-      filter = "productName eq 'Virtual Network Private Link' and armRegionName eq '$loc' and priceType eq 'Consumption'"
-      pick = { $_.meterName -match 'Private Endpoint' -and $_.meterName -notmatch 'Data|Processed' -and $_.unitOfMeasure -eq '1 Hour' } }
+      # Listed once, under armRegionName 'Global', not per region (lesson 0025). 'Fixed Private Endpoint T1' is another hourly meter.
+      filter = "productName eq 'Virtual Network Private Link' and armRegionName eq 'Global' and priceType eq 'Consumption'"
+      pick = { $_.skuName -eq 'Standard' -and $_.meterName -eq 'Standard Private Endpoint' -and $_.unitOfMeasure -eq '1 Hour' } }
   )
   if ($Plan.connectivityMode -ne 'HubPeered') {
     $specs += @{ key = 'natgateway'; item = 'NAT Gateway'; quantity = $script:HoursPerMonth; unit = 'hours'
-      filter = "productName eq 'NAT Gateway' and armRegionName eq '$loc' and priceType eq 'Consumption'"
-      pick = { $_.unitOfMeasure -eq '1 Hour' -and $_.meterName -notmatch 'Data' } }
+      # Global, like Private Link (lesson 0025). StandardV2 has its own meters.
+      filter = "productName eq 'NAT Gateway' and armRegionName eq 'Global' and priceType eq 'Consumption'"
+      pick = { $_.skuName -eq 'Standard' -and $_.meterName -eq 'Standard Gateway' -and $_.unitOfMeasure -eq '1 Hour' } }
     $specs += @{ key = 'publicip'; item = 'NAT Gateway public IP'; quantity = $script:HoursPerMonth; unit = 'hours'
       filter = "productName eq 'IP Addresses' and armRegionName eq '$loc' and priceType eq 'Consumption'"
       pick = { $_.skuName -eq 'Standard' -and $_.meterName -match 'Static Public IP' -and $_.meterName -notmatch 'IPv6' -and $_.unitOfMeasure -eq '1 Hour' } }
@@ -1951,6 +1953,30 @@ function Test-AvdPreDeployment {
   }
 
   return [pscustomobject]@{ Plan = $plan; UsersGroup = $users; AdminsGroup = $admins; Estimate = $estimate }
+}
+
+# =====================================================================
+# Golden image pipeline (docs/image-pipeline-spec.md)
+# =====================================================================
+function Get-AvdLatestVersion {
+  <# The highest of a list of dotted versions, compared as numbers (never as strings: red-team M1). #>
+  param([AllowEmptyCollection()][string[]] $Version = @())
+  $parsed = @($Version | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Text = $_; Value = [version]$_ } })
+  if (-not $parsed.Count) { return $null }
+  ($parsed | Sort-Object Value -Descending | Select-Object -First 1).Text
+}
+
+function Get-AvdImageVersionName {
+  <#
+    The next gallery version for a build on $Date (UTC): YYYY.MDD.N with no zero padding, so
+    January 4 is 2027.104.1 and October 4 is 2026.1004.1 (spec section 4.2, red-team M1).
+    N is one more than the highest build already published that day.
+  #>
+  param([Parameter(Mandatory)][datetime] $Date, [AllowEmptyCollection()][string[]] $Existing = @())
+  $prefix = '{0}.{1}' -f $Date.Year, ($Date.Month * 100 + $Date.Day)
+  $taken = @($Existing | Where-Object { $_ -like "$prefix.*" } | ForEach-Object { [int]($_.Split('.')[2]) })
+  $next = if ($taken.Count) { ($taken | Measure-Object -Maximum).Maximum + 1 } else { 1 }
+  "$prefix.$next"
 }
 
 Export-ModuleMember -Function *-Avd*

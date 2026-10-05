@@ -168,11 +168,40 @@ portal_state() {
     "$1" "$(json_str "$PARAM_FILE")" "$(json_str "$LOCATION")" "$(json_str "$USERS_GROUP")" "$(json_str "$ADMINS_GROUP")" "$(json_str "$DEPLOY_NAME")" "$sizing" "${2:-}"
 }
 
+# --- Session hosts that aren't running (lesson 0026) ---
+# A redeploy updates each existing host's run commands, and Azure refuses that on a VM that isn't
+# running ("Cannot modify extensions in the VM when the VM is not running"). Power management keeps
+# hosts deallocated most of the time, so a redeploy starts them and deallocates them again after.
+param_value() { sed -n "s/^param $1 = '\([^']*\)'.*/\1/p" "$PARAM_FILE" | head -n 1; }
+NAME_PREFIX=$(param_value namePrefix); ENV_NAME=$(param_value environmentName)
+NAME_PREFIX=${NAME_PREFIX//-/}; NAME_PREFIX=${NAME_PREFIX,,}   # cleanPrefix in bicep/main.bicep
+HOSTS_RG="rg-$NAME_PREFIX-$ENV_NAME-hosts"
+STOPPED_HOSTS=()
+if [[ -n "$NAME_PREFIX" && -n "$ENV_NAME" ]] && [[ "$(az group exists -n "$HOSTS_RG")" == "true" ]]; then
+  echo "==> Checking the session hosts' power state in $HOSTS_RG"
+  mapfile -t STOPPED_HOSTS < <(az vm list -d -g "$HOSTS_RG" --query "[?powerState!='VM running'].id" -o tsv)
+fi
+restore_hosts() {
+  ((${#STOPPED_HOSTS[@]})) || return 0
+  echo "==> Deallocating the session hosts started for the deployment: ${STOPPED_HOSTS[*]##*/}"
+  az vm deallocate --ids "${STOPPED_HOSTS[@]}" --no-wait -o none \
+    || echo "    Could not deallocate them; the scaling plan or the scheduled stop will."
+}
+
 if $WHATIF; then
+  if ((${#STOPPED_HOSTS[@]})); then
+    echo "    Not running: ${STOPPED_HOSTS[*]##*/}. The deployment starts them first and deallocates them after."
+  fi
   echo "==> What-if ($DEPLOY_NAME) — no changes applied"
   az deployment sub what-if -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE"
   portal_state whatif
   exit 0
+fi
+
+if ((${#STOPPED_HOSTS[@]})); then
+  echo "==> Starting the session hosts that aren't running: ${STOPPED_HOSTS[*]##*/}"
+  echo "    The deployment updates their run commands, which needs them running. They are deallocated again afterwards."
+  az vm start --ids "${STOPPED_HOSTS[@]}" -o none
 fi
 
 echo "==> Deploying ($DEPLOY_NAME). A first deployment takes 30-45 minutes."
@@ -180,9 +209,11 @@ echo "    If Cloud Shell disconnects, the deployment keeps running in Azure."
 portal_state started
 if ! az deployment sub create -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE" \
   --query properties.outputs -o jsonc; then
+  restore_hosts
   portal_state failed
   exit 1
 fi
+restore_hosts
 
 STORAGE_NAME=$(az deployment sub show -n "$DEPLOY_NAME" --query properties.outputs.storageAccountName.value -o tsv)
 # rg-<prefix>-<env>-avd -> <prefix> and <env>, for the post-deployment command.

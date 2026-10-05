@@ -1,0 +1,30 @@
+# WDOT profile for the golden image
+
+The image build runs the [Windows Desktop Optimization Tool](https://github.com/The-Virtual-Desktop-Team/Windows-Desktop-Optimization-Tool) (WDOT, MIT License, by The Virtual Desktop Team) with this profile. See `docs/image-pipeline-spec.md` §5.5.
+
+- **`wdot.lock.json`** pins WDOT to a commit (release `v1.1`) and records the SHA-256 of every WDOT file the build runs. `Invoke-Wdot.ps1` downloads the commit's archive and refuses to run if any file's hash differs. A newer WDOT is a PR that updates the lock. The archive itself isn't pinned by hash, because GitHub doesn't promise stable archive bytes; the files are what run.
+- **`profile/`** holds the JSON files WDOT reads, generated from WDOT's `Configurations/Templates` at that commit. Every item's `OptimizationState` was reviewed. `profileSha256` in the lock covers them: a profile change without a lock update fails CI (`tests/ImageScripts.Tests.ps1`).
+
+## What runs
+
+`Windows_Optimization.ps1 -ConfigProfile avdlz -Optimizations Services,ScheduledTasks,Autologgers,DefaultUserSettings -AcceptEULA`
+
+| Category | Run | Items applied | Kept `Skip`, and why |
+|---|---|---|---|
+| Services | Yes | 19 of 23 | `InstallService` (Store and MSIX installs), `DiagTrack` (Defender for Endpoint's sensor uses it), `VSS` (backup and restore tooling), `WerSvc` (crash reports are evidence for diagnosis) |
+| ScheduledTasks | Yes | 26 of 29 | `NotificationTask`, `VerifyWinRE`, `Restore` |
+| Autologgers | Yes | 6 of 7 | `Mellanox-Kernel`: Azure accelerated networking uses Mellanox adapters |
+| DefaultUserSettings | Yes | 53 of 60 | Edge update suppression (Edge keeps updating, spec §5.6); toast notification blocks and hidden tray icons (Teams and Outlook need them); Copilot (an organization's policy choice, not a performance setting) |
+| LocalPolicy (`PolicyRegSettings.json`) | **No** | 0 of 147 | Not reviewed yet: 147 policy settings, each an organization-level choice |
+| NetworkOptimizations (`LanManWorkstation.json`) | **No** | 0 | Besides the SMB client settings, WDOT also changes the network adapter's send buffer, which on Azure is the accelerated networking adapter. Not verified |
+| DiskCleanup | **No** | — | It deletes every `*.log`, `*.etl` and `*.evtx` on `C:` and empties `C:\Windows\Temp`: the build's own evidence, before `Test-GoldenImage.ps1` reads it. `Invoke-ImageCleanup.ps1` cleans up instead, narrowly |
+| AppxPackages | **No** | 0 of 56 | Removing Appx packages is the classic sysprep breaker (spec §5.5, Q6) |
+| WindowsMediaPlayer, Edge, RemoveLegacyIE, RemoveOneDrive | **No** | — | Spec §5.5 |
+
+None of the services the landing zone depends on (spec §5.5: `dmwappushservice`, Defender, `wuauserv`, `BITS`, `WSearch`, `LanmanWorkstation`, `KeyIso`, `TokenBroker`, `AppXSvc`, `ClipSVC`, Edge Update and the RDP stack) is in WDOT's `Services.json` at this commit. A test keeps it that way, and `Test-GoldenImage.ps1` checks them again on the built image.
+
+## Changing the profile
+
+1. Edit the JSON (`Apply` or `Skip`), and say why in the table above.
+2. Update `profileSha256` in `wdot.lock.json`. The test prints the expected value when it fails.
+3. Raising capability, such as running a new category, is a guardrail change (second brain spec §9.2): in solo mode it waits for the time-lock.

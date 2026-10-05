@@ -137,3 +137,56 @@ Describe 'A second landing zone beside dev (parameters/test.bicepparam, docs/dem
   }
 }
 
+
+Describe 'Golden image pipeline templates' {
+  # docs/image-pipeline-spec.md. The landing zone only changes when the build subnets are asked for.
+  It 'adds the build subnets only with AVD_IMAGE_BUILD_SUBNETS=true (set-but-empty = off, lesson 0004)' {
+    $read = { param($v) $env:AVD_IMAGE_BUILD_SUBNETS = $v; try { ((& $script:bicep build-params 'parameters/dev.bicepparam' --stdout | ConvertFrom-Json).parametersJson | ConvertFrom-Json).parameters.deployImageBuildSubnets.value } finally { $env:AVD_IMAGE_BUILD_SUBNETS = '' } }
+    & $read '' | Should -BeFalse
+    & $read 'true' | Should -BeTrue
+    $network = Find-Deployment (Get-CompiledTemplate 'parameters/prod.bicepparam') 'avdlz-network'
+    $network['properties']['parameters']['deployImageBuildSubnets'] | Should -Not -BeNullOrEmpty
+  }
+
+  It 'gives both build subnets an NSG and the hosts'' egress, and delegates the container subnet to ACI' {
+    $raw = (& $script:bicep build 'bicep/modules/network.bicep' --stdout) -join "`n"
+    $raw | Should -Match "'snet-image-build'"
+    $raw | Should -Match "'snet-image-aci'"
+    $raw | Should -Match 'Microsoft.ContainerInstance/containerGroups'
+    $raw | Should -Match 'nsg-image-build'
+  }
+
+  It 'defines a Generation 2, Trusted Launch image with accelerated networking, and federates the build identity to the images environment only' {
+    $t = Get-CompiledTemplate 'parameters/images.bicepparam'
+    $g = Find-Deployment $t 'avdlz-images-gallery'
+    $res = $g['properties']['template']['resources']; if ($res -is [System.Collections.IDictionary]) { $res = @($res.Values) }
+    $def = @($res | Where-Object { $_['type'] -eq 'Microsoft.Compute/galleries/images' })[0]
+    $def['properties']['hyperVGeneration'] | Should -Be 'V2'
+    $f = @{}; foreach ($x in $def['properties']['features']) { $f[$x['name']] = $x['value'] }
+    $f['SecurityType'] | Should -Be 'TrustedLaunch'
+    $f['IsAcceleratedNetworkSupported'] | Should -Be 'True'
+    $fed = @($res | Where-Object { $_['type'] -eq 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials' })[0]
+    $fed['properties']['subject'] | Should -Match 'environment:images'
+  }
+
+  It 'inlines every image script and the WDOT profile, fetches nothing from this repo, and never publishes to latest' {
+    $o = (& $script:bicep build-params 'parameters/images-build.bicepparam' --stdout) -join "`n" | ConvertFrom-Json
+    $raw = $o.templateJson
+    $raw | Should -Not -Match 'scriptUri'
+    $raw | Should -Not -Match 'raw\.githubusercontent\.com'
+    foreach ($f in Get-ChildItem 'scripts/image/wdot/profile' -File) {
+      $raw.Contains([Convert]::ToBase64String([IO.File]::ReadAllBytes($f.FullName))) | Should -BeTrue -Because "$($f.Name) must be inlined as it is in the repo"
+    }
+    $src = Get-Content 'bicep/images/build.bicep' -Raw
+    foreach ($s in Get-ChildItem 'scripts/image' -Filter '*.ps1' -Recurse) {
+      $rel = [IO.Path]::GetRelativePath((Resolve-Path 'scripts/image'), $s.FullName).Replace('\', '/')
+      $src | Should -Match ([regex]::Escape("scripts/image/$rel")) -Because "$rel must be a build step"
+    }
+    $t = $raw | ConvertFrom-Json -Depth 100 -AsHashtable
+    $it = @(@($t['resources'].Values) | Where-Object { $_['type'] -eq 'Microsoft.VirtualMachineImages/imageTemplates' })[0]
+    $it['properties']['distribute'][0]['excludeFromLatest'] | Should -BeTrue
+    $it['properties']['validate']['continueDistributeOnFailure'] | Should -BeFalse
+    $it['properties']['vmProfile']['vnetConfig']['containerInstanceSubnetId'] | Should -Not -BeNullOrEmpty
+    (($o.parametersJson | ConvertFrom-Json).parameters.buildTimeoutInMinutes.value) | Should -Be 360
+  }
+}

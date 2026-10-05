@@ -33,5 +33,9 @@ The offline price mock returns the lookalikes as the real API does: a `CloudServ
 ## Rule
 Match a price on the product as well as the SKU and meter. Print everything that tells candidates apart (product, SKU, meter, unit) when a match fails; when the list gains a lookalike, the message should show the difference.
 
-## Still open
-Private endpoints (`Virtual Network Private Link`) and the NAT Gateway (`NAT Gateway`) returned no meters in `northcentralus` on the same day. The product names or regions they are listed under need checking against the API. They stay reported as unpriced rather than guessed.
+## Follow-up: Private Link and NAT Gateway are listed under "Global" (2026-10-05)
+The dev pre-deployment preflight left private endpoints and the NAT Gateway unpriced, with no meters returned. A query without the region showed why: the API lists both only under `armRegionName` `Global` (`location` `Global`), never per region. Next to them are lookalike hourly meters: `Fixed Private Endpoint T1` ($14/hour) and `Standard Service Endpoint Virtual Network` for Private Link, and `StandardV2` meters for the NAT Gateway.
+
+- Both lines now query `armRegionName eq 'Global'` and match the exact meter: `Standard` / `Standard Private Endpoint` and `Standard` / `Standard Gateway`, per hour.
+- **Guard:** the offline price mock returns these products only for a `Global` filter, with the lookalikes. The PreDeployment scenario asserts the meter of each line. Querying the region again brings back the warnings this run saw.
+- **Rule:** when a lookup returns no meters at all, query the product without the region before deciding it isn't sold there.
