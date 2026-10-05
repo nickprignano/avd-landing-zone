@@ -15,8 +15,8 @@ Track A (decision 0014) needs a person. An unattended, repeatable check would ca
 - **Credentials and actions** (after the [red-team review](../verify-access-redteam.md)):
   - Sign-in is deterministic, with no model involved, and certificate-based authentication is preferred.
   - The model only observes the desktop afterwards (`screenshot` and `wait`). Any other action ends the run for review.
-  - A broker service in session 0 holds the identity, and the agent's session can't reach IMDS or launch anything outside an application allowlist.
-  - The agent signs in only to a dedicated check pool, where its identity alone may log sessions off (Q9).
+  - A broker service in session 0 holds the identity. Windows Firewall denies outbound traffic by default and allows IMDS only for the broker, and an application allowlist limits the agent's session. If the B0 spike can't enforce that, Track B stops or the broker moves off the VM.
+  - The agent signs in only to a dedicated one-host check pool, not the main, demo or QA pool. Only there may its identity log sessions off (Q9).
   - Safety checks are never acknowledged: the run stops with *needs review*.
 - **Bounds and evidence:** an iteration cap, a wall-clock limit, a token budget, a daily run cap with a resource-group budget, and kill switches (a tag, deallocation, role removal). It always logs off. Evidence is kept 7 days, write-once, with restricted access. Timing still comes from telemetry, not the loop.
 - **Not built yet:** it waits for model access and a test user license. When both exist, a deterministic visual check with no model is tried first (red-team S1, S2).

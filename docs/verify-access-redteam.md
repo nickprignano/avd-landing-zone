@@ -28,7 +28,11 @@ The fixes make the agent **observe-only after a deterministic sign-in**, put the
 **Scenario:** the model's actions are mouse and keyboard on the sandbox's own desktop, not only inside the AVD client. Any process on the VM can ask IMDS (`169.254.169.254`) for the managed identity's token: no permission, no secret. A screenshot that carries an instruction ("press Win+R, type `powershell`…") gets the model to open a shell as `avdagent` and ask IMDS for a token for Key Vault, then read the test user's password and TOTP seed, and send them anywhere through the any-443 egress (§8). The same token calls Foundry on the account's budget and, with Q9's role, logs off users. `pending_safety_checks` won't reliably catch it: the domain checks evaluate a browser URL, and this happens outside any browser.
 **Fix:**
 - **A broker holds the identity, never the agent's session.** A local service in session 0, running as its own virtual service account, makes every Azure call: Foundry, Key Vault, evidence upload, ARM logoff. The harness in session 1 talks to it over a named pipe with a fixed set of verbs: next action for this screenshot, enter this credential kind, store this evidence, finish. There is no verb that returns a token or a secret.
-- **IMDS only for the broker.** A Windows Firewall outbound rule blocks `169.254.169.254` for everything except the broker's service SID. Whether a service-SID allow rule beats a block for all other processes on Windows 11 is to verify at B2 (spike); if it can't be expressed, the broker runs as the only process allowed by program path, and `avdagent` is denied by user.
+- **Outbound default-deny, not an IMDS block** (Copilot review). Windows Firewall block rules override allow rules, so "block IMDS except for the broker" can't be expressed. Instead, every profile's default outbound action is **Block**, and the only allow rules are:
+  - the broker's service SID: IMDS (`169.254.169.254`) and the three private endpoints;
+  - Windows App and its WebView2 sign-in, by program path: TCP 443 and UDP 3478 (TURN) to the internet;
+  - the DNS Client service: DNS.
+  Nothing else on the VM, including anything the model might start, can reach IMDS or the internet. **If the B0 spike can't enforce this while Windows App still works, Track B stops**, or the broker moves off the VM: an Azure Function in the agent VNet with its own identity, and a sandbox VM with no managed identity at all. The boundary is never weakened to make the spike pass.
 - **An application allowlist for the agent's session.** App Control for Business (WDAC) in enforced mode: Windows App (by publisher), the harness, Explorer, and nothing else. No PowerShell, cmd, Run dialog, browser or Store for `avdagent`. Test at B2 that Win+R and the Start menu can't launch anything outside the list.
 - **Least privilege per secret:** Key Vault Secrets User on each secret, held by the broker's identity (it is the VM's, but only the broker can get a token).
 - A template test fails if the sandbox VM's identity holds any role outside the agent resource group, except Q9's (below).
@@ -37,7 +41,9 @@ The fixes make the agent **observe-only after a deterministic sign-in**, put the
 **Where:** §10.3 step 1 "checks that the foreground window belongs to the expected client or `login.microsoftonline.com`".
 **Scenario:** after the session starts, the foreground window is the Windows App, which shows the remote desktop. Anything rendered on that desktop, such as a web page, a dialog, or a phishing form from a compromised profile or a malicious notification, can ask for "your password". The model calls `enter_credential(password)`. The guard sees the expected client in front and types the test user's password into the session, where whatever asked for it can read it. The same applies to the TOTP code. The window check can't tell the client's own sign-in UI from pixels the remote session draws inside it.
 **Fix:**
-- **Sign-in is deterministic and happens before the model sees anything.** The broker and harness drive the sign-in without the model: launch Windows App, subscribe with the test user, and answer the Entra prompts through UI Automation on the sign-in web view, identified as a separate top-level window owned by Windows App with `login.microsoftonline.com` as its URL. They never type into the client's main window.
+- **Sign-in is deterministic and happens before the model sees anything.** A trusted sign-in step of the harness, in session 1 (UI Automation only works within the session; a session-0 broker can't drive it, Copilot review), launches Windows App, subscribes with the test user, and answers the Entra prompts through UI Automation on the sign-in web view. That view is a separate top-level window owned by Windows App, with `login.microsoftonline.com` as its URL. It never types into the client's main window.
+  - With TOTP, the harness gets each credential from the broker through a **one-shot verb**. The broker closes it for the rest of the run the moment the harness reports the session window, or after 5 minutes, whichever comes first. The model is engaged only after that, and its actions are executed by the same harness, which accepts nothing but `screenshot` and `wait` (C3). So nothing the model does can reach the verb.
+  - With CBA there is no credential verb at all.
 - **No `enter_credential` tool at all.** The model gets control only once the harness has seen the session window, and from then on it can't trigger any credential entry. This also removes the open question B6 (mixing a function tool with the `computer` tool).
 - **Prefer CBA (§10a).** With certificate-based authentication there's nothing to type and nothing to steal by typing. TOTP stays the fallback.
 - If deterministic sign-in proves too brittle in the B3 spike, Track B stops there. The fallback is not to let the model type secrets.
@@ -47,8 +53,12 @@ The fixes make the agent **observe-only after a deterministic sign-in**, put the
 **Scenario:** the test user is assigned to the landing zone's desktop, so the agent's session lands on a production session host shared with real users. A prompt in the session (a page that opens at logon, a shared file, a notification) makes the model click, type and browse inside that host as the test user, with the host's egress and the user's access to the profile share. Whatever the session can do, an injected instruction can do. The "fixed task prompt" constrains a well-behaved model only.
 **Fix:**
 - **Observe-only after connect.** Once the session window is up, the harness accepts only `screenshot` and `wait` from the model, plus one harness-owned sign-out. Clicks, typing, scrolling and key presses inside the session are rejected and recorded as an attempted action (`status: needsreview`). The checklist (§10.7) is answered from screenshots alone. That is enough for "desktop appeared, no error dialog, expected icons present".
-- **A dedicated target pool, never the main pool.** The test user's group is assigned only to a pool that exists for checks: the QA pool of decision 0013 when it's built, else the demo host pool (`Deploy-AvdDemo.ps1`). The preflight fails `-FoundryCua` when the test user's group can reach the main desktop app group.
-- **Q9 settled by this:** the broker's identity gets **Desktop Virtualization User Session Operator on the target pool only**. It can still log off anyone on that pool, but that pool has no real users, by the rule above. On the main pool: no ARM rights, ever. A template test asserts the role's scope.
+- **A dedicated check pool, never the main pool, and not the demo or QA pool** (Copilot review). `Deploy-AvdDemo.ps1` assigns the demo desktop and VM login to the landing zone's AVD Users group and reuses the production profile share. Decision 0013's QA pool is used by QA users. Real users can reach both. So the target is a **one-host agent check pool**:
+  - its own desktop app group, assigned only to the test user's group;
+  - local profiles (no FSLogix share, so no path to real users' profiles);
+  - the same image and host template as the main pool, so what it checks still means something.
+  The preflight with `-FoundryCua` fails if the test user's group can reach any other app group, or if anyone else can reach this one. The trade-off: the agent checks a pool built like the main one, not the main pool itself; Track A covers the main pool from real devices. It costs one more host while it runs (deallocated between runs).
+- **Q9 settled by this:** the broker's identity gets **Desktop Virtualization User Session Operator on the check pool only**. Only the test user can be on that pool, so the role can't affect real users. On every other pool: no ARM rights, ever. A template test asserts the role's scope.
 
 ## High
 
@@ -106,7 +116,7 @@ The fixes make the agent **observe-only after a deterministic sign-in**, put the
 ### S1. After the fixes, the model adds little over Track A, at real cost and risk
 With observe-only after a deterministic sign-in, the model's job is to look at screenshots and say whether the desktop looks right. Track A's telemetry already proves the connection reached the desktop, from the user's real device and for free. What's left is the visual check: no error dialog, the profile loaded, and expected icons present. That's worth having, but it costs:
 - a Foundry account, a gated model, a sandbox VM with WDAC and a broker, a NAT Gateway and three private endpoints;
-- a test user with two licenses;
+- a test user with two entitlements, AVD-eligible and Entra ID P1 (possibly one bundle);
 - screenshots of the desktop sent to a model endpoint.
 
 **Recommendation:**
@@ -121,9 +131,9 @@ The checklist ("desktop appeared, no error dialog, icons present") is a fixed co
 
 | Finding | Status |
 |---|---|
-| C1 Identity reachable from the agent's desktop | **Resolved in spec**: broker service holds the identity; IMDS allowed for the broker only; WDAC allowlist for the agent's session (§9, §10.2, §10.3) |
-| C2 Credential guard trusts the foreground window | **Resolved in spec**: deterministic sign-in before the model acts; no credential tool; CBA preferred (§10.3, §10a) |
-| C3 Agent acts on production pooled hosts | **Resolved in spec**: observe-only after connect; a dedicated target pool; Q9 = User Session Operator on that pool only (§10.5, §10.6, §10.6a) |
+| C1 Identity reachable from the agent's desktop | **Resolved in spec**: broker service holds the identity; outbound default-deny with broker-scoped IMDS, a stop condition if B0 can't enforce it, off-box broker as the alternative; WDAC allowlist (§9, §10.2, §10.3). Revised after Copilot review |
+| C2 Credential guard trusts the foreground window | **Resolved in spec**: deterministic sign-in by a trusted session-1 harness step before the model acts; one-shot credential verb closed at the session window; no credential tool; CBA preferred (§10.3, §10a). Revised after Copilot review |
+| C3 Agent acts on production pooled hosts | **Resolved in spec**: observe-only after connect; a dedicated one-host check pool (not demo, not QA); Q9 = User Session Operator on that pool only (§10.5, §10.6, §10.6a). Revised after Copilot review |
 | H1 Kill switch latency | **Resolved in spec**: deallocation and role removal as hard stops; tag latency marked unverified (§10.5) |
 | H2 Safety checks overstated | **Resolved in spec**: harness controls named as what holds; rejected actions reported like checks (§10.4) |
 | H3 Bastion vs the console session | **Resolved in spec**: evidence instead of watching; refuse to start with another session; abort on disconnect (§9) |
