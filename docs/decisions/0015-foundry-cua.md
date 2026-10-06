@@ -24,7 +24,7 @@ Track A (decision 0014) needs a person. An unattended, repeatable check would ca
 ## Alternatives considered
 - **`computer-use-preview` through Foundry Agent Service:** preview, three regions, and its tool is listed as unsupported behind network isolation.
 - **Peering the sandbox to the spoke:** it gives a prompt-injectable machine a route to session hosts for no test benefit. The user path is public anyway.
-- **Windows 365 for Agents:** a better host in principle. Its status and licensing weren't confirmable, and it's driven from Copilot Studio. It's the revisit trigger (spec §10b).
+- **Windows 365 for Agents:** a better host in principle. Its billing is confirmed (pay-as-you-go per Cloud PC through an Azure subscription) but its GA status isn't, and it's driven from Copilot Studio. It's the revisit trigger (spec §10b).
 - **A Python harness on the official SDK:** see open question Q8. PowerShell and REST keep the repo to one language and testable offline.
 
 ## Consequences

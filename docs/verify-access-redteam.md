@@ -106,7 +106,7 @@ The fixes make the agent **observe-only after a deterministic sign-in**, put the
 |---|---|---|
 | M1 | **Evidence hashes typed text** (§10.8). A hash of a short secret or a TOTP code can be guessed offline. | Record the action kind only for any typing, never a hash. After C2 the model never types anyway. |
 | M2 | **Evidence uploads with the VM's identity** (§10.8), which C1 makes reachable. | The broker uploads. The container gets a write-once (immutability) policy for the 7-day retention, so a run can't rewrite earlier evidence. |
-| M3 | **A pinned model version retires** (§7.2). The deployment and the runs break on the retirement date. | The preflight reads the model's lifecycle from the region's model list (to verify that the API exposes it) and warns 60 days ahead. A version change is a PR. |
+| M3 | **A pinned model version retires** (§7.2). The deployment and the runs break on the retirement date. | The preflight reads the model's lifecycle (`lifecycleStatus`, `deprecation.inference`, per-SKU `deprecationDate`, confirmed in the Models API docs, spec §11 B26) from the region's model list and warns 60 days ahead. A version change is a PR. |
 | M4 | **Windows 11 licensing for a workgroup VM** (§9). Multitenant hosting rights are per user. The VM's user is a local account, so which license covers it isn't obvious. | Mark it unverified, and ask at B2. If it can't be settled, the sandbox becomes the target pool's own client-less check (S2) or Windows 365 for Agents (§10b). |
 | M5 | **Who starts the sandbox for a schedule** (§9 Power). The spec says "the scheduled run starts it" but names no identity. That would be a new automation identity with start rights. | Reuse decision 0011's Automation account and runbook pattern: a schedule calls a runbook with Virtual Machine Contributor scoped to the sandbox VM only. That's a new role assignment, listed in the decision. |
 | M6 | **Track A shows the agent's sign-ins.** `Test-AvdUserConnection.ps1` filters by user, but a person reading WVDConnections or AVD Insights sees scheduled test sign-ins as real usage. | Tag the test user clearly (display name `AVD agent (test)`), exclude it in the image pipeline's QA-usage counts (`qa-pool-unused`), and say so in operations.md. |
@@ -140,7 +140,7 @@ The checklist ("desktop appeared, no error dialog, icons present") is a fixed co
 | H4 CA licensing and risk policies | **Resolved in spec**: P1 stated, risk-policy exclusion with alerts (§10a) |
 | H5 No spend cap across runs | **Resolved in spec**: daily cap, auto-disable after three failures, a budget that deallocates (§10.5, §10c) |
 | H6 Rollback purges by name | **Resolved in spec**: delete only this run's tagged account; purge from the delete's response; `-WhatIf` (§7.4) |
-| M1–M6 | **Resolved in spec** (§10.8, §7.2, §9, §10a); M4 and M3's lifecycle API stay unverified |
+| M1–M6 | **Resolved in spec** (§10.8, §7.2, §9, §10a); M4 stays unverified; M3's lifecycle API is confirmed (spec §11 B26) |
 | S1 Value over Track A | **Accepted as the recommendation**: designed, not built, until Q4 and Q10; then decide against S2 (§12, §13) |
 | S2 Deterministic visual check | **Resolved in spec**: the first spike when Track B is unblocked (§13) |
 
