@@ -397,11 +397,10 @@ The brief asks for the official SDK of the chosen language. The options:
 - Windows 365 for Agents provides Intune-managed Cloud PCs that agents check out and back in, with a dedicated security baseline. It powers Copilot Studio computer use.
 - It could replace the sandbox VM, the Autologon session, the display spike and the VM's patching.
 - **Not built because:**
-  - Its GA status couldn't be confirmed: no Microsoft page states preview or GA (§11 B21).
   - It's billed pay-as-you-go per Cloud PC through an Azure subscription (US $0.40 per hour, no per-user license; §11 B21), but the Cloud PCs aren't an Azure resource this repo deploys.
   - It's driven from Copilot Studio, not the Foundry Responses API.
   - It would add a second product to a deliberately narrow repo.
-- **Revisit trigger:** documented GA with a Foundry or REST entry point.
+- **Revisit trigger:** a Foundry or REST entry point. It's generally available since the week of June 1, 2026 (§11 B21), so that's the only gap left.
 
 ## 10c. Cost (Track B only; the default deployment adds nothing)
 
@@ -417,7 +416,7 @@ The brief asks for the official SDK of the chosen language. The options:
 | Budget on the agent resource group | No charge | Its alert deallocates the sandbox and disables the schedule (red-team H5) |
 | Test user license | Per user per month | Tenant-side, not Azure |
 
-The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the retail meters, with one meter per line or the meters it saw (decision 0010, lesson 0025). Prices aren't written into this spec.
+The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the retail meters, with one meter per line or the meters it saw (decision 0010, lesson 0025). Prices quoted in this spec (§10b, §10c, §11) are verification snapshots dated 2026-10-06, not estimates to deploy against; the preflight's meters are the source of truth.
 
 ---
 
@@ -465,7 +464,7 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 | B18 | AVD user licenses | **Corrected** (ms.date 2024-09-17): "Microsoft 365 E3, E5, A3, A5, F3, Business Premium, Student Use Benefit / Windows Enterprise E3, E5 / Windows Education A3, A5 / Windows VDA per user". §10a updated | [Prerequisites](https://learn.microsoft.com/azure/virtual-desktop/prerequisites) |
 | B19 | Auth methods: TOTP, TAP lifetimes, authentication strengths | **Verified, with detail** (2025-03-04 / 2026-03-04): software and hardware OATH TOTP (hardware is preview; no HOTP); TAP default lifetime 1 hour, maximum 8 hours by default, configurable 10 minutes to 30 days; three built-in strengths, TAP satisfies MFA only. §10a updated | [OATH](https://learn.microsoft.com/entra/identity/authentication/concept-authentication-oath-tokens), [TAP](https://learn.microsoft.com/entra/identity/authentication/howto-authentication-temporary-access-pass), [strengths](https://learn.microsoft.com/entra/identity/authentication/concept-authentication-strengths) |
 | B20 | Key Vault Secrets User `4633458b-17de-408a-b874-0445c86b69e6` | **Verified** (ms.date 2026-07-01). Goes into `PUBLIC_IDS` when Track B is built | [Security roles](https://learn.microsoft.com/azure/role-based-access-control/built-in-roles/security) |
-| B21 | Windows 365 for Agents exists; status and licensing | **Exists and billing verified** (2026-07-23, 2026-05-01): pay-as-you-go through an Azure subscription, US $0.40 per Cloud PC hour, no per-user license. **GA vs preview unverifiable**: no page states either | [W365 for Agents](https://learn.microsoft.com/windows-365/agents/introduction-windows-365-for-agents), [pricing](https://learn.microsoft.com/windows-365/agents/pricing-paygo-always-available) |
+| B21 | Windows 365 for Agents exists; status and licensing | **Exists and billing verified** (2026-07-23, 2026-05-01): pay-as-you-go through an Azure subscription, US $0.40 per Cloud PC hour, no per-user license. **GA verified** (What's new, updated 2026-08-28, week of June 1, 2026): "Windows 365 for Agents is now generally available" | [W365 for Agents](https://learn.microsoft.com/windows-365/agents/introduction-windows-365-for-agents), [what's new](https://learn.microsoft.com/windows-365/agents/whats-new), [pricing](https://learn.microsoft.com/windows-365/agents/pricing-paygo-always-available) |
 | B22 | Setting the console display resolution on an Azure VM without RDP; Windows App unattended install and its dependencies | Resolution: **unverifiable** (no page; B2 spike). Install: **verified in part**: an offline install with `Add-AppxPackage` and its dependencies (`Microsoft.VCLibs.140.00`, `…UWPDesktop`, `Microsoft.WindowsAppRuntime.2`) is documented (updated 2026-08-11); per-machine provisioning isn't (B2 spike) | [Offline install](https://learn.microsoft.com/windows-app/troubleshoot-basic) |
 | B23 | Windows Firewall with outbound default-deny on every profile, allowing IMDS only for one service SID and the internet only for Windows App and WebView2 by program path, while Windows App still signs in and connects (red-team C1; block rules override allows, so this is the only form that can work) | **Not verified** (B0 spike; failure stops Track B or moves the broker off the VM) | — |
 | B24 | App Control for Business (WDAC) blocking Run, the Start menu and shells for one local user while Windows App works | **Not verified** (B2 spike) | — |
