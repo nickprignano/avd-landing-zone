@@ -11,7 +11,7 @@
 7. **Sign in** (and optionally the demo host pool).
 8. **Verify access.** From the operator's own device ([decision 0014](../decisions/0014-verify-access.md)):
    - a reachability probe to the AVD sign-in and client hosts, timed like the latency step. It's a warning, never a stop, and the page says what it doesn't prove;
-   - a direct link to the desktop in the web client, built from the workspace and desktop object IDs the post-deployment setup or the demo reports (`launchUrl`). The IDs must be GUIDs and the link always points at `windows.cloud.microsoft`. There's no Windows App (`ms-avd:`) link yet: its parameter names aren't confirmed (TODO, [verify-access-spec.md](../verify-access-spec.md) §6.3).
+   - a direct link to the desktop in the web client, built from the workspace and desktop object IDs the post-deployment setup or the demo reports (`launchUrl`). The IDs must be GUIDs and the link always points at `windows.cloud.microsoft`. There's no Windows App (`ms-avd:`) link yet: Microsoft's URI scheme page lists `user` in its parameter table but `username` in its example, so the names aren't confirmed (TODO, [verify-access-spec.md](../verify-access-spec.md) §6.3).
 
    - confirmation from telemetry: the step's command runs `Test-AvdUserConnection.ps1`, and a pasted result shows *Verified*, *Failed* or *Not verified* with what to do next. Only *Verified* is a pass. Error codes get specific guidance only once a real run shows them (`decide`, stage `verify`); until then the portal shows the code, the message and whether AVD marked it a service error.
 
