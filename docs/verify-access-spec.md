@@ -1,6 +1,6 @@
 # Spec: verify access from the operator's device, and an optional computer-use agent
 
-- **Status:** Proposed. The owner agreed with every proposal in §12 (2026-10-05); Track A (Phases A1–A3) is built. Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B).
+- **Status:** Proposed. The owner agreed with every proposal in §12 (2026-10-05); Track A (Phases A1–A3) is built. Decisions [0014](decisions/0014-verify-access.md) (Track A) and [0015](decisions/0015-foundry-cua.md) (Track B). Track B was red-teamed ([verify-access-redteam.md](verify-access-redteam.md)) and the fixes are folded in below.
 - **Date:** 2026-10-05
 - **Scope:** landing zones built from this repo. Track A changes the deployment portal and the ops scripts, not the deployed resources. Track B is a separate, optional deployment, off by default.
 
@@ -233,6 +233,7 @@ The three pages the owner found are all current. They describe **two different t
 ### 7.2 Choice
 - **The Responses API `computer` tool with `gpt-5.4`, version `2026-03-05`, SKU `GlobalStandard`, capacity a parameter (default 10 thousand TPM, to be confirmed against quota at B1).**
 - All four are parameters: `foundryModelName`, `foundryModelVersion`, `foundryModelSku`, `foundryModelCapacity`.
+- **Retirement (red-team M3):** a pinned version retires on a date. The preflight reads the model's lifecycle from the region's model list (whether that API exposes it is to verify) and warns 60 days ahead. A version change is a PR.
 
 Why this over the others:
 - **Not `computer-use-preview`.** It's a preview model in three regions, behind the agent service and the older tool shape. The Agent Service computer use tool is also listed as *not supported* behind network isolation (§8).
@@ -253,7 +254,7 @@ Model access is an application to Microsoft (aka.ms/OAI/gpt54access) with no sta
    - Stage 2: everything else (sandbox network, VM, Key Vault, evidence storage), in a second deployment that runs only when stage 1 succeeded.
 4. **When stage 1 fails:**
    - The script reports the ARM error (code, message, target) and recognizes the access error by its code. The code is unverified; the first real failure becomes a fixture (retro).
-   - It **deletes the half-created account**, then purges it, because Cognitive Services accounts soft-delete. Both happen only after a prompt, or with `-Force`. The purge needs the same care as lesson 0022.
+   - It **deletes the half-created account**, then purges it, because Cognitive Services accounts soft-delete. Only an account whose tags carry this run's deployment name and that was created in this run is deleted. The purge uses the exact name and location from the delete's response, never a name typed or derived again. `-WhatIf` prints what would be purged. Both steps need a prompt, or `-Force`. The purge needs the same care as lesson 0022, and an offline scenario covers a foreign account with the same name (red-team H6).
    - It prints the access form link. The state line says `stage: "agent-deploy"`, `status: "failed"`, `id: "model-access"`.
 
 ## 8. Networking
@@ -289,17 +290,18 @@ Model access is an application to Microsoft (aka.ms/OAI/gpt54access) with no sta
 
 | Choice | Decision | Why |
 |---|---|---|
-| OS | Windows 11 Enterprise (single session), `licenseType: Windows_Client` | Windows App supports Windows 11 and 10 1809+, and doesn't list Windows Server. Windows 11 on Azure needs an eligible per-user license (Windows E3/E5 or similar) through multitenant hosting rights. Image `MicrosoftWindowsDesktop/windows-11/win11-24h2-ent` to be confirmed at B2 |
+| OS | Windows 11 Enterprise (single session), `licenseType: Windows_Client` | Windows App supports Windows 11 and 10 1809+, and doesn't list Windows Server. Windows 11 on Azure needs an eligible per-user license (Windows E3/E5 or similar) through multitenant hosting rights. Which license covers a workgroup VM whose only user is a local account is **unverified** (red-team M4). Image `MicrosoftWindowsDesktop/windows-11/win11-24h2-ent` to be confirmed at B2 |
 | Size | `Standard_D2as_v5` (parameter) | Enough for a browser or Windows App and a script. Priced by the preflight from the retail meters, never guessed (decision 0010) |
-| Security | Trusted Launch, encryption at host, no public IP, system-assigned managed identity, Microsoft Defender Antivirus (built in) | Same baseline as session hosts |
+| Security | Trusted Launch, encryption at host, no public IP, system-assigned managed identity, Microsoft Defender Antivirus (built in). **App Control for Business (WDAC), enforced, for the agent's session:** Windows App (by publisher), the harness and Explorer only. No PowerShell, cmd, Run dialog, browser or Store for `avdagent` (red-team C1) | Same baseline as session hosts, plus the allowlist: the model drives this desktop, so anything it can launch is in scope |
+| **Broker** (red-team C1) | A local service in session 0, as its own virtual service account, makes every Azure call (Foundry, Key Vault, evidence, ARM logoff). The harness in session 1 reaches it over a named pipe with fixed verbs: next action for this screenshot, a one-shot credential (TOTP only, §10.3), store evidence, sign out, finish. No verb returns a token. **Windows Firewall outbound default-deny** on every profile, with allows only for the broker's service SID (IMDS, the private endpoints), Windows App and WebView2 by program path (TCP 443, UDP 3478) and DNS. An IMDS *block* with a broker exception can't work: block rules override allows (Copilot review). If B0 can't enforce this with Windows App working, Track B stops or the broker moves off the VM (an Azure Function in the agent VNet; the VM gets no managed identity) | The model controls the desktop's mouse and keyboard. Without the default-deny, anything it can open could ask IMDS for the identity's token |
 | **Not joined** to Entra ID or Intune | Workgroup VM | A compromised or misled agent then has no device identity in the tenant, and nothing on it is trusted by Conditional Access. Consequence: a "require compliant device" policy would block the test user here (B4 deals with it) |
-| Session for screenshots | A local, non-admin user `avdagent` with Autologon. Its random password is generated at deploy and stored as an LSA secret through Sysinternals Autologon, never as plain text in `Winlogon\DefaultPassword`. The harness runs as a scheduled task at that user's logon, in session 1 | Screenshots and input need the interactive desktop. Services run in session 0 and can't see it. The local password protects nothing of value (no network rights, not used for AVD) and nobody needs to know it (rule: never make operators remember secrets) |
+| Session for screenshots | A local, non-admin user `avdagent` with Autologon. Its random password is generated at deploy and stored as an LSA secret through Sysinternals Autologon, never as plain text in `Winlogon\DefaultPassword`. The harness runs as a scheduled task at that user's logon, in session 1, and holds no identity: it talks to the broker | Screenshots and input need the interactive desktop. Services run in session 0 and can't see it. The local password protects nothing of value (no network rights, not used for AVD) and nobody needs to know it (rule: never make operators remember secrets) |
 | Display | 1440x900 | The Responses API how-to recommends 1440x900 or 1600x900 for click accuracy. **How to set the console resolution on an Azure VM with no RDP session is unverified** (B2 spike; **Q7**) |
 | Screen lock | Off for `avdagent`. The VM is reachable only through Run Command or Bastion | A locked screen stops the loop |
 | Client under test | **Windows App** (pinned MSIX version and SHA-256, from Microsoft's download link) | It tests the real client and RDP path. The web client is the fallback when the MSIX can't be installed unattended |
 | Harness install | An embedded managed Run Command (`loadTextContent`), like `Register-AvdAgent`. Pinned versions and hashes for everything it installs | Same as the session hosts (design decision 3) |
-| Operator access | **None by default.** Run Command for status and evidence. Azure Bastion **Developer** (free, one connection, no peering, local sign-in only, not in every region) is an opt-in parameter for watching a run | No standing access path and no added cost. Basic or Standard Bastion costs per hour and isn't needed. Just-in-time access needs Defender for Servers Plan 2 and an NSG rule on a management port, so it's rejected |
-| Power | Deallocated except during a run. The scheduled run starts it and the harness deallocates it at the end, with the auto-shutdown runbook's pattern | Cost |
+| Operator access | **None by default.** Run Command for status and evidence. Azure Bastion **Developer** (free, one connection, no peering, local sign-in only, not in every region) is an opt-in for **maintenance only**: an RDP session takes the single console from `avdagent`. People watch a run through its evidence, not live. The harness refuses to start while another session exists, and aborts (`status: aborted`, signed out through ARM) if the console session disconnects mid-run (red-team H3) | No standing access path and no added cost. Basic or Standard Bastion costs per hour and isn't needed. Just-in-time access needs Defender for Servers Plan 2 and an NSG rule on a management port, so it's rejected |
+| Power | Deallocated except during a run. A schedule calls a runbook on decision 0011's Automation pattern, with Virtual Machine Contributor scoped to the sandbox VM only, to start it. The broker deallocates it at the end (red-team M5) | Cost |
 
 **What this VM tests:** an Azure-hosted client in `foundryLocation`'s egress, signing in as the test user. It doesn't test any user's device, ISP, proxy or Conditional Access device state. Docs and the portal say so beside every Track B result.
 
@@ -315,54 +317,53 @@ The brief asks for the official SDK of the chosen language. The options:
 
 **Proposed: PowerShell 5.1 + REST.** The request and response shapes are small, documented and testable offline. Adding Python only for an SDK wrapper would break the repo's one-language rule. The owner decides.
 
-### 10.2 Loop
-1. **Kill switch:** read the VM's tags from IMDS (no permission needed). If `avdlz-agent=off`, stop.
-2. **Start:** launch the client, wait for its window, capture a screenshot, and send the task with the screenshot (`tools: [{type: "computer"}]`, plus one function tool, `enter_credential`).
-3. **Iterate:**
-   - Receive `computer_call` actions.
-   - Execute them (click, double-click, scroll, type, keypress, wait).
-   - Capture a screenshot and return it as `computer_call_output`, chaining with `previous_response_id`.
-   - Repeat.
-4. **Stop** on a final message, a safety check, or a bound.
+### 10.2 Loop (red-team C2, C3)
+1. **Kill switch:** the broker reads the VM's tags from IMDS. If `avdlz-agent=off`, stop.
+2. **Sign-in, without the model.** A trusted sign-in step of the harness, in session 1 (UI Automation only works within the session, so the session-0 broker can't drive it), launches Windows App and drives the sign-in through UI Automation on the Entra sign-in web view. That view is a separate top-level window owned by Windows App, with `login.microsoftonline.com` as its URL. Nothing is typed into the client's main window, and the model hasn't seen anything yet.
+3. **Desktop, observed by the model.** Once the session window is up, the harness sends the task and a screenshot (`tools: [{type: "computer"}]`). From here it accepts only `screenshot` and `wait`. Any click, typing, scroll or key press inside the session is rejected, recorded, and ends the run with `needsreview`.
+4. **Sign-out, by the harness** (§10.6).
+5. **Stop** on a final message, a safety check, a rejected action, or a bound.
 
 ### 10.3 Credentials never go through the model
-- The test user's password (and TOTP seed, if B4 chooses TOTP) live in the agent's Key Vault. The VM's identity reads them with **Key Vault Secrets User scoped to those two secrets**, not to the vault.
-- The model is told it can't type credentials. When the sign-in page asks for one, it calls the function tool `enter_credential` with `kind` = `username` | `password` | `otp`. The model never receives a value. The harness:
-  1. checks that the foreground window belongs to the expected client or `login.microsoftonline.com` (the window title and the browser URL through UI Automation; unverified for Windows App's embedded sign-in, B3 spike);
-  2. types the value itself;
-  3. presses Enter in the same step;
-  4. waits for the field to clear before taking the next screenshot.
-- **What the model can see:**
-  - the username (it isn't a secret);
-  - password fields, which render as bullets;
-  - **a TOTP code, possibly, for under a second**, if a screenshot catches the field before submission. The harness never screenshots between typing and Enter, so in practice it shouldn't. A code is valid for one 30-second step. Whether Entra rejects a reused code is unverified.
-- **Evidence screenshots get the same rule**, and the harness also blanks the screenshot taken right after a credential step from evidence.
-- Secrets are never logged, never put in the state line, and never kept in a variable after use.
+- **Certificate-based authentication is preferred** (§10a): nothing is typed, and nothing can be stolen by typing. TOTP with a password is the fallback.
+- With TOTP, the password and seed live in the agent's Key Vault. **Key Vault Secrets User on each secret**, held by the VM's identity, which only the broker can use (§9).
+- **Credentials are typed only during sign-in (§10.2 step 2)**, by the harness's sign-in step, only into the Entra sign-in window identified by owner and URL through UI Automation, with Enter in the same step. With TOTP, the step gets each value from the broker's **one-shot credential verb**, which the broker closes for the run when the harness reports the session window, or after 5 minutes. There is **no credential tool for the model**. It gets control only after the verb is closed, and its actions run through a harness that accepts only `screenshot` and `wait`, so nothing it does can reach a credential (red-team C2, revised after Copilot review). This also removes the open question of mixing a function tool with the `computer` tool (§11 B6).
+- **What the model can see:** the desktop after sign-in. No sign-in screen, no password field, no TOTP code.
+- **If deterministic sign-in proves too brittle** in the B3 spike, Track B stops there. The fallback is never to let the model type secrets.
+- Secrets are never logged, never put in the state line or evidence, and never kept after use.
 
 ### 10.4 Safety checks
 - **`pending_safety_checks`** (`malicious_instructions`, `irrelevant_domain`, `sensitive_domain`) are **never acknowledged** in unattended runs. The harness stops, records each check's code and message, logs off (§10.6), and reports `status: "needsreview"`.
 - **A check is never cleared by a later run.** It's a person's job: they read the evidence and either fix the cause or accept it and rerun.
+- **What actually holds is the harness, not the checks** (red-team H2). The domain checks evaluate a browser URL that Windows App doesn't have, and `malicious_instructions` is a model-side heuristic. The controls that hold are: observe-only after connect, the WDAC allowlist and the broker. A rejected action is reported exactly like a safety check.
 
 ### 10.5 Bounds
 
 | Bound | Default (parameter) |
 |---|---|
-| Task prompt | Fixed in the repo: open the desktop named X in workspace Y, wait for it, report what's visible against the checklist, then stop. No browsing, no other apps, no settings changes |
+| Task prompt | Fixed in the repo: look at the desktop and report what's visible against the checklist, then stop |
+| Actions allowed | `screenshot` and `wait` only, after the session window is up. Anything else is rejected and ends the run with `needsreview` (red-team C3) |
 | Iterations | 40 |
 | Wall clock | 15 minutes |
 | Token budget | 400,000 input + output per run, summed from each response's `usage`. Exceeding it stops the run |
-| Kill switch | VM tag `avdlz-agent=off` (read each iteration); deleting the model deployment (hard stop); the run's scheduled task disabled |
-| Allowed hosts | When the browser path is used, the harness rejects actions while the URL is outside `windows.cloud.microsoft` and `login.microsoftonline.com` (+ the documented sign-in hosts) |
+| Across runs | At most 4 runs a day. Three failed or aborted runs in a row disable the schedule. A budget on the agent resource group, whose alert deallocates the sandbox and disables the schedule (decision 0011's pattern; red-team H5) |
+| Kill switch | Soft: VM tag `avdlz-agent=off`, read each iteration (how fast IMDS reflects a tag change is unverified). Hard: **deallocate the VM**, or **remove the broker identity's Foundry role**; both are one command in the runbook. The wall clock is the bound that always holds (red-team H1) |
+| Allowed hosts | When the web client fallback is used, the harness drives sign-in only on `login.microsoftonline.com` and the documented sign-in hosts, and the model never navigates (observe-only) |
 
 ### 10.6 Always sign out
 - The harness logs the test user's AVD session off on success, failure, timeout and kill, from a `finally` block.
 - **Primary:** inside the session, by sending the sign-out keyboard sequence through the client.
 - **Then it verifies through ARM:** list `userSessions` on the host pool, filtered to the test user's UPN, and delete any left.
-  - That needs **Desktop Virtualization User Session Operator** on the host pool for the VM's identity. It would let the identity log off *any* user on that pool, so it's a real permission (**Q9**).
-  - Alternative: no ARM rights. Leftover sessions end by the host pool's disconnect time limit, and Track A's post-deployment check reports them.
+  - That needs **Desktop Virtualization User Session Operator** on the host pool. **Q9, settled by the red team:** granted to the VM's identity (used only by the broker) **on the dedicated check pool only** (§10.6a), never on the main, demo or QA pool. Only the test user can be on the check pool, so the role can't affect real users. A template test asserts the scope.
+  - On the main pool there are no ARM rights at all. Leftover sessions there would end by the disconnect time limit, but the agent never signs in there (§10.6a).
+
+### 10.6a The target pool (red-team C3)
+- The test user's group is assigned **only** to a **one-host agent check pool**: its own desktop app group, assigned to nobody else; local profiles (no FSLogix share); the same image and host template as the main pool. **Not the demo pool and not the QA pool**: `Deploy-AvdDemo.ps1` assigns the demo to the landing zone's AVD Users group and reuses the production profile share, and the QA pool (decision 0013) has QA users (Copilot review).
+- The pre-deployment preflight with `-FoundryCua` fails if the test user's group can reach any other app group, or if anyone else can reach the check pool's.
+- Why: after sign-in the agent's session runs on a session host, as a user. A pooled production host is shared with real users and the profile share; the check pool isn't. The trade-off: the agent checks a pool built like the main one, not the main pool itself. Track A covers the main pool from real devices. The check pool costs one more host while it runs, deallocated between runs, priced by the preflight.
 
 ### 10.7 What it checks, and the result
-- **The checklist, a parameter:** the desktop appeared; the expected apps are pinned or present (default: none); a profile banner or error isn't visible.
+- **The checklist, a parameter:** the desktop appeared; the expected apps are pinned or present (default: none); a profile banner or error isn't visible. Answered from screenshots alone (observe-only).
 - **Timing comes from telemetry** (Track A's KQL against the test user), never from the loop, because model latency would pollute it.
 - **The result is a state line, `stage: "agent"`:**
   - `status`: `verified` | `failed` | `needsreview` | `aborted`
@@ -370,8 +371,8 @@ The brief asks for the official SDK of the chosen language. The options:
 - The portal's Verify step reads it like A3's.
 
 ### 10.8 Evidence
-- Each action (type, coordinates, a hash of typed text, never the text for credential steps) and each screenshot goes to a private blob container, with a lifecycle rule deleting it after **7 days** (parameter).
-- The VM's identity can only write to it: Storage Blob Data Contributor scoped to the container (to be narrowed further at B3 if a write-only data role fits).
+- Each action the model proposed (its kind and coordinates; never typed text, and no hash of it, because a hash of a short secret can be guessed; red-team M1) and each screenshot go to a private blob container, with a lifecycle rule deleting them after **7 days** (parameter) and a write-once immutability policy for that period, so a run can't rewrite earlier evidence (red-team M2).
+- Only the broker uploads: Storage Blob Data Contributor scoped to the container, held by the VM's identity, which only the broker can use (to be narrowed further at B3 if a write-only data role fits).
 - Operators read it with their own RBAC. Nothing is public.
 - Evidence never holds secrets (§10.3). The redaction in `report.js` doesn't apply to images. Evidence isn't attached to portal issue reports.
 
@@ -387,9 +388,9 @@ The brief asks for the official SDK of the chosen language. The options:
 - **Common to all options:**
   - A cloud-only user with no mailbox data and no roles, a member of a dedicated group assigned Desktop Virtualization User on the desktop app group only.
   - A license for AVD access (Microsoft 365 E3/E5/A3/A5/F3/Business Premium, Windows E3/E5 or VDA per user). That's **one more paid license** for the tenant.
-  - A Conditional Access policy *targeting* this user to the Azure Virtual Desktop and Windows Cloud Login apps from the agent's NAT IP only (named location). Excluding the user from the tenant's MFA policy doesn't weaken it for anyone else. The user is excluded only from the device-compliance requirement, and only for those two apps.
-  - Sign-in log alerts for any sign-in by this user from anywhere else.
-- **Proposed:** CBA if a spike shows Windows App completes it unattended, else TOTP. **Q10.**
+  - A Conditional Access policy *targeting* this user to the Azure Virtual Desktop and Windows Cloud Login apps from the agent's NAT IP only (named location). Excluding the user from the tenant's MFA policy doesn't weaken it for anyone else. The user is excluded only from the device-compliance requirement, and only for those two apps. **Conditional Access needs Microsoft Entra ID P1 for this user** (many AVD-eligible bundles include it; to confirm per bundle). Exclude the user from risk-based policies only, and alert on any risk detection for it, so a block shows up as a finding (red-team H4).
+  - Sign-in log alerts for any sign-in by this user from anywhere else. A display name that says what it is (`AVD agent (test)`), and its sign-ins excluded from QA-usage counts such as the image pipeline's `qa-pool-unused` (red-team M6).
+- **Agreed:** CBA if a spike shows Windows App completes it unattended, else TOTP (Q10). No license is available yet.
 
 ## 10b. Future work (Phase B5): Windows 365 for Agents
 - Windows 365 for Agents provides Intune-managed Cloud PCs that agents check out and back in, with a dedicated security baseline. It powers Copilot Studio computer use.
@@ -412,6 +413,7 @@ The brief asks for the official SDK of the chosen language. The options:
 | 3 private endpoints | Per hour plus data each | Foundry, Key Vault, blob |
 | Key Vault, storage | Per operation / GB | Small |
 | Bastion Developer (opt-in) | Free | Not in every region |
+| Budget on the agent resource group | No charge | Its alert deallocates the sandbox and disables the schedule (red-team H5) |
 | Test user license | Per user per month | Tenant-side, not Azure |
 
 The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the retail meters, with one meter per line or the meters it saw (decision 0010, lesson 0025). Prices aren't written into this spec.
@@ -445,7 +447,7 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 | B3 | Models with "Computer use" capability; region and SKU matrix | Verified (doc source, 2026-09-21 / 2026-09-03) | [Models](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure), [regions](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure-region-availability) |
 | B4 | Whether the gpt-5.4 registration also gates gpt-5.5/5.6/6 computer use; GA vs preview; SLA | **Not verified** | — |
 | B5 | Safety check codes; never execute with pending checks without user approval; run on a low-privilege VM with no sensitive data | Verified | B1, B2, [transparency note](https://learn.microsoft.com/azure/foundry/responsible-ai/openai/transparency-note) |
-| B6 | Mixing a function tool with the `computer` tool in one request | **Not verified** (B3 spike) | — |
+| B6 | Mixing a function tool with the `computer` tool in one request | **No longer needed**: the red team removed the credential tool (§10.3) | — |
 | B7 | `accounts` kind `AIServices` with `allowProjectManagement`, `disableLocalAuth`, `publicNetworkAccess`, `customSubDomainName`; `accounts/projects`; `accounts/deployments` with `sku` and `model {format,name,version}` | Verified (Bicep types; stable 2025-06-01 through 2026-09-01) | [Template reference](https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/accounts) |
 | B8 | AVM `cognitive-services/account` (0.19.x) doesn't deploy projects; `avm/ptn/ai-ml/ai-foundry` 0.7.0 does (projects at 2025-12-01) | Verified (AVM source and registry) | [AVM](https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/cognitive-services/account) |
 | B9 | Private endpoint group `account`; zones `privatelink.cognitiveservices.azure.com`, `privatelink.openai.azure.com`, `privatelink.services.ai.azure.com` | Verified | [Foundry VNets](https://learn.microsoft.com/azure/foundry/agents/how-to/virtual-networks) |
@@ -462,10 +464,17 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 | B20 | Key Vault Secrets User `4633458b-17de-408a-b874-0445c86b69e6` | Summary (to confirm against the role reference before it goes into `PUBLIC_IDS`) | [Security roles](https://learn.microsoft.com/azure/role-based-access-control/built-in-roles/security) |
 | B21 | Windows 365 for Agents exists; status and licensing | Summary; GA **not verified** | [W365 for Agents](https://learn.microsoft.com/windows-365/agents/introduction-windows-365-for-agents) |
 | B22 | Setting the console display resolution on an Azure VM without RDP; Windows App MSIX unattended install and its dependencies | **Not verified** (B2 spike) | — |
+| B23 | Windows Firewall with outbound default-deny on every profile, allowing IMDS only for one service SID and the internet only for Windows App and WebView2 by program path, while Windows App still signs in and connects (red-team C1; block rules override allows, so this is the only form that can work) | **Not verified** (B0 spike; failure stops Track B or moves the broker off the VM) | — |
+| B24 | App Control for Business (WDAC) blocking Run, the Start menu and shells for one local user while Windows App works | **Not verified** (B2 spike) | — |
+| B25 | Driving the Entra sign-in web view in Windows App through UI Automation from the harness in session 1, and CBA completing unattended there | **Not verified** (B0 spike) | — |
+| B26 | How fast IMDS reflects a tag change; whether the model list API exposes a retirement date | **Not verified** | — |
+| B27 | Which Windows license covers a Windows 11 Enterprise VM whose only user is a local account | **Not verified** (red-team M4) | — |
 
 ## 12. Open questions for the owner
 
-**Answered 2026-10-05:** the owner agreed with every proposed answer below. Q1: only the confirmed hosts. Q2: document trusted devices. Q3: pick the route at A3 and mark it. Q5: no peering to the spoke. Q6: public access restricted to the NAT IP is the fallback. Q7: spike. Q8: PowerShell 5.1 + REST. Q11: its own template and run. Q10: CBA if a spike shows it works unattended, else TOTP. Q12: a 7-day blob container. Still open, because they ask for facts or a choice without a proposal: Q4 (which model access you hold, and where), Q9 (logoff rights) and Q10's license for the test user. They're needed before B1, B3 and B4.
+**Answered 2026-10-05:** the owner agreed with every proposed answer below. Q1: only the confirmed hosts. Q2: document trusted devices. Q3: pick the route at A3 and mark it. Q5: no peering to the spoke. Q6: public access restricted to the NAT IP is the fallback. Q7: spike. Q8: PowerShell 5.1 + REST. Q11: its own template and run. Q10: CBA if a spike shows it works unattended, else TOTP. Q12: a 7-day blob container. **Answered 2026-10-05 (later):** Q4: no model access is held yet. Q10: no license for a test user yet. Q9: deferred to a red-team review of Track B.
+
+**What that means for Track B.** It is **blocked on two prerequisites the repo can't supply**: approved access to a computer-use model (aka.ms/OAI/gpt54access, §7.4) and an AVD-eligible license for the test user (§10a). **Q9 is settled by the [red-team review](verify-access-redteam.md):** User Session Operator on a dedicated one-host check pool only, never the main, demo or QA pool (§10.6, §10.6a). The review also recommends (S1) keeping Track B **designed but unbuilt** until both prerequisites exist, then deciding whether the model's visual check is worth its standing cost, starting with a deterministic check that needs no model (S2).
 
 1. **Q1, probe hosts:** add `rdweb.wvd.microsoft.com` and `client.wvd.microsoft.com` as informational and unconfirmed, or probe only the two confirmed hosts? *Proposed: only the confirmed ones.*
 2. **Q2, consent prompt:** document trusted devices only (proposed), or have the post-deployment `-Fix` create a device group of the session hosts and register it with `targetDeviceGroups`? The second needs a new Graph permission in the operator's sign-in, and a group that tracks hosts.
@@ -488,9 +497,10 @@ The pre-deployment preflight with `-FoundryCua` prices the Azure lines from the 
 | **A1** | `classifyReachability`, the probe in the Verify step, copy, Node tests | Node tests green; a manual check in a browser (not possible from CI) |
 | **A2** | `context.launch` from the post-deployment and demo runs, `launchUrl`, the README schema, the PostDeployment scenario asserting `launch` | Pester, offline scenario and Node tests green |
 | **A3** | `Test-AvdUserConnection.ps1`, `kql/user-connection.kql`, AzMock query route, `VerifyConnection` scenario (5 cases), portal `verify` branch, template test for `allLogs` | All CI checks green. Real sign-in still unverified until the owner runs it |
-| **B1** | `bicep/agent/foundry.bicep` (account, project, deployment, private endpoint and zones), preflight `-FoundryCua` checks, deploy-stage rollback | Builds and lints, PSRule clean, nothing created without `--agent` |
-| **B2** | `bicep/agent/sandbox.bicep` (VNet, NAT or hub route, VM, Key Vault, storage), the Run Command installer | Same, plus template tests for no peering to the spoke, no public IP, Trusted Launch, encryption at host |
-| **B3** | Harness, offline-tested against a mocked Responses API (actions, safety check, budget, kill switch, logoff in every exit path) | Pester green. No real Foundry call has been made |
+| **B0 spikes** (when Q4 and Q10 are met) | The S2 deterministic check; IMDS firewall by service SID (B23); the WDAC allowlist (B24); deterministic sign-in and CBA in Windows App (B25) | Each spike that fails changes the design before any module is written |
+| **B1** | `bicep/agent/foundry.bicep` (account, project, deployment, private endpoint and zones), preflight `-FoundryCua` checks (including the target-pool rule), deploy-stage rollback | Builds and lints, PSRule clean, nothing created without `--agent` |
+| **B2** | `bicep/agent/sandbox.bicep` (VNet, NAT or hub route, VM, Key Vault, storage with immutability), the broker and WDAC policy through the Run Command installer | Same, plus template tests for no peering to the spoke, no public IP, Trusted Launch, encryption at host, roles scoped to the agent group and the target pool |
+| **B3** | Broker and harness, offline-tested against a mocked Responses API (observe-only rejection, safety check, budgets, kill switch, logoff in every exit path) | Pester green. No real Foundry call has been made |
 | **B4** | Test identity as chosen, portal wiring, optional schedule | After the owner's B4 decision |
 
-Each phase is one commit. Track B starts only after the owner answers §12.
+Each phase is one commit. Track A (A1–A3) is built. Track B is designed and red-teamed, and waits for model access and a test user license (§12); its first step is the B0 spikes.

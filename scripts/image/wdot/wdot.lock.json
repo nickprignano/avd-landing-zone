@@ -1,0 +1,33 @@
+{
+  "name": "Windows Desktop Optimization Tool",
+  "repository": "https://github.com/The-Virtual-Desktop-Team/Windows-Desktop-Optimization-Tool",
+  "license": "MIT",
+  "version": "v1.1",
+  "commit": "f20d6b7748d01e6e6c55518e8a9496af2749ca41",
+  "archiveUrl": "https://github.com/The-Virtual-Desktop-Team/Windows-Desktop-Optimization-Tool/archive/f20d6b7748d01e6e6c55518e8a9496af2749ca41.zip",
+  "archiveRoot": "Windows-Desktop-Optimization-Tool-f20d6b7748d01e6e6c55518e8a9496af2749ca41",
+  "optimizations": [
+    "Services",
+    "ScheduledTasks",
+    "Autologgers",
+    "DefaultUserSettings"
+  ],
+  "profileSha256": "08092903f13f079100f4c242f3281446344567076a0a12f39627cae9ced87f74",
+  "files": {
+    "Windows_Optimization.ps1": "87fc0bb13d725150afa308b8e2210f42baa657ee2078b6f6e5719582c7dd67cc",
+    "Functions/Disable-WDOTAutoLoggers.ps1": "4e979c8ceab9b18cfcb96bfa4df77b44823245c620c5771cb6e477b18a564bd0",
+    "Functions/Disable-WDOTScheduledTasks.ps1": "baa2481c3146fb3b6cf477e539c7140e31b8de26636ebdc1e2e47908caad23b6",
+    "Functions/Disable-WDOTServices.ps1": "34d252d238c467834ccd354e3be6e4c0d14f562941a0f7d9a49899d86c01038d",
+    "Functions/Get-WDOTOperatingSystemInfo.ps1": "cf2fea55ae7f26f4aee4f8e9968fd1e3c9d2627ce17eec9faf1e126eafaf9309",
+    "Functions/New-WDOTCommentBox.ps1": "a9e206124bdddac452f55a249540d0fd5b6863d7d2ecf1b97b63c2f1945afbb6",
+    "Functions/Optimize-WDOTDefaultUserSettings.ps1": "6d97e38c3b189c47e7cde4a68155c7c1d2b5eb233707a1b260a3ec84bad77b81",
+    "Functions/Optimize-WDOTDiskCleanup.ps1": "13d2a49a8033724cb7730e17ae7c3d4a2144a3503519892d107fb43e522a8efc",
+    "Functions/Optimize-WDOTEdgeSettings.ps1": "161b3ebecd6d2ccd6566fdd33db7888976ed7a51b5f61206c1e50c694b2ba82c",
+    "Functions/Optimize-WDOTLocalPolicySettings.ps1": "a408bdb9a2020aaea5eed72906845cef9285c597e02408755d4d37ee8971cf9a",
+    "Functions/Optimize-WDOTNetworkOptimizations.ps1": "bb7d6dbe35112f632a658c1c1099438796cd10936009e732400c31772bd10cf7",
+    "Functions/Remove-WDOTAppxPackages.ps1": "670e1205e19c1e1c554ea425385e4d95ccb3eb024982e6d6da129d4419f419ad",
+    "Functions/Remove-WDOTRemoveLegacyIE.ps1": "e926d583aaf321c60025d50d410539972ef5674e5614f23e2463a2c4f4dbd97b",
+    "Functions/Remove-WDOTRemoveOneDrive.ps1": "33868535fc1faab5cab2c1a6e37c2964c1191f8c7c51212c8ff6d43ff416ba45",
+    "Functions/Remove-WDOTWindowsMediaPlayer.ps1": "7db7bcdf79425820ac52906859eabfebea7e88128b95cc09c9c08f42f3a0ee48"
+  }
+}

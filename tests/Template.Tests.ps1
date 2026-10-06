@@ -214,3 +214,22 @@ Describe 'Connection logs for Verify access (decision 0014)' {
     }
   }
 }
+
+Describe 'Files the templates load are committed (docs/lessons/0027)' {
+  # A file a template reads at compile time (loadTextContent, loadJsonContent, loadFileAsBase64,
+  # loadYamlContent) builds locally even when .gitignore keeps it out of git, then fails in CI and
+  # for everyone else. A repo-wide *.json rule did exactly that to the image pipeline's data files.
+  It 'tracks every file a Bicep template loads' {
+    $tracked = @(git ls-files --full-name | ForEach-Object { $_ })
+    $tracked.Count | Should -BeGreaterThan 0 -Because 'the test needs a git checkout'
+    $missing = foreach ($file in Get-ChildItem 'bicep' -Filter '*.bicep' -Recurse) {
+      $src = Get-Content $file.FullName -Raw
+      foreach ($m in [regex]::Matches($src, "load(?:TextContent|JsonContent|FileAsBase64|YamlContent)\('([^']+)'")) {
+        $full = [IO.Path]::GetFullPath((Join-Path $file.DirectoryName $m.Groups[1].Value))
+        $rel = [IO.Path]::GetRelativePath((Get-Location).Path, $full).Replace('\', '/')
+        if ($tracked -notcontains $rel) { "$rel (loaded by $([IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName)))" }
+      }
+    }
+    @($missing) | Should -BeNullOrEmpty -Because 'git add the file; if .gitignore hides it, narrow the rule'
+  }
+}

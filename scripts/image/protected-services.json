@@ -1,0 +1,28 @@
+{
+  "description": "Services the landing zone depends on (docs/image-pipeline-spec.md section 5.5). They must stay Skip in the WDOT profile (tests/ImageScripts.Tests.ps1), and Test-GoldenImage.ps1 checks that none is Disabled on the built image.",
+  "services": [
+    "dmwappushservice",
+    "WinDefend",
+    "WdNisSvc",
+    "Sense",
+    "SecurityHealthService",
+    "mpssvc",
+    "wuauserv",
+    "BITS",
+    "WSearch",
+    "W32Time",
+    "CryptSvc",
+    "Schedule",
+    "TermService",
+    "SessionEnv",
+    "UmRdpService",
+    "LanmanWorkstation",
+    "KeyIso",
+    "VaultSvc",
+    "TokenBroker",
+    "AppXSvc",
+    "ClipSVC",
+    "edgeupdate",
+    "edgeupdatem"
+  ]
+}
