@@ -579,6 +579,14 @@ test('launch: direct web client link from the two object IDs; tenant only when a
   assert.equal(P.launchUrl(LAUNCH, { tenant: true }), base + '?tenant=55555555-5555-5555-5555-555555555555');
   assert.equal(P.launchUrl(LAUNCH, { tenant: true, loginHint: 'alex@contoso.com' }), base + '?tenant=55555555-5555-5555-5555-555555555555#loginHint=alex@contoso.com');
   assert.equal(P.launchUrl({ ...LAUNCH, tenantId: undefined }, { tenant: true }), base, 'no tenant ID, no tenant parameter');
+  assert.equal(P.launchUrl(LAUNCH, { loginHint: 'alex@contoso.com' }), base + '#loginHint=alex@contoso.com', 'internal identity: hint without the tenant parameter');
+});
+
+test('launch: matches the fully formatted example on Microsoft\'s direct launch URLs page (spec §11 A2)', () => {
+  // https://learn.microsoft.com/windows-app/direct-launch-urls, Azure Virtual Desktop tab (ms.date 2026-09-09).
+  const documented = 'https://windows.cloud.microsoft/webclient/avd/00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111?tenant=22222222-2222-2222-2222-222222222222#loginHint=user@contoso.com';
+  const launch = { workspaceObjectId: '00000000-0000-0000-0000-000000000000', desktopObjectId: '11111111-1111-1111-1111-111111111111', tenantId: '22222222-2222-2222-2222-222222222222' };
+  assert.equal(P.launchUrl(launch, { tenant: true, loginHint: 'user@contoso.com' }), documented);
 });
 
 test('launch: a pasted state line is untrusted: only GUIDs, only windows.cloud.microsoft, no injected URL parts', () => {

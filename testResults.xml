@@ -1,0 +1,336 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="143" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-10-06" time="00:29:51">
+  <environment user-domain="" os-version="6.18.44-fc-v70" platform="Linux" clr-version="9.0.10" cwd="/home/user/avd-landing-zone" nunit-version="2.5.8.0" machine-name="vm" user="root" />
+  <culture-info current-culture="" current-uiculture="" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="309.8404" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="/home/user/avd-landing-zone/tests/AvdLandingZone.Tests.ps1" executed="True" result="Success" success="True" time="2.7273" asserts="0" description="/home/user/avd-landing-zone/tests/AvdLandingZone.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="ConvertTo-AvdEntraSid" executed="True" result="Success" success="True" time="0.1623" asserts="0" description="ConvertTo-AvdEntraSid">
+            <results>
+              <test-case description="matches the Microsoft-published object ID to SID example" name="ConvertTo-AvdEntraSid.matches the Microsoft-published object ID to SID example" time="0.1015" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Profile share ACL evaluation" executed="True" result="Success" success="True" time="0.2411" asserts="0" description="Profile share ACL evaluation">
+            <results>
+              <test-case description="accepts the ACL it generates" name="Profile share ACL evaluation.accepts the ACL it generates" time="0.0304" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="flags the default share ACL" name="Profile share ACL evaluation.flags the default share ACL" time="0.0334" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="flags a users entry that inherits into profile folders" name="Profile share ACL evaluation.flags a users entry that inherits into profile folders" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-AvdAceGrantsWrite" executed="True" result="Success" success="True" time="0.3055" asserts="0" description="Test-AvdAceGrantsWrite">
+            <results>
+              <test-suite type="ParameterizedTest" name="Test-AvdAceGrantsWrite.&lt;Rights&gt; grants write: &lt;Expected&gt;" executed="True" result="Success" success="True" time="0.0592" asserts="0" description="&lt;Rights&gt; grants write: &lt;Expected&gt;">
+                <results>
+                  <test-case description="0x1301bf grants write: $true" name="Test-AvdAceGrantsWrite.0x1301bf grants write: $true" time="0.0316" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="0x1200a9 grants write: $false" name="Test-AvdAceGrantsWrite.0x1200a9 grants write: $false" time="0.0068" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="GXGR grants write: $false" name="Test-AvdAceGrantsWrite.GXGR grants write: $false" time="0.0061" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="SDGXGWGR grants write: $true" name="Test-AvdAceGrantsWrite.SDGXGWGR grants write: $true" time="0.0057" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="FA grants write: $true" name="Test-AvdAceGrantsWrite.FA grants write: $true" time="0.009" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdRandomPassword" executed="True" result="Success" success="True" time="0.4082" asserts="0" description="Get-AvdRandomPassword">
+            <results>
+              <test-case description="returns a read-only 24-character SecureString meeting Windows complexity" name="Get-AvdRandomPassword.returns a read-only 24-character SecureString meeting Windows complexity" time="0.0564" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="differs between calls" name="Get-AvdRandomPassword.differs between calls" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdGraphFilterUri" executed="True" result="Success" success="True" time="0.4204" asserts="0" description="Get-AvdGraphFilterUri">
+            <results>
+              <test-case description="URL-encodes the filter" name="Get-AvdGraphFilterUri.URL-encodes the filter" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Check result reporting" executed="True" result="Success" success="True" time="0.4838" asserts="0" description="Check result reporting">
+            <results>
+              <test-case description="counts failures in the summary" name="Check result reporting.counts failures in the summary" time="0.0596" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-AvdGraph" executed="True" result="Success" success="True" time="0.8977" asserts="0" description="Invoke-AvdGraph">
+            <results>
+              <test-case description="follows nextLink and returns a flat list that @() does not nest" name="Invoke-AvdGraph.follows nextLink and returns a flat list that @() does not nest" time="0.2452" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns nothing (not a nested empty array) for an empty collection" name="Invoke-AvdGraph.returns nothing (not a nested empty array) for an empty collection" time="0.0197" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="throws instead of looping when a page request fails" name="Invoke-AvdGraph.throws instead of looping when a page request fails" time="0.1386" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdProviderState" executed="True" result="Success" success="True" time="1.0319" asserts="0" description="Get-AvdProviderState">
+            <results>
+              <test-case description="reads every namespace from one provider list call" name="Get-AvdProviderState.reads every namespace from one provider list call" time="0.0559" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to per-namespace lookups when the list call fails" name="Get-AvdProviderState.falls back to per-namespace lookups when the list call fails" time="0.0715" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-AvdGraphToken" executed="True" result="Success" success="True" time="1.082" asserts="0" description="Test-AvdGraphToken">
+            <results>
+              <test-case description="is false when the sign-in cannot produce a token" name="Test-AvdGraphToken.is false when the sign-in cannot produce a token" time="0.0186" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is true on a permission error, which still proves a token was issued" name="Test-AvdGraphToken.is true on a permission error, which still proves a token was issued" time="0.0143" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is true when the request succeeds" name="Test-AvdGraphToken.is true when the request succeeds" time="0.0124" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-AvdHostPoolRegion" executed="True" result="Success" success="True" time="1.1509" asserts="0" description="Test-AvdHostPoolRegion">
+            <results>
+              <test-case description="passes for a host pool region given by its ARM name" name="Test-AvdHostPoolRegion.passes for a host pool region given by its ARM name" time="0.0324" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="warns instead of failing when the provider cannot be read" name="Test-AvdHostPoolRegion.warns instead of failing when the provider cannot be read" time="0.0162" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fails for a region without host pools and lists the ones that have them" name="Test-AvdHostPoolRegion.fails for a region without host pools and lists the ones that have them" time="0.0167" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-AvdResourceProvider -Fix" executed="True" result="Success" success="True" time="1.4268" asserts="0" description="Test-AvdResourceProvider -Fix">
+            <results>
+              <test-case description="waits for the registrations, reports Fixed and re-registers Microsoft.Compute" name="Test-AvdResourceProvider -Fix.waits for the registrations, reports Fixed and re-registers Microsoft.Compute" time="0.1738" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="warns and does not re-register Compute when the feature is still registering at the timeout" name="Test-AvdResourceProvider -Fix.warns and does not re-register Compute when the feature is still registering at the timeout" time="0.0577" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="only reports in check mode" name="Test-AvdResourceProvider -Fix.only reports in check mode" time="0.0394" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Add-AvdCallerToGroup" executed="True" result="Success" success="True" time="1.561" asserts="0" description="Add-AvdCallerToGroup">
+            <results>
+              <test-case description="adds the signed-in user only to groups they are not already in" name="Add-AvdCallerToGroup.adds the signed-in user only to groups they are not already in" time="0.1289" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdPrivateEndpointDnsZoneId" executed="True" result="Success" success="True" time="1.6069" asserts="0" description="Get-AvdPrivateEndpointDnsZoneId">
+            <results>
+              <test-case description="searches the whole subscription and returns the zone of the endpoint that fronts the target" name="Get-AvdPrivateEndpointDnsZoneId.searches the whole subscription and returns the zone of the endpoint that fronts the target" time="0.0407" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Profile share ACL error reporting" executed="True" result="Success" success="True" time="1.6368" asserts="0" description="Profile share ACL error reporting">
+            <results>
+              <test-case description="names the step, HTTP status, storage error code, message and resolved IP" name="Profile share ACL error reporting.names the step, HTTP status, storage error code, message and resolved IP" time="0.0185" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="points at DNS when the storage account resolves to a public IP" name="Profile share ACL error reporting.points at DNS when the storage account resolves to a public IP" time="0.0059" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdArmList" executed="True" result="Success" success="True" time="1.7894" asserts="0" description="Get-AvdArmList">
+            <results>
+              <test-case description="follows nextLink as a path and returns a flat list" name="Get-AvdArmList.follows nextLink as a path and returns a flat list" time="0.0406" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stops at MaxPages when nextLink never ends" name="Get-AvdArmList.stops at MaxPages when nextLink never ends" time="0.0447" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stops on an empty page and passes an error through" name="Get-AvdArmList.stops on an empty page and passes an error through" time="0.0554" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Well-Architected findings" executed="True" result="Success" success="True" time="1.8612" asserts="0" description="Well-Architected findings">
+            <results>
+              <test-case description="marks a dev trade-off as expected, and the same finding in prod as a plain warning" name="Well-Architected findings.marks a dev trade-off as expected, and the same finding in prod as a plain warning" time="0.0447" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never fails a run: a finding is Pass or Warn" name="Well-Architected findings.never fails a run: a finding is Pass or Warn" time="0.013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reads the pillar from a PSRule record tag" name="Well-Architected findings.reads the pillar from a PSRule record tag" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdRetailPrice" executed="True" result="Success" success="True" time="2.0075" asserts="0" description="Get-AvdRetailPrice">
+            <results>
+              <test-case description="follows NextPageLink and stops at MaxPages" name="Get-AvdRetailPrice.follows NextPageLink and stops at MaxPages" time="0.079" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stops on an empty page and passes an error through" name="Get-AvdRetailPrice.stops on an empty page and passes an error through" time="0.0361" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="asks for the currency and escapes the filter" name="Get-AvdRetailPrice.asks for the currency and escapes the filter" time="0.0261" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdCostEstimate" executed="True" result="Success" success="True" time="2.1362" asserts="0" description="Get-AvdCostEstimate">
+            <results>
+              <test-case description="leaves a line unpriced when two different meters match, instead of picking one" name="Get-AvdCostEstimate.leaves a line unpriced when two different meters match, instead of picking one" time="0.1236" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AvdUserConnectionOutcome (decision 0014)" executed="True" result="Success" success="True" time="2.211" asserts="0" description="Get-AvdUserConnectionOutcome (decision 0014)">
+            <results>
+              <test-case description="fails closed: nothing is &quot;none&quot;, never verified" name="Get-AvdUserConnectionOutcome (decision 0014).fails closed: nothing is &quot;none&quot;, never verified" time="0.0104" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reads the dynamic columns the query API returns as JSON strings" name="Get-AvdUserConnectionOutcome (decision 0014).reads the dynamic columns the query API returns as JSON strings" time="0.0334" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="a connection with no errors and no Connected time is in progress; Connected anywhere is verified" name="Get-AvdUserConnectionOutcome (decision 0014).a connection with no errors and no Connected time is in progress; Connected anywhere is verified" time="0.0251" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/home/user/avd-landing-zone/tests/ImageScripts.Tests.ps1" executed="True" result="Success" success="True" time="0.2773" asserts="0" description="/home/user/avd-landing-zone/tests/ImageScripts.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="WDOT lock" executed="True" result="Success" success="True" time="0.1037" asserts="0" description="WDOT lock">
+            <results>
+              <test-case description="records the hash of the profile as it is" name="WDOT lock.records the hash of the profile as it is" time="0.0336" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="pins a commit, and the SHA-256 of the main script and of function files" name="WDOT lock.pins a commit, and the SHA-256 of the main script and of function files" time="0.0588" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never runs DiskCleanup (it deletes the build's evidence) or All" name="WDOT lock.never runs DiskCleanup (it deletes the build's evidence) or All" time="0.0062" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="WDOT profile" executed="True" result="Success" success="True" time="0.1736" asserts="0" description="WDOT profile">
+            <results>
+              <test-case description="never applies to a service the landing zone depends on" name="WDOT profile.never applies to a service the landing zone depends on" time="0.0185" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps the default-user settings that conflict with the landing zone Skip" name="WDOT profile.keeps the default-user settings that conflict with the landing zone Skip" time="0.021" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps the Mellanox autologger (accelerated networking adapters)" name="WDOT profile.keeps the Mellanox autologger (accelerated networking adapters)" time="0.0065" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="applies nothing in a category the lock doesn't run" name="WDOT profile.applies nothing in a category the lock doesn't run" time="0.0192" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Image version names" executed="True" result="Success" success="True" time="0.2186" asserts="0" description="Image version names">
+            <results>
+              <test-case description="names builds YYYY.MDD.N and counts the day's builds" name="Image version names.names builds YYYY.MDD.N and counts the day's builds" time="0.0223" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="picks the newest version as a number, not as text" name="Image version names.picks the newest version as a number, not as text" time="0.0182" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/home/user/avd-landing-zone/tests/OfflineScenarios.Tests.ps1" executed="True" result="Success" success="True" time="171.4721" asserts="0" description="/home/user/avd-landing-zone/tests/OfflineScenarios.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Post-deployment: preflight, demo and cleanup" executed="True" result="Success" success="True" time="2.8573" asserts="0" description="Post-deployment: preflight, demo and cleanup">
+            <results>
+              <test-case description="fails the check while the tenant steps are not done" name="Post-deployment: preflight, demo and cleanup.fails the check while the tenant steps are not done" time="0.0315" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="-Fix completes all three tenant steps" name="Post-deployment: preflight, demo and cleanup.-Fix completes all three tenant steps" time="0.0043" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="-Fix grants consent, tags the app, excludes it from CA and applies the ACL" name="Post-deployment: preflight, demo and cleanup.-Fix grants consent, tags the app, excludes it from CA and applies the ACL" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="-Fix removes the temporary storage role it granted the host" name="Post-deployment: preflight, demo and cleanup.-Fix removes the temporary storage role it granted the host" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is clean when checked again" name="Post-deployment: preflight, demo and cleanup.is clean when checked again" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="deploys and validates the demo, then removes it" name="Post-deployment: preflight, demo and cleanup.deploys and validates the demo, then removes it" time="0.006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="changes nothing when removing the landing zone with -WhatIf" name="Post-deployment: preflight, demo and cleanup.changes nothing when removing the landing zone with -WhatIf" time="0.0037" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="says the Key Vault will be soft-deleted under -WhatIf, and is soft-deleted after the real run" name="Post-deployment: preflight, demo and cleanup.says the Key Vault will be soft-deleted under -WhatIf, and is soft-deleted after the real run" time="0.0229" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports each deployment record it deletes" name="Post-deployment: preflight, demo and cleanup.reports each deployment record it deletes" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="removing a landing zone beside another keeps what the other one uses" name="Post-deployment: preflight, demo and cleanup.removing a landing zone beside another keeps what the other one uses" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="deletes the Log Analytics workspace permanently before its resource group (lesson 0023)" name="Post-deployment: preflight, demo and cleanup.deletes the Log Analytics workspace permanently before its resource group (lesson 0023)" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="purges the storage account's Entra app from deleted items after deleting the storage (rule 26)" name="Post-deployment: preflight, demo and cleanup.purges the storage account's Entra app from deleted items after deleting the storage (rule 26)" time="0.0092" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="removes every landing zone resource group" name="Post-deployment: preflight, demo and cleanup.removes every landing zone resource group" time="0.0055" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ends every run with a portal state line (none under -WhatIf)" name="Post-deployment: preflight, demo and cleanup.ends every run with a portal state line (none under -WhatIf)" time="0.0305" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports the launch link IDs for the landing zone desktop and the demo desktop (decision 0014)" name="Post-deployment: preflight, demo and cleanup.reports the launch link IDs for the landing zone desktop and the demo desktop (decision 0014)" time="0.0245" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves the launch link out when ARM returns no objectId" name="Post-deployment: preflight, demo and cleanup.leaves the launch link out when ARM returns no objectId" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Pre-deployment: empty subscription, then a blocked prod deployment" executed="True" result="Success" success="True" time="76.2431" asserts="0" description="Pre-deployment: empty subscription, then a blocked prod deployment">
+            <results>
+              <test-case description="fails on missing groups, service principal and providers" name="Pre-deployment: empty subscription, then a blocked prod deployment.fails on missing groups, service principal and providers" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="-Fix creates and registers everything it can" name="Pre-deployment: empty subscription, then a blocked prod deployment.-Fix creates and registers everything it can" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is clean when checked again, and prints the deploy command" name="Pre-deployment: empty subscription, then a blocked prod deployment.is clean when checked again, and prints the deploy command" time="0.0026" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reads the AVD host pool regions from the provider API" name="Pre-deployment: empty subscription, then a blocked prod deployment.reads the AVD host pool regions from the provider API" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="blocks prod on a soft-deleted, purge-protected Key Vault" name="Pre-deployment: empty subscription, then a blocked prod deployment.blocks prod on a soft-deleted, purge-protected Key Vault" time="0.0021" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="gives the portal the context and structured failures it needs" name="Pre-deployment: empty subscription, then a blocked prod deployment.gives the portal the context and structured failures it needs" time="0.0288" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="-Fix recovers the soft-deleted vault into its resource group, created again first" name="Pre-deployment: empty subscription, then a blocked prod deployment.-Fix recovers the soft-deleted vault into its resource group, created again first" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="prices the power settings from the portal's Cost step and reports them to the portal" name="Pre-deployment: empty subscription, then a blocked prod deployment.prices the power settings from the portal's Cost step and reports them to the portal" time="0.0206" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="check mode points at -Fix for the vault" name="Pre-deployment: empty subscription, then a blocked prod deployment.check mode points at -Fix for the vault" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Pre-deployment: sizing from the deployment portal, and its cost" executed="True" result="Success" success="True" time="137.2964" asserts="0" description="Pre-deployment: sizing from the deployment portal, and its cost">
+            <results>
+              <test-case description="validates the desired sizing, not the parameter file's: quota for 3 x 8 vCPUs" name="Pre-deployment: sizing from the deployment portal, and its cost.validates the desired sizing, not the parameter file's: quota for 3 x 8 vCPUs" time="0.0099" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="warns above 6 sessions per vCPU" name="Pre-deployment: sizing from the deployment portal, and its cost.warns above 6 sessions per vCPU" time="0.0018" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="warns when memory per session is too low, and suggests the E-series size" name="Pre-deployment: sizing from the deployment portal, and its cost.warns when memory per session is too low, and suggests the E-series size" time="0.0026" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="warns before redeploying resizes the hosts (D4as_v5 deployed, E4as_v5 default)" name="Pre-deployment: sizing from the deployment portal, and its cost.warns before redeploying resizes the hosts (D4as_v5 deployed, E4as_v5 default)" time="0.0073" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="tells the portal the sizing it validated" name="Pre-deployment: sizing from the deployment portal, and its cost.tells the portal the sizing it validated" time="0.007" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="prices each line from one meter, at the base compute rate, across pages" name="Pre-deployment: sizing from the deployment portal, and its cost.prices each line from one meter, at the base compute rate, across pages" time="0.011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports a line it cannot price, with the meters it saw, instead of guessing" name="Pre-deployment: sizing from the deployment portal, and its cost.reports a line it cannot price, with the meters it saw, instead of guessing" time="0.0077" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="prints the deploy command with the validated sizing once it passes" name="Pre-deployment: sizing from the deployment portal, and its cost.prints the deploy command with the validated sizing once it passes" time="0.0065" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still finishes (and is ready) when the price API is down" name="Pre-deployment: sizing from the deployment portal, and its cost.still finishes (and is ready) when the price API is down" time="0.0198" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="deploy.sh with session hosts that are not running (real run, 2026-10-05)" executed="True" result="Success" success="True" time="138.5062" asserts="0" description="deploy.sh with session hosts that are not running (real run, 2026-10-05)">
+            <results>
+              <test-case description="starts a deallocated host before the deployment and deallocates it after" name="deploy.sh with session hosts that are not running (real run, 2026-10-05).starts a deallocated host before the deployment and deallocates it after" time="0.0061" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="deallocates it again when the deployment fails, and still fails" name="deploy.sh with session hosts that are not running (real run, 2026-10-05).deallocates it again when the deployment fails, and still fails" time="0.0022" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="only reports it on a what-if" name="deploy.sh with session hosts that are not running (real run, 2026-10-05).only reports it on a what-if" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="touches no host when all are running, or on a first deployment" name="deploy.sh with session hosts that are not running (real run, 2026-10-05).touches no host when all are running, or on a first deployment" time="0.0024" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="makes no az call the fake does not know" name="deploy.sh with session hosts that are not running (real run, 2026-10-05).makes no az call the fake does not know" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Post-deployment quota on a deployed landing zone (real run, 2026-09-30)" executed="True" result="Success" success="True" time="139.6056" asserts="0" description="Post-deployment quota on a deployed landing zone (real run, 2026-09-30)">
+            <results>
+              <test-case description="does not count the deployed host twice: 4 of 4 Easv5 vCPUs used by the host itself passes" name="Post-deployment quota on a deployed landing zone (real run, 2026-09-30).does not count the deployed host twice: 4 of 4 Easv5 vCPUs used by the host itself passes" time="0.0033" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still fails a scale-out beyond the quota, and asks only for the difference" name="Post-deployment quota on a deployed landing zone (real run, 2026-09-30).still fails a scale-out beyond the quota, and asks only for the difference" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="No landing zone in the subscription" executed="True" result="Success" success="True" time="140.4343" asserts="0" description="No landing zone in the subscription">
+            <results>
+              <test-case description="fails once with a pointer to what is there, not once per missing resource" name="No landing zone in the subscription.fails once with a pointer to what is there, not once per missing resource" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="tells the portal which landing zones do exist" name="No landing zone in the subscription.tells the portal which landing zones do exist" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Profile share root that never had an ACL set" executed="True" result="Success" success="True" time="141.7771" asserts="0" description="Profile share root that never had an ACL set">
+            <results>
+              <test-case description="reports the default ACL in check mode" name="Profile share root that never had an ACL set.reports the default ACL in check mode" time="0.0034" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="applies the FSLogix ACL with -Fix" name="Profile share root that never had an ACL set.applies the FSLogix ACL with -Fix" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Well-Architected review of the deployed landing zone" executed="True" result="Success" success="True" time="143.4917" asserts="0" description="Well-Architected review of the deployed landing zone">
+            <results>
+              <test-case description="reports findings as warnings, so a dev landing zone is still ready" name="Well-Architected review of the deployed landing zone.reports findings as warnings, so a dev landing zone is still ready" time="0.0055" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="marks the dev parameter file's trade-offs as expected" name="Well-Architected review of the deployed landing zone.marks the dev parameter file's trade-offs as expected" time="0.0075" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps only recommendations for the landing zone (any case), across pages" name="Well-Architected review of the deployed landing zone.keeps only recommendations for the landing zone (any case), across pages" time="0.0032" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reads a region without zones as having none (ARM omits the property; lesson 0021)" name="Well-Architected review of the deployed landing zone.reads a region without zones as having none (ARM omits the property; lesson 0021)" time="0.0018" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="summarizes PSRule export warnings and shows why a rule failed" name="Well-Architected review of the deployed landing zone.summarizes PSRule export warnings and shows why a rule failed" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="runs PSRule on the landing zone resource groups with the repo suppressions, unless skipped" name="Well-Architected review of the deployed landing zone.runs PSRule on the landing zone resource groups with the repo suppressions, unless skipped" time="0.0018" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="passes every pillar for a production-grade landing zone" name="Well-Architected review of the deployed landing zone.passes every pillar for a production-grade landing zone" time="0.0033" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="checks the Azure Monitor Agent directly, and drops PSRule's AMA finding only where the agent is confirmed" name="Well-Architected review of the deployed landing zone.checks the Azure Monitor Agent directly, and drops PSRule's AMA finding only where the agent is confirmed" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="flags a session host whose OS disk is not Premium SSD" name="Well-Architected review of the deployed landing zone.flags a session host whose OS disk is not Premium SSD" time="0.0036" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="adds nothing without -WellArchitected" name="Well-Architected review of the deployed landing zone.adds nothing without -WellArchitected" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Auto shutdown runbook" executed="True" result="Success" success="True" time="144.8329" asserts="0" description="Auto shutdown runbook">
+            <results>
+              <test-case description="Stop deallocates idle hosts and leaves hosts with users running" name="Auto shutdown runbook.Stop deallocates idle hosts and leaves hosts with users running" time="0.0036" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="changes nothing with -WhatIf" name="Auto shutdown runbook.changes nothing with -WhatIf" time="0.0015" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Lock drains, excludes from the scaling plan, turns off Start VM on Connect, warns users and deallocates" name="Auto shutdown runbook.Lock drains, excludes from the scaling plan, turns off Start VM on Connect, warns users and deallocates" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="the post-deployment check reports the lock with the resume command, and not after Resume" name="Auto shutdown runbook.the post-deployment check reports the lock with the resume command, and not after Resume" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Resume (from Cloud Shell, with the operator's token) undoes the lock without starting hosts" name="Auto shutdown runbook.Resume (from Cloud Shell, with the operator's token) undoes the lock without starting hosts" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Resume keeps Start VM on Connect off when the deployment turned it off (host pool tag)" name="Auto shutdown runbook.Resume keeps Start VM on Connect off when the deployment turned it off (host pool tag)" time="0.0019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports what ARM returned when a call fails" name="Auto shutdown runbook.reports what ARM returned when a call fails" time="0.0064" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="prints a portal state line for each action" name="Auto shutdown runbook.prints a portal state line for each action" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Golden image build" executed="True" result="Success" success="True" time="170.2186" asserts="0" description="Golden image build">
+            <results>
+              <test-case description="removes a leftover template, builds from the newest source version compared as numbers, and removes its own template" name="Golden image build.removes a leftover template, builds from the newest source version compared as numbers, and removes its own template" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stops when the source image and the commit are unchanged, and -Force builds the day's next version" name="Golden image build.stops when the source image and the commit are unchanged, and -Force builds the day's next version" time="0.0036" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fails with the log's validation evidence when the build-time validation fails, and still removes the template" name="Golden image build.fails with the log's validation evidence when the build-time validation fails, and still removes the template" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports a failed run even when the customization log can't be read" name="Golden image build.reports a failed run even when the customization log can't be read" time="0.0022" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fails safe when AIB reports success but a validation line failed, marks that version, and lets the same inputs be retried" name="Golden image build.fails safe when AIB reports success but a validation line failed, marks that version, and lets the same inputs be retried" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stops before deploying anything when the gallery is missing or the build VM has no quota" name="Golden image build.stops before deploying anything when the gallery is missing or the build VM has no quota" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports ARM's error when the template deployment fails, and leaves no template behind" name="Golden image build.reports ARM's error when the template deployment fails, and leaves no template behind" time="0.0029" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Verify access: the connection check fails closed (decision 0014)" executed="True" result="Success" success="True" time="171.3758" asserts="0" description="Verify access: the connection check fails closed (decision 0014)">
+            <results>
+              <test-case description="verifies a connection that reached Connected, after waiting for it to arrive" name="Verify access: the connection check fails closed (decision 0014).verifies a connection that reached Connected, after waiting for it to arrive" time="0.0144" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports errors without a connection as failed, after a second look" name="Verify access: the connection check fails closed (decision 0014).reports errors without a connection as failed, after a second look" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never passes on no rows, a connection still in progress or a failed query" name="Verify access: the connection check fails closed (decision 0014).never passes on no rows, a connection still in progress or a failed query" time="0.0077" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="checks the demo desktop for another user" name="Verify access: the connection check fails closed (decision 0014).checks the demo desktop for another user" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ends every run with a verify state line the portal reads" name="Verify access: the connection check fails closed (decision 0014).ends every run with a verify state line the portal reads" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/home/user/avd-landing-zone/tests/Template.Tests.ps1" executed="True" result="Success" success="True" time="135.3637" asserts="0" description="/home/user/avd-landing-zone/tests/Template.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="NAT Gateway public IP zones" executed="True" result="Success" success="True" time="5.1436" asserts="0" description="NAT Gateway public IP zones">
+            <results>
+              <test-case description="follows the landing zone availabilityZones instead of the module default" name="NAT Gateway public IP zones.follows the landing zone availabilityZones instead of the module default" time="5.1413" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Region override" executed="True" result="Success" success="True" time="15.2881" asserts="0" description="Region override">
+            <results>
+              <test-case description="takes the region from AVD_LOCATION and defaults when it is empty" name="Region override.takes the region from AVD_LOCATION and defaults when it is empty" time="10.1421" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Sizing overrides" executed="True" result="Success" success="True" time="66.6765" asserts="0" description="Sizing overrides">
+            <results>
+              <test-case description="takes host count, size, sessions and profile quota from the environment, and defaults when empty" name="Sizing overrides.takes host count, size, sessions and profile quota from the environment, and defaults when empty" time="30.3224" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="takes the scheduled stop and Start VM on Connect from the environment; none = no scheduled stop" name="Sizing overrides.takes the scheduled stop and Start VM on Connect from the environment; none = no scheduled stop" time="21.064" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Auto shutdown" executed="True" result="Success" success="True" time="92.1582" asserts="0" description="Auto shutdown">
+            <results>
+              <test-case description="deploys the runbook, the dev schedule and the runbook identity's roles" name="Auto shutdown.deploys the runbook, the dev schedule and the runbook identity's roles" time="9.9334" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="has the budget call the auto-shutdown action group" name="Auto shutdown.has the budget call the auto-shutdown action group" time="5.2501" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="takes an empty AVD_MONTHLY_BUDGET as no budget (docs/lessons/0004)" name="Auto shutdown.takes an empty AVD_MONTHLY_BUDGET as no budget (docs/lessons/0004)" time="10.2958" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="A second landing zone beside dev (parameters/test.bicepparam, docs/demo.md)" executed="True" result="Success" success="True" time="108.4703" asserts="0" description="A second landing zone beside dev (parameters/test.bicepparam, docs/demo.md)">
+            <results>
+              <test-case description="is dev's footprint under its own names, and leaves the subscription-wide pieces to dev" name="A second landing zone beside dev (parameters/test.bicepparam, docs/demo.md).is dev's footprint under its own names, and leaves the subscription-wide pieces to dev" time="10.7879" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="turns off the policy guardrails and the activity log export when deploySubscriptionSettings is false" name="A second landing zone beside dev (parameters/test.bicepparam, docs/demo.md).turns off the policy guardrails and the activity log export when deploySubscriptionSettings is false" time="5.5198" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Golden image pipeline templates" executed="True" result="Success" success="True" time="129.6192" asserts="0" description="Golden image pipeline templates">
+            <results>
+              <test-case description="adds the build subnets only with AVD_IMAGE_BUILD_SUBNETS=true (set-but-empty = off, lesson 0004)" name="Golden image pipeline templates.adds the build subnets only with AVD_IMAGE_BUILD_SUBNETS=true (set-but-empty = off, lesson 0004)" time="15.7936" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="gives both build subnets an NSG and the hosts' egress, and delegates the container subnet to ACI" name="Golden image pipeline templates.gives both build subnets an NSG and the hosts' egress, and delegates the container subnet to ACI" time="2.0959" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="defines a Generation 2, Trusted Launch image with accelerated networking, and federates the build identity to the images environment only" name="Golden image pipeline templates.defines a Generation 2, Trusted Launch image with accelerated networking, and federates the build identity to the images environment only" time="1.6927" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="inlines every image script and the WDOT profile, fetches nothing from this repo, and never publishes to latest" name="Golden image pipeline templates.inlines every image script and the WDOT profile, fetches nothing from this repo, and never publishes to latest" time="1.5647" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Connection logs for Verify access (decision 0014)" executed="True" result="Success" success="True" time="135.2762" asserts="0" description="Connection logs for Verify access (decision 0014)">
+            <results>
+              <test-case description="sends every log category of the host pool, app group and workspace to Log Analytics" name="Connection logs for Verify access (decision 0014).sends every log category of the host pool, app group and workspace to Log Analytics" time="0.0122" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Files the templates load are committed (docs/lessons/0027)" executed="True" result="Success" success="True" time="135.3385" asserts="0" description="Files the templates load are committed (docs/lessons/0027)">
+            <results>
+              <test-case description="tracks every file a Bicep template loads" name="Files the templates load are committed (docs/lessons/0027).tracks every file a Bicep template loads" time="0.0603" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

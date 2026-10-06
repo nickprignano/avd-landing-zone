@@ -631,7 +631,7 @@
   // Concrete hosts from Microsoft's required endpoints for end-user devices
   // (https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint). Most of that list is
   // wildcards, which a browser can't probe; *.wvd.microsoft.com (feed, broker, gateway) is the important one.
-  // UNVERIFIED wording: confirmed from a search summary of the page, not its text (verify-access-spec.md §11 A1).
+  // Both are listed by name for end-user devices on that page (ms.date 2026-03-11, read 2026-10-06; spec §11 A1).
   var REACHABILITY_HOSTS = [
     { host: 'login.microsoftonline.com', purpose: 'Microsoft Entra ID sign-in' },
     { host: 'windows.cloud.microsoft', purpose: 'Web client and Windows App service' }
@@ -679,9 +679,9 @@
 
   // ---------------------------------------------------------------- verify access: launch link (decision 0014)
   // The web client's direct launch URL, from the workspace and desktop object IDs in the post-deployment
-  // or demo state line (context.launch). UNVERIFIED wording: the path, ?tenant= (for external identities)
-  // and #loginHint= (must come last) come from a search summary of
-  // https://learn.microsoft.com/windows-app/direct-launch-urls, not its text (verify-access-spec.md §11 A2).
+  // or demo state line (context.launch). The path, ?tenant= (for external identities) and #loginHint=
+  // ("only work[s] if it is at the end of the URL"; without the tenant parameter for internal identities) are
+  // from https://learn.microsoft.com/windows-app/direct-launch-urls (ms.date 2026-09-09, read 2026-10-06; spec §11 A2).
   // A pasted state line is untrusted input: the IDs must be GUIDs, so the link can only point at
   // windows.cloud.microsoft, and a login hint must look like a UPN with nothing that could end the URL part.
   var GUID = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
